@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { useState, useCallback } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar, Button, Card, SectionHeader } from '@/components/ui';
@@ -18,6 +18,7 @@ import {
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
+import { analyzeJournalMentalState, analyzeSentiment, MentalStateAnalysis } from '@/lib/sentiment';
 import {
   fetchAppointments,
   fetchCounselors,
@@ -27,11 +28,10 @@ import {
   SupabaseCounselor
 } from '@/lib/supabase-db';
 import { getCounselorPhoto } from './sessions';
-import { analyzeSentiment } from '@/lib/sentiment';
 
 const moods = [
   { emoji: '😢', label: 'Sad' },
-  { emoji: '😕', label: 'Meh' },
+  { emoji: '😡', label: 'Angry' },
   { emoji: '🙂', label: 'Okay' },
   { emoji: '😊', label: 'Good' },
   { emoji: '😁', label: 'Great' },
@@ -43,9 +43,129 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [selectedMood, setSelectedMood] = useState('🙂');
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+  const [isManuallySelected, setIsManuallySelected] = useState(false);
   const [moodNote, setMoodNote] = useState('');
   const [savingMood, setSavingMood] = useState(false);
+
+  const [mentalAnalysis, setMentalAnalysis] = useState<MentalStateAnalysis>({
+    sentiment: { score: 0, label: 'neutral' },
+    detectedPatterns: { anxiety: false, burnout: false, depression: false, crisis: false },
+    primaryState: 'normal',
+  });
+  const [hasOpenedCrisisSheet, setHasOpenedCrisisSheet] = useState(false);
+  const [isCrisisModalVisible, setIsCrisisModalVisible] = useState(false);
+  const [activeTab, setActiveTab] = useState<'coping' | 'helplines' | 'chat'>('coping');
+
+  // Breathing timer states
+  const [isBreathingActive, setIsBreathingActive] = useState(false);
+  const [breathingStep, setBreathingStep] = useState<'idle' | 'inhale' | 'hold' | 'exhale'>('idle');
+  const [breathingTimer, setBreathingTimer] = useState(0);
+
+  // Sync tab active choice and breathing timer cleanup when modal opens/closes
+  useEffect(() => {
+    if (isCrisisModalVisible) {
+      if (mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression') {
+        setActiveTab('helplines');
+      } else {
+        setActiveTab('coping');
+      }
+    } else {
+      setIsBreathingActive(false);
+    }
+  }, [isCrisisModalVisible, mentalAnalysis.primaryState]);
+
+  // Stateful breathing timer effect
+  useEffect(() => {
+    let interval: any = null;
+    if (isBreathingActive) {
+      let currentStep: 'inhale' | 'hold' | 'exhale' = 'inhale';
+      let secondsLeft = 4;
+      setBreathingStep('inhale');
+      setBreathingTimer(4);
+
+      interval = setInterval(() => {
+        secondsLeft--;
+        if (secondsLeft <= 0) {
+          if (currentStep === 'inhale') {
+            currentStep = 'hold';
+            secondsLeft = 7;
+          } else if (currentStep === 'hold') {
+            currentStep = 'exhale';
+            secondsLeft = 8;
+          } else {
+            currentStep = 'inhale';
+            secondsLeft = 4;
+          }
+          setBreathingStep(currentStep);
+        }
+        setBreathingTimer(secondsLeft);
+      }, 1000);
+    } else {
+      setBreathingStep('idle');
+      setBreathingTimer(0);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isBreathingActive]);
+
+  const handleJournalChange = (text: string) => {
+    setMoodNote(text);
+
+    // Analyze mental state in real time
+    const analysis = analyzeJournalMentalState(text);
+    setMentalAnalysis(analysis);
+
+    // Auto-predict emoji based on sentiment score if not manually selected
+    if (text.trim().length > 2) {
+      if (!isManuallySelected) {
+        let predictedEmoji = '🙂';
+        const score = analysis.sentiment.score;
+        if (score < -0.4) {
+          predictedEmoji = '😢';
+        } else if (score < -0.1) {
+          predictedEmoji = '😡';
+        } else if (score <= 0.1) {
+          predictedEmoji = '🙂';
+        } else if (score <= 0.5) {
+          predictedEmoji = '😊';
+        } else {
+          predictedEmoji = '😁';
+        }
+        setSelectedMood(predictedEmoji);
+      }
+    } else {
+      if (!isManuallySelected) {
+        setSelectedMood(null);
+      }
+    }
+
+    // Auto-trigger Crisis Sheet
+    if (analysis.detectedPatterns.crisis && !hasOpenedCrisisSheet) {
+      setIsCrisisModalVisible(true);
+      setHasOpenedCrisisSheet(true);
+    } else if (!analysis.detectedPatterns.crisis) {
+      setHasOpenedCrisisSheet(false);
+    }
+  };
+
+  const getCircleSize = () => {
+    if (breathingStep === 'inhale') return 140;
+    if (breathingStep === 'hold') return 160;
+    if (breathingStep === 'exhale') return 100;
+    return 110;
+  };
+
+  const getCircleColor = () => {
+    if (breathingStep === 'inhale') return '#5B4FE5';
+    if (breathingStep === 'hold') return '#3F8C7A';
+    if (breathingStep === 'exhale') return '#FF9500';
+    return theme.surfaceMuted;
+  };
+
+
 
   const [appointments, setAppointments] = useState<SupabaseAppointment[]>([]);
   const [counselors, setCounselors] = useState<SupabaseCounselor[]>([]);
@@ -79,15 +199,27 @@ export default function HomeScreen() {
   );
 
   const handleLogMood = async () => {
+    if (!selectedMood) {
+      Alert.alert('Select Mood', 'Please type in the journal or tap a mood emoji before saving.');
+      return;
+    }
     setSavingMood(true);
     try {
       const noteText = moodNote.trim();
-      
+
       // Analyze sentiment (HF API → keyword fallback)
       const sentiment = await analyzeSentiment(noteText);
 
       await insertMoodLog(currentUserId, selectedMood, noteText);
       setMoodNote('');
+      setSelectedMood(null);
+      setIsManuallySelected(false);
+      setMentalAnalysis({
+        sentiment: { score: 0, label: 'neutral' },
+        detectedPatterns: { anxiety: false, burnout: false, depression: false, crisis: false },
+        primaryState: 'normal',
+      });
+      setHasOpenedCrisisSheet(false);
 
       if (sentiment.isFlagged) {
         Alert.alert(
@@ -144,14 +276,39 @@ export default function HomeScreen() {
 
           {/* Mood Log Check-in card */}
           <Card variant="raised" padding="four" style={styles.moodCard}>
-            <Text style={[styles.moodHeader, { color: theme.text }]}>How are you feeling today?</Text>
+            <Text style={[styles.moodHeader, { color: theme.text }]}>Daily Wellbeing Journal</Text>
+
+            <View style={[styles.noteInputWrapper, { borderColor: theme.border, backgroundColor: theme.surfaceSoft, minHeight: 120 }]}>
+              <TextInput
+                placeholder="Write your brief journal entry here... (e.g. how you feel today, your academic stressors, or what's on your mind)"
+                placeholderTextColor={theme.textSecondary}
+                value={moodNote}
+                onChangeText={handleJournalChange}
+                multiline={true}
+                numberOfLines={5}
+                style={[styles.noteInput, { color: theme.text, textAlignVertical: 'top', minHeight: 100 }]}
+              />
+            </View>
+
+            <View style={styles.emojiSectionHeader}>
+              <Text style={[styles.emojiSectionTitle, { color: theme.text }]}>How are you feeling?</Text>
+              {moodNote.trim().length > 2 && (
+                <Text style={[styles.predictedBadge, { color: theme.primary, backgroundColor: theme.primarySoft }]}>
+                  AI Suggested
+                </Text>
+              )}
+            </View>
+
             <View style={styles.emojiRow}>
               {moods.map((m) => {
                 const isSelected = selectedMood === m.emoji;
                 return (
                   <Pressable
                     key={m.emoji}
-                    onPress={() => setSelectedMood(m.emoji)}
+                    onPress={() => {
+                      setSelectedMood(m.emoji);
+                      setIsManuallySelected(true);
+                    }}
                     style={[
                       styles.emojiButton,
                       { borderColor: theme.border },
@@ -166,21 +323,67 @@ export default function HomeScreen() {
               })}
             </View>
 
-            <View style={[styles.noteInputWrapper, { borderColor: theme.border, backgroundColor: theme.surfaceSoft }]}>
-              <TextInput
-                placeholder="What is making you feel this way? (optional)"
-                placeholderTextColor={theme.textSecondary}
-                value={moodNote}
-                onChangeText={setMoodNote}
-                style={[styles.noteInput, { color: theme.text }]}
-              />
-            </View>
+            {/* Real-time Alert Banner */}
+            {mentalAnalysis.primaryState !== 'normal' && (
+              <Pressable
+                onPress={() => setIsCrisisModalVisible(true)}
+                style={[
+                  styles.alertContainer,
+                  mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                    ? { backgroundColor: '#FF3B3012', borderColor: '#FF3B3033' }
+                    : mentalAnalysis.primaryState === 'anxiety'
+                      ? { backgroundColor: '#FF950012', borderColor: '#FF950033' }
+                      : { backgroundColor: '#5B4FE512', borderColor: '#5B4FE533' } // Burnout
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={
+                    mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                      ? 'alert-octagon'
+                      : mentalAnalysis.primaryState === 'anxiety'
+                        ? 'alert-decagram'
+                        : 'book-open-page-variant'
+                  }
+                  size={20}
+                  color={
+                    mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                      ? '#FF3B30'
+                      : mentalAnalysis.primaryState === 'anxiety'
+                        ? '#FF9500'
+                        : theme.primary
+                  }
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.alertTextTitle, {
+                    color: mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                      ? '#FF3B30'
+                      : mentalAnalysis.primaryState === 'anxiety'
+                        ? '#FF9500'
+                        : theme.text
+                  }]}>
+                    {mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                      ? 'Immediate Support Suggested'
+                      : mentalAnalysis.primaryState === 'anxiety'
+                        ? 'Anxiety Patterns Detected'
+                        : 'Academic Stress Detected'}
+                  </Text>
+                  <Text style={[styles.alertTextBody, { color: theme.textSecondary }]}>
+                    {mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                      ? 'We care about your safety. Tap to view local crisis lines and grounding exercises.'
+                      : mentalAnalysis.primaryState === 'anxiety'
+                        ? "Feeling overwhelmed? Tap to try a quick calming breathing exercise."
+                        : "Assignments or exam strain? Tap to see study break & coping tips."}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+              </Pressable>
+            )}
 
             <Button
-              label={savingMood ? "Saving..." : "Save Log"}
+              label={savingMood ? "Saving..." : "Save Daily Log"}
               variant="primary"
               onPress={handleLogMood}
-              disabled={savingMood}
+              disabled={savingMood || !moodNote.trim()}
               style={styles.moodSubmitBtn}
             />
           </Card>
@@ -233,7 +436,7 @@ export default function HomeScreen() {
 
                       <Button
                         label="Join call"
-                        onPress={() => router.push('/video-call')}
+                        onPress={() => router.push({ pathname: '/video-call', params: { counselorName: nextSession.counselor_profile?.name || 'Counselor', counselorId: nextSession.counselor_id, callType: 'video' } })}
                         variant="secondary"
                         style={styles.joinButton}
                       />
@@ -306,6 +509,303 @@ export default function HomeScreen() {
         onPress={() => router.push('/social-feed')}>
         <MaterialCommunityIcons name="earth" size={26} color="#FFFFFF" />
       </Pressable>
+
+      {/* Crisis & Support Intervention Sheet */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={isCrisisModalVisible}
+        onRequestClose={() => setIsCrisisModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surfaceRaised, borderTopColor: theme.border }]}>
+            <View style={styles.modalDragIndicator} />
+
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalTitleContainer}>
+                <MaterialCommunityIcons
+                  name={
+                    mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                      ? 'alert-octagon'
+                      : mentalAnalysis.primaryState === 'anxiety'
+                        ? 'alert-decagram'
+                        : 'book-open-page-variant'
+                  }
+                  size={24}
+                  color={
+                    mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                      ? '#FF3B30'
+                      : mentalAnalysis.primaryState === 'anxiety'
+                        ? '#FF9500'
+                        : theme.primary
+                  }
+                />
+                <Text style={[styles.modalTitle, { color: theme.text }]}>
+                  {mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                    ? 'Crisis & Wellbeing Support'
+                    : mentalAnalysis.primaryState === 'anxiety'
+                      ? 'Grounding & Anxiety Relief'
+                      : 'Academic Stress Guidance'}
+                </Text>
+              </View>
+              <Pressable style={styles.modalCloseButton} onPress={() => setIsCrisisModalVisible(false)}>
+                <MaterialCommunityIcons name="close" size={22} color={theme.textSecondary} />
+              </Pressable>
+            </View>
+
+            {/* Subtitle */}
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>
+              {mentalAnalysis.primaryState === 'crisis' || mentalAnalysis.primaryState === 'depression'
+                ? "Your safety and wellbeing are paramount. Please use the resources below to connect or calm yourself. We're here for you."
+                : mentalAnalysis.primaryState === 'anxiety'
+                  ? 'If your mind is racing or you feel overwhelmed, take a few minutes to reset your nervous system.'
+                  : 'KNUST study loads can get heavy. Here are ways to manage burnout and get academic support.'}
+            </Text>
+
+            {/* Navigation Tabs inside Modal */}
+            <View style={[styles.tabBar, { backgroundColor: theme.surfaceSoft }]}>
+              <Pressable
+                onPress={() => {
+                  setActiveTab('coping');
+                  setIsBreathingActive(false);
+                }}
+                style={[
+                  styles.tabButton,
+                  activeTab === 'coping' ? { backgroundColor: theme.surfaceRaised, borderWidth: 1, borderColor: theme.border } : null
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="spa-outline"
+                  size={16}
+                  color={activeTab === 'coping' ? theme.primary : theme.textSecondary}
+                />
+                <Text style={[
+                  styles.tabText,
+                  { color: activeTab === 'coping' ? theme.text : theme.textSecondary }
+                ]}>
+                  Coping Tool
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  setActiveTab('helplines');
+                  setIsBreathingActive(false);
+                }}
+                style={[
+                  styles.tabButton,
+                  activeTab === 'helplines' ? { backgroundColor: theme.surfaceRaised, borderWidth: 1, borderColor: theme.border } : null
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="phone-outline"
+                  size={16}
+                  color={activeTab === 'helplines' ? theme.primary : theme.textSecondary}
+                />
+                <Text style={[
+                  styles.tabText,
+                  { color: activeTab === 'helplines' ? theme.text : theme.textSecondary }
+                ]}>
+                  Helplines
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  setActiveTab('chat');
+                  setIsBreathingActive(false);
+                }}
+                style={[
+                  styles.tabButton,
+                  activeTab === 'chat' ? { backgroundColor: theme.surfaceRaised, borderWidth: 1, borderColor: theme.border } : null
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="message-text-outline"
+                  size={16}
+                  color={activeTab === 'chat' ? theme.primary : theme.textSecondary}
+                />
+                <Text style={[
+                  styles.tabText,
+                  { color: activeTab === 'chat' ? theme.text : theme.textSecondary }
+                ]}>
+                  Counselors
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* Tab Contents */}
+            <View style={styles.tabContentContainer}>
+              {activeTab === 'coping' && (
+                <ScrollView contentContainerStyle={styles.tabScrollContent} showsVerticalScrollIndicator={false}>
+                  {mentalAnalysis.primaryState === 'burnout' ? (
+                    <View style={styles.burnoutSection}>
+                      <Text style={[styles.sectionHeading, { color: theme.text }]}>📚 Coping with Academic Burnout</Text>
+
+                      <View style={[styles.adviceCard, { backgroundColor: theme.surfaceSoft }]}>
+                        <MaterialCommunityIcons name="clock-check-outline" size={20} color={theme.primary} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.adviceTitle, { color: theme.text }]}>1. Structured Rest Breaks</Text>
+                          <Text style={[styles.adviceBody, { color: theme.textSecondary }]}>
+                            Use the Pomodoro technique. Study for 45 minutes, then take a 10-minute break completely away from screens.
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={[styles.adviceCard, { backgroundColor: theme.surfaceSoft }]}>
+                        <MaterialCommunityIcons name="calendar-alert" size={20} color={theme.primary} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.adviceTitle, { color: theme.text }]}>2. Workload Triaging</Text>
+                          <Text style={[styles.adviceBody, { color: theme.textSecondary }]}>
+                            List your assignments by deadline and weight. Focus on finishing only the top item today. Ignore the rest for now.
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={[styles.adviceCard, { backgroundColor: theme.surfaceSoft }]}>
+                        <MaterialCommunityIcons name="pill" size={20} color={theme.primary} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.adviceTitle, { color: theme.text }]}>3. Physical Recovery</Text>
+                          <Text style={[styles.adviceBody, { color: theme.textSecondary }]}>
+                            Burnout is physical fatigue. Prioritize 7-8 hours of sleep. Neural paths reload during slow-wave sleep.
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.breathingSection}>
+                      <Text style={[styles.sectionHeading, { color: theme.text, textAlign: 'center' }]}>
+                        🧘 4-7-8 Deep Breathing Exercise
+                      </Text>
+                      <Text style={[styles.sectionSubheading, { color: theme.textSecondary, textAlign: 'center' }]}>
+                        Inhale for 4 seconds, hold for 7 seconds, and exhale for 8 seconds. This lowers heart rate and triggers the parasympathetic nervous system.
+                      </Text>
+
+                      {/* Visual Breathing Indicator */}
+                      <View style={styles.breathingContainer}>
+                        <View
+                          style={[
+                            styles.breathingCircle,
+                            {
+                              width: getCircleSize(),
+                              height: getCircleSize(),
+                              borderRadius: getCircleSize() / 2,
+                              backgroundColor: getCircleColor(),
+                            }
+                          ]}
+                        >
+                          {isBreathingActive ? (
+                            <View style={styles.breathingLabelWrapper}>
+                              <Text style={styles.breathingStepText}>
+                                {breathingStep === 'inhale' ? 'Inhale' : breathingStep === 'hold' ? 'Hold' : 'Exhale'}
+                              </Text>
+                              <Text style={styles.breathingTimerText}>{breathingTimer}s</Text>
+                            </View>
+                          ) : (
+                            <MaterialCommunityIcons name="spa" size={36} color="#FFFFFF" />
+                          )}
+                        </View>
+                      </View>
+
+                      <Button
+                        label={isBreathingActive ? "Stop Exercise" : "Start Breathing Exercise"}
+                        variant={isBreathingActive ? "secondary" : "primary"}
+                        onPress={() => setIsBreathingActive(!isBreathingActive)}
+                        style={styles.breathingButton}
+                      />
+                    </View>
+                  )}
+                </ScrollView>
+              )}
+
+              {activeTab === 'helplines' && (
+                <View style={styles.helplineSection}>
+                  <Text style={[styles.sectionHeading, { color: theme.text }]}>📞 Immediate Crisis Contact</Text>
+                  <Text style={[styles.sectionSubheading, { color: theme.textSecondary }]}>
+                    Reach out for free, confidential mental health counseling and crisis intervention.
+                  </Text>
+
+                  <View style={styles.phoneList}>
+                    <Pressable
+                      onPress={() => Linking.openURL('tel:0322060352')}
+                      style={[styles.phoneButton, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}
+                    >
+                      <View style={[styles.phoneIconBg, { backgroundColor: 'rgba(255, 59, 48, 0.1)' }]}>
+                        <MaterialCommunityIcons name="phone" size={20} color="#FF3B30" />
+                      </View>
+                      <View style={styles.phoneTextContainer}>
+                        <Text style={[styles.phoneLabel, { color: theme.text }]} numberOfLines={1}>
+                          KNUST Counseling Hotline (24/7)
+                        </Text>
+                        <Text style={[styles.phoneNumber, { color: theme.primary }]}>03220-60352</Text>
+                      </View>
+                      <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => Linking.openURL('tel:+233596664444')}
+                      style={[styles.phoneButton, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}
+                    >
+                      <View style={[styles.phoneIconBg, { backgroundColor: 'rgba(255, 59, 48, 0.1)' }]}>
+                        <MaterialCommunityIcons name="phone" size={20} color="#FF3B30" />
+                      </View>
+                      <View style={styles.phoneTextContainer}>
+                        <Text style={[styles.phoneLabel, { color: theme.text }]} numberOfLines={1}>
+                          Ghana Mental Health Helpline
+                        </Text>
+                        <Text style={[styles.phoneNumber, { color: theme.primary }]}>+233 59 666 4444</Text>
+                      </View>
+                      <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {activeTab === 'chat' && (
+                <View style={styles.chatSection}>
+                  <Text style={[styles.sectionHeading, { color: theme.text }]}>💬 Connect with Professional Support</Text>
+                  <Text style={[styles.sectionSubheading, { color: theme.textSecondary }]}>
+                    Reach out to one of our peer counselors or schedule an in-person session on campus.
+                  </Text>
+
+                  <View style={styles.actionButtonsRow}>
+                    <Button
+                      label="Open Chats"
+                      icon="message-text"
+                      onPress={() => {
+                        setIsCrisisModalVisible(false);
+                        router.push('/(tabs)/chats');
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      label="Book Session"
+                      icon="calendar"
+                      variant="secondary"
+                      onPress={() => {
+                        setIsCrisisModalVisible(false);
+                        router.push('/(tabs)/sessions');
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* Bottom Actions */}
+            <View style={styles.modalFooter}>
+              <Button
+                label="Dismiss Check-in"
+                variant="secondary"
+                onPress={() => setIsCrisisModalVisible(false)}
+                style={styles.modalDismissBtn}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -579,5 +1079,233 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  emojiSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: Spacing.two,
+  },
+  emojiSectionTitle: {
+    fontSize: FontSize.body - 2,
+    fontWeight: FontWeight.bold,
+  },
+  predictedBadge: {
+    fontSize: FontSize.small - 1,
+    fontWeight: FontWeight.bold,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+    overflow: 'hidden',
+  },
+  alertContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: Spacing.three,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginTop: Spacing.two,
+  },
+  alertTextTitle: {
+    fontSize: FontSize.body - 2,
+    fontWeight: FontWeight.bold,
+  },
+  alertTextBody: {
+    fontSize: FontSize.caption,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
+    padding: Spacing.four,
+    maxHeight: '90%',
+    borderTopWidth: 1,
+    gap: Spacing.three,
+  },
+  modalDragIndicator: {
+    width: 40,
+    height: 4,
+    backgroundColor: 'rgba(100, 116, 139, 0.2)',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: Spacing.two,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  modalTitle: {
+    fontSize: FontSize.h3,
+    fontWeight: FontWeight.bold,
+  },
+  modalCloseButton: {
+    padding: Spacing.one,
+  },
+  modalSubtitle: {
+    fontSize: FontSize.caption + 1,
+    lineHeight: 18,
+    marginBottom: Spacing.two,
+  },
+  tabBar: {
+    flexDirection: 'row',
+    borderRadius: BorderRadius.md,
+    padding: 4,
+    width: '100%',
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: Spacing.two + 4,
+    borderRadius: BorderRadius.md - 4,
+  },
+  tabText: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
+  },
+  tabContentContainer: {
+    minHeight: 280,
+  },
+  tabScrollContent: {
+    paddingVertical: Spacing.two,
+  },
+  burnoutSection: {
+    gap: Spacing.two + 2,
+  },
+  sectionHeading: {
+    fontSize: FontSize.body,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.one,
+  },
+  sectionSubheading: {
+    fontSize: FontSize.caption,
+    lineHeight: 18,
+    marginBottom: Spacing.three,
+  },
+  adviceCard: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: Spacing.three,
+    borderRadius: BorderRadius.md,
+  },
+  adviceTitle: {
+    fontSize: FontSize.body - 2,
+    fontWeight: FontWeight.bold,
+    marginBottom: 2,
+  },
+  adviceBody: {
+    fontSize: FontSize.caption,
+    lineHeight: 16,
+  },
+  breathingSection: {
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  breathingContainer: {
+    height: 200,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  breathingCircle: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#5B4FE5',
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 4,
+  },
+  breathingLabelWrapper: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  breathingStepText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.body,
+    fontWeight: FontWeight.bold,
+    textTransform: 'uppercase',
+  },
+  breathingTimerText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.h1,
+    fontWeight: FontWeight.bold,
+  },
+  breathingButton: {
+    width: '100%',
+    marginTop: Spacing.two,
+  },
+  helplineSection: {
+    paddingVertical: Spacing.two,
+  },
+  phoneList: {
+    gap: Spacing.three,
+    marginTop: Spacing.two,
+  },
+  phoneButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.three,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    width: '100%',
+  },
+  phoneTextContainer: {
+    flex: 1,
+    paddingLeft: 12,
+    justifyContent: 'center',
+  },
+  phoneIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phoneLabel: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.semibold,
+  },
+  phoneNumber: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.bold,
+    marginTop: 2,
+  },
+  chatSection: {
+    paddingVertical: Spacing.two,
+    gap: Spacing.three,
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    gap: Spacing.three,
+    marginTop: Spacing.two,
+  },
+  modalFooter: {
+    marginTop: Spacing.two,
+  },
+  modalDismissBtn: {
+    width: '100%',
   },
 });

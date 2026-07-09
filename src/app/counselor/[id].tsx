@@ -129,7 +129,7 @@ export default function CounselorDetailScreen() {
               </Pressable>
 
               {/* Voice Call action */}
-              <Pressable onPress={() => router.push('/video-call')} style={styles.circleAction}>
+              <Pressable onPress={() => router.push({ pathname: '/video-call', params: { counselorName: name, counselorId: counselor.id, callType: 'voice' } })} style={styles.circleAction}>
                 <View style={[styles.circleIconBox, { backgroundColor: theme.primarySoft }]}>
                   <MaterialCommunityIcons name="phone-outline" size={24} color={theme.primary} />
                 </View>
@@ -137,7 +137,7 @@ export default function CounselorDetailScreen() {
               </Pressable>
 
               {/* Video Call action */}
-              <Pressable onPress={() => router.push('/video-call')} style={styles.circleAction}>
+              <Pressable onPress={() => router.push({ pathname: '/video-call', params: { counselorName: name, counselorId: counselor.id, callType: 'video' } })} style={styles.circleAction}>
                 <View style={[styles.circleIconBox, { backgroundColor: theme.primarySoft }]}>
                   <MaterialCommunityIcons name="video-outline" size={24} color={theme.primary} />
                 </View>

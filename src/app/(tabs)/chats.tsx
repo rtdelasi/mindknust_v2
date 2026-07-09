@@ -77,7 +77,7 @@ export default function StudentChatsScreen() {
       if (activeChat) {
         router.push({
           pathname: '/chat/[id]',
-          params: { id: activeChat.id, name: counselorName, role: 'Counselor' },
+          params: { id: activeChat.id, name: counselorName, role: 'Counselor', recipientId: counselorId },
         });
       }
     } catch (err) {
@@ -85,7 +85,7 @@ export default function StudentChatsScreen() {
       // Fallback
       router.push({
         pathname: '/chat/[id]',
-        params: { id: `mock-chat-${counselorId}`, name: counselorName, role: 'Counselor' },
+        params: { id: `mock-chat-${counselorId}`, name: counselorName, role: 'Counselor', recipientId: counselorId },
       });
     } finally {
       setLoading(false);
@@ -184,7 +184,7 @@ export default function StudentChatsScreen() {
                       onPress={() =>
                         router.push({
                           pathname: '/chat/[id]',
-                          params: { id: chat.id, name: nameVal, role: 'Counselor' },
+                          params: { id: chat.id, name: nameVal, role: 'Counselor', recipientId: chat.counselor_id },
                         })
                       }>
                       <Card variant="surface" padding="three" style={[styles.chatCard, { borderColor: theme.border }]}>

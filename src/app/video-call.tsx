@@ -1,11 +1,12 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState, useEffect } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Card, Avatar } from '@/components/ui';
+import { Avatar, Button, Card } from '@/components/ui';
 import {
   BorderRadius,
   FontSize,
@@ -14,19 +15,29 @@ import {
   Spacing,
 } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { auth } from '@/lib/firebase';
+import { useMockAuth } from '@/lib/mock-auth-store';
+import { supabase } from '@/lib/supabase';
 import { getCounselorPhoto } from './(tabs)/sessions';
 
-type CallState = 'lobby' | 'dialing' | 'ringing' | 'connected' | 'reconnecting' | 'ended';
+type CallState = 'lobby' | 'dialing' | 'ringing' | 'connected' | 'reconnecting' | 'ended' | 'declined';
 
 export default function VideoCallScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { role, userName } = useMockAuth();
 
-  const { counselorName = 'Amina Owusu', avatarUrl, callType = 'video' } = useLocalSearchParams<{
+  const {
+    counselorName = 'Amina Owusu',
+    avatarUrl,
+    callType = 'video',
+    counselorId = '',
+  } = useLocalSearchParams<{
     counselorName: string;
     avatarUrl?: string;
     callType: 'voice' | 'video';
+    counselorId: string;
   }>();
 
   // Call States Machine
@@ -41,6 +52,12 @@ export default function VideoCallScreen() {
   // Voice animation scale
   const [pulseScale, setPulseScale] = useState(1);
 
+  // Signaling
+  const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
+  const roomId = useRef(`counselcare-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
+  const callerChannelRef = useRef<any>(null);
+  const remoteChannelRef = useRef<any>(null);
+
   // 1. Connection timer (only runs when connected)
   useEffect(() => {
     let timer: any;
@@ -52,24 +69,7 @@ export default function VideoCallScreen() {
     return () => clearInterval(timer);
   }, [callState]);
 
-  // 2. Ringing simulation
-  useEffect(() => {
-    if (callState === 'dialing') {
-      const delay = setTimeout(() => {
-        setCallState('ringing');
-      }, 1800);
-      return () => clearTimeout(delay);
-    }
-
-    if (callState === 'ringing') {
-      const delay = setTimeout(() => {
-        setCallState('connected');
-      }, 2200);
-      return () => clearTimeout(delay);
-    }
-  }, [callState]);
-
-  // 3. Voice pulse simulation
+  // 2. Voice pulse simulation
   useEffect(() => {
     if (callType === 'voice' && callState === 'connected') {
       const pulseTimer = setInterval(() => {
@@ -79,13 +79,110 @@ export default function VideoCallScreen() {
     }
   }, [callType, callState]);
 
-  // 4. Request camera permissions in lobby if video call
+  // 3. Request camera permissions in lobby if video call
   useEffect(() => {
     if (callType === 'video' && (!cameraPermission || !cameraPermission.granted)) {
       requestCameraPermission();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 4. Signaling: When dialing, broadcast incoming_call to the remote user
+  useEffect(() => {
+    if (callState !== 'dialing' || !supabase || !counselorId) {
+      return;
+    }
+
+    // Subscribe to our own channel to listen for accept/decline responses
+    const callerChannel = supabase
+      .channel(`calls-${currentUserId}`)
+      .on('broadcast', { event: 'accept_call' }, (event) => {
+        const payload = event.payload;
+        if (payload.roomId === roomId) {
+          setCallState('connected');
+          launchJitsiRoom();
+        }
+      })
+      .on('broadcast', { event: 'decline_call' }, (event) => {
+        const payload = event.payload;
+        if (payload.roomId === roomId) {
+          setCallState('declined');
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          // Send the incoming_call signal to the remote user's channel
+          const remoteChannel = supabase!.channel(`calls-${counselorId}`);
+          remoteChannel.subscribe((remoteStatus) => {
+            if (remoteStatus === 'SUBSCRIBED') {
+              remoteChannel.send({
+                type: 'broadcast',
+                event: 'incoming_call',
+                payload: {
+                  roomId,
+                  callerId: currentUserId,
+                  callerName: userName || 'Student',
+                  callType,
+                },
+              });
+              remoteChannelRef.current = remoteChannel;
+
+              // Transition to ringing after a short delay
+              setTimeout(() => {
+                setCallState((prev) => (prev === 'dialing' ? 'ringing' : prev));
+              }, 1500);
+            }
+          });
+        }
+      });
+
+    callerChannelRef.current = callerChannel;
+
+    return () => {
+      if (callerChannelRef.current) {
+        supabase!.removeChannel(callerChannelRef.current);
+        callerChannelRef.current = null;
+      }
+      if (remoteChannelRef.current) {
+        supabase!.removeChannel(remoteChannelRef.current);
+        remoteChannelRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callState === 'dialing']);
+
+  // 5. Auto-timeout: if ringing for 30s with no answer, show ended
+  useEffect(() => {
+    if (callState !== 'ringing') return;
+    const timeout = setTimeout(() => {
+      setCallState((prev) => (prev === 'ringing' ? 'ended' : prev));
+    }, 30000);
+    return () => clearTimeout(timeout);
+  }, [callState]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (callerChannelRef.current && supabase) {
+        supabase.removeChannel(callerChannelRef.current);
+      }
+      if (remoteChannelRef.current && supabase) {
+        supabase.removeChannel(remoteChannelRef.current);
+      }
+    };
+  }, []);
+
+  const launchJitsiRoom = useCallback(async () => {
+    const jitsiUrl = `https://meet.jit.si/${roomId}#config.startWithVideoMuted=${callType === 'voice'}&config.startWithAudioMuted=${!micOn}&config.prejoinPageEnabled=false`;
+    try {
+      await WebBrowser.openBrowserAsync(jitsiUrl, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+      });
+    } catch (e) {
+      console.warn('Could not open Jitsi room:', e);
+      Alert.alert('Browser Error', 'Could not open the call room. Please try again.');
+    }
+  }, [roomId, callType, micOn]);
 
   const formatTimer = (totalSeconds: number) => {
     const hours = Math.floor(totalSeconds / 3600);
@@ -99,6 +196,14 @@ export default function VideoCallScreen() {
   };
 
   const handleEndCall = () => {
+    // Broadcast hang_up to remote user
+    if (remoteChannelRef.current) {
+      remoteChannelRef.current.send({
+        type: 'broadcast',
+        event: 'decline_call',
+        payload: { roomId, callerId: currentUserId },
+      });
+    }
     setCallState('ended');
   };
 
@@ -145,7 +250,7 @@ export default function VideoCallScreen() {
             <View style={styles.lobbyRowText}>
               <Text style={[styles.lobbyRowTitle, { color: theme.text }]}>Microphone Status</Text>
               <Text style={[styles.lobbyRowSub, { color: theme.textSecondary }]}>
-                {micOn ? 'Active • Capturing voice input' : 'Muted'}
+                {micOn ? 'Active \u2022 Capturing voice input' : 'Muted'}
               </Text>
             </View>
             <Pressable
@@ -160,7 +265,7 @@ export default function VideoCallScreen() {
               <View style={styles.lobbyRowText}>
                 <Text style={[styles.lobbyRowTitle, { color: theme.text }]}>Camera Status</Text>
                 <Text style={[styles.lobbyRowSub, { color: theme.textSecondary }]}>
-                  {cameraOn ? 'Active • Self-viewfinder enabled' : 'Disabled'}
+                  {cameraOn ? 'Active \u2022 Self-viewfinder enabled' : 'Disabled'}
                 </Text>
               </View>
               <Pressable
@@ -174,8 +279,29 @@ export default function VideoCallScreen() {
 
         <View style={styles.lobbyActions}>
           <Button label="Back to Dashboard" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
-          <Button label="Join Session" variant="primary" onPress={() => setCallState('dialing')} style={{ flex: 1 }} />
+          <Button label="Call Now" variant="primary" onPress={() => setCallState('dialing')} style={{ flex: 1 }} />
         </View>
+      </View>
+    );
+  }
+
+  // Render Declined screen
+  if (callState === 'declined') {
+    return (
+      <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
+        <Card variant="raised" padding="four" style={styles.endedCard}>
+          <View style={[styles.endedIconBox, { backgroundColor: '#FEE2E2' }]}>
+            <MaterialCommunityIcons name="phone-missed" size={44} color="#DC2626" />
+          </View>
+          <Text style={[styles.endedTitle, { color: theme.text }]}>Call Declined</Text>
+          <Text style={[styles.endedDesc, { color: theme.textSecondary }]}>
+            {counselorName} is currently unavailable. Try again later or send a message.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: Spacing.two, width: '100%' }}>
+            <Button label="Go Back" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
+            <Button label="Retry" variant="primary" onPress={() => { setCallState('lobby'); setTimeElapsed(0); }} style={{ flex: 1 }} />
+          </View>
+        </Card>
       </View>
     );
   }
@@ -319,6 +445,14 @@ export default function VideoCallScreen() {
           </View>
         </Card>
       </View>
+
+      {/* Re-open Jitsi room button (only when connected) */}
+      {isConnected && (
+        <Pressable onPress={launchJitsiRoom} style={[styles.testBtn, { backgroundColor: theme.primarySoft, borderColor: theme.primary }]}>
+          <MaterialCommunityIcons name="open-in-new" size={14} color={theme.primary} />
+          <Text style={{ color: theme.primary, fontSize: 11, fontWeight: 'bold', marginLeft: 4 }}>Open Call Room</Text>
+        </Pressable>
+      )}
 
       {/* Network testing button (only visible when connected) */}
       {callState === 'connected' && (
@@ -613,11 +747,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.caption,
     fontWeight: FontWeight.bold,
   },
-  remoteAvatarImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-  },
   pulseCircle: {
     position: 'absolute',
     width: 180,
@@ -705,6 +834,8 @@ const styles = StyleSheet.create({
   },
   testBtn: {
     alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: Spacing.three,
     paddingVertical: 6,
     borderRadius: BorderRadius.full,

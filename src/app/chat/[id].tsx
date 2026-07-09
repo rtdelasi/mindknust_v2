@@ -44,7 +44,7 @@ export default function ChatRoomScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ id: string; name?: string; role?: string }>();
+  const params = useLocalSearchParams<{ id: string; name?: string; role?: string; recipientId?: string }>();
   const chatId = params.id;
   const { role } = useMockAuth();
 
@@ -65,6 +65,7 @@ export default function ChatRoomScreen() {
   const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
   const recipientName = params.name || 'Wellbeing Advisor';
   const recipientRole = params.role || 'Counselor';
+  const recipientId = params.recipientId || '';
 
   const loadChatThread = async () => {
     if (!chatId) return;
@@ -187,7 +188,7 @@ export default function ChatRoomScreen() {
 
     return () => {
       if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+        supabase!.removeChannel(channelRef.current);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -301,7 +302,7 @@ export default function ChatRoomScreen() {
         <View style={styles.headerRight}>
           <Pressable
             style={[styles.callButton, { backgroundColor: theme.primarySoft }]}
-            onPress={() => router.push(`/video-call?counselorName=${encodeURIComponent(recipientName)}`)}>
+            onPress={() => router.push({ pathname: '/video-call', params: { counselorName: recipientName, counselorId: recipientId, callType: 'video' } })}>
             <MaterialCommunityIcons name="video" size={20} color={theme.primary} />
           </Pressable>
           <Pressable style={styles.menuButton} onPress={() => setMenuVisible(true)}>
@@ -371,7 +372,7 @@ export default function ChatRoomScreen() {
                   ]}>
                   {!isOutgoing && !isConsecutive ? (
                     <View style={styles.incomingAvatarWrapper}>
-                      <Avatar name={recipientName} size="xs" />
+                      <Avatar name={recipientName} size="sm" />
                     </View>
                   ) : !isOutgoing ? (
                     <View style={styles.avatarPlaceholder} />
@@ -406,7 +407,7 @@ export default function ChatRoomScreen() {
           {otherUserTyping && (
             <View style={[styles.messageRow, styles.incomingRow, styles.consecutiveRowGap]}>
               <View style={styles.incomingAvatarWrapper}>
-                <Avatar name={recipientName} size="xs" />
+                <Avatar name={recipientName} size="sm" />
               </View>
               <View style={[styles.bubble, styles.incomingBubble, { backgroundColor: theme.surfaceSoft, borderColor: theme.border, paddingVertical: 8 }]}>
                 <Text style={{ fontStyle: 'italic', fontSize: FontSize.caption, color: theme.textSecondary }}>
@@ -471,7 +472,7 @@ export default function ChatRoomScreen() {
                 Alert.alert('Profile details', `Showing professional records for ${recipientName}.`);
               }}
               style={styles.modalOption}>
-              <MaterialCommunityIcons name="account-card-details-outline" size={20} color={theme.textSecondary} />
+              <MaterialCommunityIcons name="account-details-outline" size={20} color={theme.textSecondary} />
               <Text style={[styles.optionText, { color: theme.text }]}>View Credentials Profile</Text>
             </Pressable>
 

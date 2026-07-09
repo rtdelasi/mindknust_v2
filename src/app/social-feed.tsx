@@ -1,6 +1,8 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,25 +21,23 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 
 import { Button } from '@/components/ui';
-import { BorderRadius, FontSize, FontWeight, Spacing, Size } from '@/constants/theme';
+import { BorderRadius, FontSize, FontWeight, Size, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
+import { moderateContent } from '@/lib/sentiment';
 import { hasSupabaseConfig } from '@/lib/supabase';
-import { uploadFile, getPublicUrl } from '@/lib/supabase-storage';
 import {
-  fetchPosts,
   createPost,
   deletePost,
-  toggleLikePost,
+  fetchPosts,
   incrementShareCount,
-  SupabasePost
+  SupabasePost,
+  toggleLikePost
 } from '@/lib/supabase-db';
-import { moderateContent } from '@/lib/sentiment';
+import { getPublicUrl, uploadFile } from '@/lib/supabase-storage';
 
 const { width } = Dimensions.get('window');
 
@@ -69,6 +69,7 @@ export default function SocialFeedScreen() {
   const [newPostContent, setNewPostContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [selectedMediaUri, setSelectedMediaUri] = useState<string | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   // Compose Modal & Figma Views State Machine
   const [composeModalVisible, setComposeModalVisible] = useState(false);
@@ -80,7 +81,7 @@ export default function SocialFeedScreen() {
   // Hardware integration hooks
   const cameraRef = useRef<CameraView | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  
+
   const [facing, setFacing] = useState<'back' | 'front'>('back');
   const [devicePhotos, setDevicePhotos] = useState<string[]>([]);
 
@@ -350,7 +351,7 @@ export default function SocialFeedScreen() {
               <Text numberOfLines={1} style={[styles.authorHandle, { color: theme.textSecondary }]}>{handleTag}</Text>
               <Text style={[styles.dotDivider, { color: theme.textSecondary }]}>·</Text>
               <Text style={[styles.timestamp, { color: theme.textSecondary }]}>{formatTime(item.created_at)}</Text>
-              
+
               {isCounselor ? (
                 <View style={[
                   styles.roleBadge,
@@ -377,7 +378,9 @@ export default function SocialFeedScreen() {
 
             {/* Attached Media Image */}
             {item.media_url ? (
-              <Image source={{ uri: item.media_url }} style={styles.postImage} resizeMode="cover" />
+              <Pressable onPress={() => setPreviewImageUrl(item.media_url || null)}>
+                <Image source={{ uri: item.media_url }} style={styles.postImage} resizeMode="cover" />
+              </Pressable>
             ) : null}
 
             {/* X-Style Action Bar */}
@@ -478,7 +481,7 @@ export default function SocialFeedScreen() {
         animationType="slide"
         presentationStyle="pageSheet"
         onRequestClose={() => setComposeModalVisible(false)}>
-        
+
         {/* SUBVIEW 1: Figma Post Composer */}
         {activeSubView === 'compose' && (
           <KeyboardAvoidingView
@@ -647,7 +650,7 @@ export default function SocialFeedScreen() {
                   />
                 </View>
               )}
-              
+
               {/* Screen Flash Animation Layer */}
               {flashTriggered && <View style={styles.flashOverlay} />}
             </View>
@@ -682,6 +685,28 @@ export default function SocialFeedScreen() {
             </View>
           </View>
         )}
+      </Modal>
+
+      {/* Full-Screen Image Preview Modal */}
+      <Modal
+        visible={!!previewImageUrl}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setPreviewImageUrl(null)}
+      >
+        <View style={styles.fullscreenImageOverlay}>
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setPreviewImageUrl(null)} />
+          {previewImageUrl && (
+            <Image
+              source={{ uri: previewImageUrl }}
+              style={styles.fullscreenImage}
+              resizeMode="contain"
+            />
+          )}
+          <Pressable style={styles.fullscreenCloseButton} onPress={() => setPreviewImageUrl(null)}>
+            <MaterialCommunityIcons name="close" size={28} color="#FFFFFF" />
+          </Pressable>
+        </View>
       </Modal>
     </View>
   );
@@ -1088,5 +1113,29 @@ const styles = StyleSheet.create({
     fontSize: FontSize.caption + 1,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  fullscreenImageOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 99999,
+  },
+  fullscreenImage: {
+    width: '100%',
+    height: '85%',
+  },
+  fullscreenCloseButton: {
+    position: 'absolute',
+    top: 48,
+    right: 20,
+    padding: 10,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 100000,
   },
 });

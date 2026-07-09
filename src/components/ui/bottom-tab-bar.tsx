@@ -43,46 +43,46 @@ export function BottomTabBar(props: BottomTabBarProps) {
   const items =
     'state' in props
       ? props.state.routes
-          .filter((route) => {
-            const { options } = props.descriptors[route.key];
-            return (options as any).href !== null && route.name !== 'search';
-          })
-          .map((route) => {
-            const { options } = props.descriptors[route.key];
-            const activeRouteName = props.state.routes[props.state.index].name;
-            const isActive = route.name === activeRouteName;
+        .filter((route) => {
+          const { options } = props.descriptors[route.key];
+          return (options as any).href !== null && route.name !== 'search';
+        })
+        .map((route) => {
+          const { options } = props.descriptors[route.key];
+          const activeRouteName = props.state.routes[props.state.index].name;
+          const isActive = route.name === activeRouteName;
 
-            const label =
-              typeof options.tabBarLabel === 'string'
-                ? options.tabBarLabel
-                : typeof options.title === 'string'
-                  ? options.title
-                  : route.name;
+          const label =
+            typeof options.tabBarLabel === 'string'
+              ? options.tabBarLabel
+              : typeof options.title === 'string'
+                ? options.title
+                : route.name;
 
-            const icon = options.tabBarIcon?.({
-              focused: isActive,
-              color: isActive ? theme.primary : theme.textSecondary,
-              size: 22,
-            });
+          const icon = options.tabBarIcon?.({
+            focused: isActive,
+            color: isActive ? theme.primary : theme.textSecondary,
+            size: 22,
+          });
 
-            return {
-              key: route.key,
-              label,
-              iconNode: icon ?? null,
-              active: isActive,
-              onPress: () => {
-                const event = props.navigation.emit({
-                  type: 'tabPress',
-                  target: route.key,
-                  canPreventDefault: true,
-                });
+          return {
+            key: route.key,
+            label,
+            iconNode: icon ?? null,
+            active: isActive,
+            onPress: () => {
+              const event = props.navigation.emit({
+                type: 'tabPress',
+                target: route.key,
+                canPreventDefault: true,
+              });
 
-                if (!event.defaultPrevented) {
-                  props.navigation.navigate(route.name);
-                }
-              },
-            } satisfies RenderedBottomTabItem;
-          }) as RenderedBottomTabItem[]
+              if (!event.defaultPrevented) {
+                props.navigation.navigate(route.name);
+              }
+            },
+          } satisfies RenderedBottomTabItem;
+        }) as RenderedBottomTabItem[]
       : props.items;
 
   return (

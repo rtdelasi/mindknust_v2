@@ -473,6 +473,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
+    flex: 1,
   },
   emptyIconBox: {
     width: 56,
@@ -483,6 +484,7 @@ const styles = StyleSheet.create({
   },
   counselorMeta: {
     gap: 2,
+    flex: 1,
   },
   counselorName: {
     fontSize: FontSize.body - 1,

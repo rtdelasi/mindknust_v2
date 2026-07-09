@@ -14,6 +14,7 @@ import {
   Text,
   TextInput,
   View,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -41,6 +42,7 @@ export default function PostDetailScreen() {
   const { userName, role } = useMockAuth();
 
   const [post, setPost] = useState<SupabasePost | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [comments, setComments] = useState<SupabaseComment[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyText, setReplyText] = useState('');
@@ -190,7 +192,7 @@ export default function PostDetailScreen() {
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
-      
+
       {/* Header Bar */}
       <View style={[
         styles.header,
@@ -234,7 +236,9 @@ export default function PostDetailScreen() {
             <Text style={[styles.originalPostContent, { color: theme.text }]}>{post.content}</Text>
 
             {post.media_url ? (
-              <Image source={{ uri: post.media_url }} style={styles.postImage} resizeMode="cover" />
+              <Pressable onPress={() => setPreviewImageUrl(post.media_url || null)}>
+                <Image source={{ uri: post.media_url }} style={styles.postImage} resizeMode="cover" />
+              </Pressable>
             ) : null}
 
             <Text style={[styles.postTimestamp, { color: theme.textSecondary }]}>
@@ -321,6 +325,28 @@ export default function PostDetailScreen() {
           style={styles.replySendButton}
         />
       </View>
+
+      {/* Full-Screen Image Preview Modal */}
+      <Modal
+        visible={!!previewImageUrl}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setPreviewImageUrl(null)}
+      >
+        <View style={styles.fullscreenImageOverlay}>
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setPreviewImageUrl(null)} />
+          {previewImageUrl && (
+            <Image
+              source={{ uri: previewImageUrl }}
+              style={styles.fullscreenImage}
+              resizeMode="contain"
+            />
+          )}
+          <Pressable style={styles.fullscreenCloseButton} onPress={() => setPreviewImageUrl(null)}>
+            <MaterialCommunityIcons name="close" size={28} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -534,5 +560,29 @@ const styles = StyleSheet.create({
   replySendButton: {
     height: 38,
     paddingHorizontal: Spacing.three,
+  },
+  fullscreenImageOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 99999,
+  },
+  fullscreenImage: {
+    width: '100%',
+    height: '85%',
+  },
+  fullscreenCloseButton: {
+    position: 'absolute',
+    top: 48,
+    right: 20,
+    padding: 10,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 100000,
   },
 });

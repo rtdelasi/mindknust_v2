@@ -183,7 +183,7 @@ export default function CounselorChatsScreen() {
                       onPress={() =>
                         router.push({
                           pathname: '/chat/[id]',
-                          params: { id: chat.id, name: studentName, role: 'Student' },
+                          params: { id: chat.id, name: studentName, role: 'Student', recipientId: chat.student_id },
                         })
                       }>
                       <Card variant="surface" padding="three" style={[styles.chatCard, { borderColor: theme.border }]}>

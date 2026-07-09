@@ -28,12 +28,13 @@ const NEGATIVE_WORDS = new Set([
   'sad', 'bad', 'lonely', 'angry', 'stressed', 'anxious', 'depressed', 'failure',
   'hate', 'scared', 'fear', 'worry', 'tired', 'exhausted', 'pain', 'hurt', 'broke',
   'struggle', 'empty', 'hopeless', 'worthless', 'heavy', 'crying', 'cry', 'worst',
+  'die', 'dying', 'death', 'kill',
 ]);
 
 const CRISIS_WORDS = [
-  'suicide', 'kill myself', 'end it all', 'harm myself', 'self-harm',
-  'self harm', 'suicidal', 'want to die', 'cutting', 'overdose',
-  'end my life', 'harming myself',
+  'suicide', 'suicidal', 'kill myself', 'end my life', 'want to die', 'cutting', 'overdose',
+  'end my life', 'harming myself', 'feel like dying', 'feeling like dying', 'wishing to die',
+  'wish i was dead', 'better off dead', 'rather be dead',
 ];
 
 const TOXIC_WORDS = [
@@ -208,3 +209,95 @@ export async function moderateContent(content: string): Promise<ModerationResult
 
   return keywordModerate(content);
 }
+
+export interface MentalStateAnalysis {
+  sentiment: {
+    score: number;
+    label: 'positive' | 'neutral' | 'negative';
+  };
+  detectedPatterns: {
+    anxiety: boolean;
+    burnout: boolean;
+    depression: boolean;
+    crisis: boolean;
+  };
+  primaryState: 'normal' | 'anxiety' | 'burnout' | 'depression' | 'crisis';
+}
+
+/**
+ * Analyzes a journal entry in real-time.
+ * Checks for anxiety, academic burn-out, severe depression, and crisis patterns.
+ */
+export function analyzeJournalMentalState(note: string): MentalStateAnalysis {
+  const lower = note.toLowerCase().trim();
+  if (!lower) {
+    return {
+      sentiment: { score: 0, label: 'neutral' },
+      detectedPatterns: { anxiety: false, burnout: false, depression: false, crisis: false },
+      primaryState: 'normal',
+    };
+  }
+
+  // Anxiety patterns: fear, panic, shaking, overwhelmed, chest tight, hyperventilating
+  const anxietyKeywords = [
+    'anxious', 'anxiety', 'panic', 'worry', 'worried', 'scared', 'fear', 'nervous', 'tense', 
+    'dread', 'shaking', 'heart racing', 'heart beating fast', 'cannot breathe', "can't breathe", 
+    'chest tight', 'overwhelmed', 'uneasy', 'jittery', 'stress', 'stressed', 'paralyzed'
+  ];
+  const isAnxiety = anxietyKeywords.some(w => lower.includes(w));
+
+  // Burn-out patterns: fatigue, workload, dropping out, failing, assignments, exam stress
+  const burnoutKeywords = [
+    'burnout', 'burnt out', 'exhausted', 'study', 'studying', 'exam', 'exams', 'test', 'tests', 
+    'assignment', 'assignments', 'grade', 'grades', 'gpa', 'midsem', 'midsems', 'lecture', 
+    'lectures', 'workload', 'academic', 'knust', 'class', 'classes', 'fail', 'failing', 
+    'academic pressure', 'syllabus', 'courses', 'course', 'drop out', 'dropping out'
+  ];
+  const isBurnout = burnoutKeywords.some(w => lower.includes(w));
+
+  // Depression patterns: hopelessness, worthlessness, heavy crying, emptiness, giving up
+  const depressionKeywords = [
+    'depress', 'depression', 'empty', 'emptiness', 'hopeless', 'hopelessness', 'worthless', 
+    'worthlessness', 'pointless', 'no point', 'give up', 'giving up', 'lonely', 'loneliness', 
+    'dark', 'darkness', 'miserable', 'numb', 'lost', 'sadness', 'crying', 'cry', 'sad'
+  ];
+  const isDepression = depressionKeywords.some(w => lower.includes(w));
+
+  // Crisis patterns: self-harm, suicide, wanting to die
+  const crisisKeywords = [
+    'suicide', 'suicidal', 'kill myself', 'end my life', 'want to die', 'wishing to die', 
+    'self-harm', 'self harm', 'harm myself', 'cutting', 'overdose', 'end it all', 'harming myself',
+    'feel like dying', 'feeling like dying', 'wish i was dead', 'better off dead', 'rather be dead'
+  ];
+  const isCrisis = crisisKeywords.some(w => lower.includes(w));
+
+  // Sentiment calculation using local engine
+  const sent = keywordSentiment(note);
+
+  // Determine primary state. Crisis overrides everything.
+  let primaryState: 'normal' | 'anxiety' | 'burnout' | 'depression' | 'crisis' = 'normal';
+  if (isCrisis) {
+    primaryState = 'crisis';
+  } else if (isDepression) {
+    primaryState = 'depression';
+  } else if (isAnxiety) {
+    primaryState = 'anxiety';
+  } else if (isBurnout) {
+    primaryState = 'burnout';
+  }
+
+  return {
+    sentiment: {
+      score: sent.score,
+      label: sent.label,
+    },
+    detectedPatterns: {
+      anxiety: isAnxiety,
+      burnout: isBurnout,
+      depression: isDepression,
+      crisis: isCrisis,
+    },
+    primaryState,
+  };
+}
+

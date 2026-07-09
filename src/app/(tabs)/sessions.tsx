@@ -185,7 +185,7 @@ export default function MySessionsScreen() {
                     </View>
                     <Button
                       label="Join call"
-                      onPress={() => router.push('/video-call')}
+                      onPress={() => router.push({ pathname: '/video-call', params: { counselorName: nextSession.counselor_profile?.name || 'Counselor', counselorId: nextSession.counselor_id, callType: 'video' } })}
                       variant="secondary"
                       style={styles.joinButton}
                     />
