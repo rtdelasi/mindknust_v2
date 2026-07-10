@@ -52,6 +52,7 @@ export default function CounselorDetailScreen() {
             id: chatRoom.id,
             name: counselor.profile?.name || 'Counselor',
             role: 'Counselor',
+            recipientId: counselor.id,
           },
         });
       }

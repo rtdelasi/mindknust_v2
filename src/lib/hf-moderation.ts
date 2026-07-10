@@ -11,7 +11,7 @@
  */
 
 const HF_API_KEY = process.env.EXPO_PUBLIC_HF_API_KEY ?? '';
-const HF_BASE = 'https://api-inference.huggingface.co/models';
+const HF_BASE = 'https://router.huggingface.co/hf-inference/models';
 
 // Timeout for each HF request (ms) — keeps UX snappy even on slow connections
 const REQUEST_TIMEOUT_MS = 6000;
@@ -102,6 +102,9 @@ export async function hfAnalyzeSentiment(
           LABEL_0: 'negative',
           LABEL_1: 'neutral',
           LABEL_2: 'positive',
+          negative: 'negative',
+          neutral: 'neutral',
+          positive: 'positive',
         };
         return {
           label: labelMap[item.label] ?? 'neutral',
@@ -164,17 +167,34 @@ export async function hfDetectCrisis(
       },
     });
 
-    if (!raw || typeof raw !== 'object') return null;
+    if (!raw) return null;
 
-    const result = raw as {
-      labels: string[];
-      scores: number[];
-    };
+    let crisisScore = 0;
+    if (Array.isArray(raw)) {
+      // New format: list of objects
+      const entry = raw.find((item: any) => item && item.label === 'crisis or self-harm');
+      if (entry) {
+        crisisScore = entry.score;
+      } else {
+        return null;
+      }
+    } else if (typeof raw === 'object') {
+      // Legacy format: { labels: string[], scores: number[] }
+      const result = raw as {
+        labels?: string[];
+        scores?: number[];
+      };
+      if (Array.isArray(result.labels) && Array.isArray(result.scores)) {
+        const crisisIdx = result.labels.indexOf('crisis or self-harm');
+        if (crisisIdx === -1) return null;
+        crisisScore = result.scores[crisisIdx];
+      } else {
+        return null;
+      }
+    } else {
+      return null;
+    }
 
-    const crisisIdx = result.labels.indexOf('crisis or self-harm');
-    if (crisisIdx === -1) return null;
-
-    const crisisScore = result.scores[crisisIdx];
     return {
       isCrisis: crisisScore > 0.55, // threshold: 55% confidence
       score: crisisScore,

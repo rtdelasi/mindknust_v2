@@ -141,7 +141,16 @@ export default function CounselorDashboardScreen() {
                             label="Start Call"
                             variant="primary"
                             icon="video"
-                            onPress={() => router.push('/video-call')}
+                            onPress={() =>
+                              router.push({
+                                pathname: '/video-call',
+                                params: {
+                                  counselorName: agenda.student_profile?.name || 'Student',
+                                  counselorId: agenda.student_id,
+                                  callType: 'video',
+                                },
+                              })
+                            }
                             style={styles.actionBtn}
                           />
                         </View>

@@ -57,26 +57,36 @@ function RootLayoutContent() {
 
   // Subscribe to incoming call signals on this user's call channel
   useEffect(() => {
-    if (!supabase || !currentUserId) return;
+    if (!supabase || !currentUserId) {
+      console.log('[Realtime Receiver] Cannot subscribe: supabase is', !!supabase, 'currentUserId is', currentUserId);
+      return;
+    }
+
+    console.log(`[Realtime Receiver] Subscribing to channel: calls-${currentUserId}`);
 
     const channel = supabase
       .channel(`calls-${currentUserId}`)
       .on('broadcast', { event: 'incoming_call' }, (event) => {
+        console.log('[Realtime Receiver] Received incoming_call event:', event);
         const payload = event.payload as IncomingCallData;
         if (payload && payload.roomId) {
           setIncomingCall(payload);
         }
       })
-      .on('broadcast', { event: 'decline_call' }, () => {
+      .on('broadcast', { event: 'decline_call' }, (event) => {
+        console.log('[Realtime Receiver] Received decline_call event:', event);
         // Remote side hung up before we answered
         setIncomingCall(null);
       })
-      .subscribe();
+      .subscribe((status, err) => {
+        console.log(`[Realtime Receiver] Subscription status for calls-${currentUserId}:`, status, err || '');
+      });
 
     callChannelRef.current = channel;
 
     return () => {
       if (callChannelRef.current) {
+        console.log(`[Realtime Receiver] Cleaning up channel calls-${currentUserId}`);
         supabase!.removeChannel(callChannelRef.current);
         callChannelRef.current = null;
       }

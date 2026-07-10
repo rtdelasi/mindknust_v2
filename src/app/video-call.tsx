@@ -90,13 +90,17 @@ export default function VideoCallScreen() {
   // 4. Signaling: When dialing, broadcast incoming_call to the remote user
   useEffect(() => {
     if (callState !== 'dialing' || !supabase || !counselorId) {
+      console.log('[Realtime Caller] Cannot dial: callState is', callState, 'supabase is', !!supabase, 'counselorId is', counselorId);
       return;
     }
+
+    console.log(`[Realtime Caller] Dialing: Subscribing to own channel calls-${currentUserId} and remote channel calls-${counselorId}`);
 
     // Subscribe to our own channel to listen for accept/decline responses
     const callerChannel = supabase
       .channel(`calls-${currentUserId}`)
       .on('broadcast', { event: 'accept_call' }, (event) => {
+        console.log('[Realtime Caller] Received accept_call broadcast:', event);
         const payload = event.payload;
         if (payload.roomId === roomId) {
           setCallState('connected');
@@ -104,17 +108,27 @@ export default function VideoCallScreen() {
         }
       })
       .on('broadcast', { event: 'decline_call' }, (event) => {
+        console.log('[Realtime Caller] Received decline_call broadcast:', event);
         const payload = event.payload;
         if (payload.roomId === roomId) {
           setCallState('declined');
         }
       })
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        console.log(`[Realtime Caller] Own channel calls-${currentUserId} status:`, status, err || '');
         if (status === 'SUBSCRIBED') {
           // Send the incoming_call signal to the remote user's channel
+          console.log(`[Realtime Caller] Own channel subscribed. Now subscribing to remote channel calls-${counselorId}`);
           const remoteChannel = supabase!.channel(`calls-${counselorId}`);
-          remoteChannel.subscribe((remoteStatus) => {
+          remoteChannel.subscribe((remoteStatus, remoteErr) => {
+            console.log(`[Realtime Caller] Remote channel calls-${counselorId} status:`, remoteStatus, remoteErr || '');
             if (remoteStatus === 'SUBSCRIBED') {
+              console.log(`[Realtime Caller] Remote channel calls-${counselorId} subscribed. Sending incoming_call broadcast payload:`, {
+                roomId,
+                callerId: currentUserId,
+                callerName: userName || 'Student',
+                callType,
+              });
               remoteChannel.send({
                 type: 'broadcast',
                 event: 'incoming_call',
@@ -140,10 +154,12 @@ export default function VideoCallScreen() {
 
     return () => {
       if (callerChannelRef.current) {
+        console.log(`[Realtime Caller] Removing callerChannel calls-${currentUserId}`);
         supabase!.removeChannel(callerChannelRef.current);
         callerChannelRef.current = null;
       }
       if (remoteChannelRef.current) {
+        console.log(`[Realtime Caller] Removing remoteChannel calls-${counselorId}`);
         supabase!.removeChannel(remoteChannelRef.current);
         remoteChannelRef.current = null;
       }

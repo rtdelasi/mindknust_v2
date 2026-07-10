@@ -21,8 +21,6 @@ import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { fetchUserChats, SupabaseChat } from '@/lib/supabase-db';
 
-type FilterTab = 'active' | 'needs_response' | 'archived';
-
 export default function CounselorChatsScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -32,9 +30,6 @@ export default function CounselorChatsScreen() {
   const [search, setSearch] = useState('');
   const [chats, setChats] = useState<SupabaseChat[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Filter state
-  const [activeTab, setActiveTab] = useState<FilterTab>('active');
 
   // Long-press options popup
   const [selectedChat, setSelectedChat] = useState<SupabaseChat | null>(null);
@@ -97,16 +92,7 @@ export default function CounselorChatsScreen() {
   // Filter logic
   const filteredChats = chats.filter((chat) => {
     const studentName = chat.student_profile?.name || 'Student Member';
-    const matchesSearch = studentName.toLowerCase().includes(search.toLowerCase());
-
-    // Mock response need checking - first slot needs reply if no message timestamp exists
-    if (activeTab === 'needs_response') {
-      return matchesSearch && !chat.last_message_at;
-    }
-    if (activeTab === 'archived') {
-      return false; // In mockup, archive list is empty
-    }
-    return matchesSearch;
+    return studentName.toLowerCase().includes(search.toLowerCase());
   });
 
   return (
@@ -137,27 +123,6 @@ export default function CounselorChatsScreen() {
               onChangeText={setSearch}
               style={[styles.searchInput, { color: theme.text }]}
             />
-          </View>
-
-          {/* Filter tabs */}
-          <View style={[styles.tabsRow, { backgroundColor: theme.surfaceSoft }]}>
-            {(['active', 'needs_response', 'archived'] as FilterTab[]).map((tab) => {
-              const isActive = activeTab === tab;
-              const label = tab === 'active' ? 'Active' : tab === 'needs_response' ? 'Needs Response' : 'Archived';
-              return (
-                <Pressable
-                  key={tab}
-                  onPress={() => setActiveTab(tab)}
-                  style={[
-                    styles.tabBtn,
-                    isActive && { backgroundColor: theme.surfaceRaised, borderColor: theme.border },
-                  ]}>
-                  <Text style={[styles.tabLabel, { color: isActive ? theme.primary : theme.textSecondary }]}>
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
           </View>
 
           {/* Chats list */}
@@ -237,7 +202,7 @@ export default function CounselorChatsScreen() {
                   </View>
                   <Text style={[styles.emptyTitle, { color: theme.text }]}>No Conversations Found</Text>
                   <Text style={[styles.emptyDesc, { color: theme.textSecondary }]}>
-                    No student chats currently match the selected inbox filter category.
+                    No student chats match your search.
                   </Text>
                 </View>
               )}
@@ -325,24 +290,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FontSize.body - 1,
     paddingVertical: 0,
-  },
-  tabsRow: {
-    flexDirection: 'row',
-    borderRadius: BorderRadius.md,
-    padding: 3,
-  },
-  tabBtn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: BorderRadius.md - 1,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  tabLabel: {
-    fontSize: FontSize.caption + 1,
-    fontWeight: FontWeight.bold,
   },
   chatsStack: {
     gap: Spacing.two,
