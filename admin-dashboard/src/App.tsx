@@ -279,7 +279,7 @@ export default function App() {
         .from('notifications')
         .insert({ title: broadcastTitle.trim(), body: broadcastBody.trim() })
         .select()
-        .single();
+        .maybeSingle();
       if (error) throw error;
       setAnnouncements(prev => [data, ...prev]);
       setBroadcastTitle('');

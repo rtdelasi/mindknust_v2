@@ -201,6 +201,7 @@ function RootLayoutContent() {
     <View style={styles.container}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(counselor-tabs)" />
         <Stack.Screen name="video-call" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="booking/[counselor]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="notifications" options={{ presentation: 'modal' }} />

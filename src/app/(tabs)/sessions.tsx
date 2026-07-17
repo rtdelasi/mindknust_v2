@@ -1,30 +1,41 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useState, useCallback } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
-import { Button, Card, SectionHeader, Tag } from '@/components/ui';
-import { BorderRadius, Colors, FontSize, FontWeight, MaxContentWidth, Shadows, Size, Spacing } from '@/constants/theme';
+import { Card } from '@/components/ui';
+import {
+  BorderRadius,
+  FontSize,
+  FontWeight,
+  MaxContentWidth,
+  Shadows,
+  Spacing,
+} from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
-import { fetchAppointments, fetchCounselors, SupabaseAppointment, SupabaseCounselor } from '@/lib/supabase-db';
+import {
+  fetchAppointments,
+  fetchCounselors,
+  SupabaseAppointment,
+  SupabaseCounselor,
+} from '@/lib/supabase-db';
 
-export const getCounselorPhoto = (counselorName: string, avatarUrl?: string) => {
-  if (avatarUrl) return avatarUrl;
-  const name = counselorName.toLowerCase();
-  if (name.includes('victoria') || name.includes('adjei')) {
-    return 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=300';
-  }
-  if (name.includes('joseph') || name.includes('asamoah')) {
-    return 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=300';
-  }
-  if (name.includes('nan') || name.includes('serwaa') || name.includes('selina') || name.includes('badu') || name.includes('amina')) {
-    return 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=300';
-  }
-  return 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300'; // Default male
-};
+import { getCounselorPhoto } from '@/lib/counselor-utils';
+export { getCounselorPhoto };
 
 export default function MySessionsScreen() {
   const theme = useTheme();
@@ -43,7 +54,7 @@ export default function MySessionsScreen() {
     try {
       const list = await fetchAppointments(currentUserId, 'student');
       setAppointments(list);
-      
+
       const counselorList = await fetchCounselors();
       setCounselors(counselorList);
     } catch (err) {
@@ -61,44 +72,78 @@ export default function MySessionsScreen() {
     }, [])
   );
 
-  // Divide appointments into upcoming (pending/accepted) and history (completed/declined)
-  const upcomingSessions = appointments.filter(a => ['pending', 'accepted'].includes(a.status));
-  const historySessions = appointments.filter(a => ['declined', 'completed'].includes(a.status));
-
-  // Determine next active upcoming session
+  const upcomingSessions = appointments.filter((a) => ['pending', 'accepted'].includes(a.status));
   const nextSession = upcomingSessions.length > 0 ? upcomingSessions[0] : null;
 
   // Filter counselors by search text
   const filteredCounselors = counselors.filter((c) => {
     const name = c.profile?.name || 'Counselor';
     const specialty = c.specialties.join(', ') || '';
-    return name.toLowerCase().includes(search.toLowerCase()) ||
-      specialty.toLowerCase().includes(search.toLowerCase());
+    return (
+      name.toLowerCase().includes(search.toLowerCase()) ||
+      specialty.toLowerCase().includes(search.toLowerCase())
+    );
   });
+
+  const getCardGradient = (index: number) => {
+    const gradients = [
+      ['#8B1C28', '#4A0A10'], // Maroon/red for John Doe
+      ['#3F42DF', '#1A1C70'], // Dark Indigo for Sarah
+      ['#5B4FE5', '#241B7A'], // Purple
+      ['#0F766E', '#115E59'], // Dark Teal
+    ];
+    return gradients[index % gradients.length];
+  };
+
+  const handleOverflowPress = () => {
+    Alert.alert(
+      'Care Options',
+      'Manage your care plan settings or contact support.',
+      [
+        { text: 'Care Plan Settings', onPress: () => console.log('Settings pressed') },
+        { text: 'Help & Support', onPress: () => console.log('Help pressed') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const handleViewFullJourney = () => {
+    Alert.alert(
+      'Counseling Journey',
+      'Step 3 of 5: Individual Therapy. You have completed Initial Intake and Assessment Review.',
+      [{ text: 'Close', style: 'default' }]
+    );
+  };
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + Spacing.four, paddingBottom: insets.bottom + 128 },
+          { paddingTop: insets.top + Spacing.four, paddingBottom: insets.bottom + 120 },
         ]}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.container}>
           {/* Header Title */}
           <View style={styles.titleBlock}>
-            <Text style={styles.eyebrow}>Your care plan</Text>
-            <Text style={styles.title}>My sessions</Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.eyebrow, { color: theme.primary }]}>YOUR CARE PLAN</Text>
+            <View style={styles.headerRow}>
+              <Text style={[styles.title, { color: theme.text }]}>My sessions</Text>
+              <Pressable onPress={handleOverflowPress} style={styles.overflowBtn}>
+                <MaterialCommunityIcons name="dots-horizontal" size={26} color={theme.text} />
+              </Pressable>
+            </View>
+            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
               Track upcoming counseling sessions, notes, and progress at a glance.
             </Text>
           </View>
 
           {/* Search bar */}
-          <View style={[styles.searchBar, { backgroundColor: theme.surfaceRaised, borderColor: theme.border }]}>
-            <MaterialCommunityIcons name="magnify" size={22} color={theme.textSecondary} />
+          <View style={[styles.searchBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <MaterialCommunityIcons name="magnify" size={22} color={theme.textSecondary} style={styles.searchIcon} />
             <TextInput
-              placeholder="Search counselor by name or specialty..."
+              placeholder="Search counselor by name or specialty"
               placeholderTextColor={theme.textSecondary}
               value={search}
               onChangeText={setSearch}
@@ -106,17 +151,29 @@ export default function MySessionsScreen() {
             />
           </View>
 
-          {/* Available Counselors Carousel */}
-          <View style={styles.carouselSection}>
-            <SectionHeader title="Counselors Available" />
+          {/* Available Counselors Section */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Counselors Available</Text>
+              <Pressable onPress={() => router.push('/search' as any)}>
+                <Text style={[styles.viewAllText, { color: theme.primary }]}>View all</Text>
+              </Pressable>
+            </View>
+
             {loading ? (
               <ActivityIndicator size="small" color={theme.primary} style={{ marginVertical: Spacing.four }} />
             ) : (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContainer}>
-                {filteredCounselors.map((c) => {
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.carouselContainer}
+              >
+                {filteredCounselors.map((c, index) => {
                   const nameVal = c.profile?.name || 'Counselor';
                   const roleVal = c.specialties[0] || 'Peer Guide';
+                  const ratingVal = c.rating ? c.rating.toFixed(1) : '5.0';
                   const imgUrl = getCounselorPhoto(nameVal, c.profile?.avatar_url);
+                  const gradient = getCardGradient(index);
 
                   return (
                     <Pressable
@@ -124,19 +181,32 @@ export default function MySessionsScreen() {
                       onPress={() => router.push(`/counselor/${c.id}`)}
                       style={styles.carouselCardWrapper}
                     >
-                      <View style={styles.carouselCard}>
-                        {/* Left Info block */}
+                      <LinearGradient
+                        colors={gradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.carouselCard}
+                      >
+                        {/* Info block */}
                         <View style={styles.cardInfoCol}>
-                          <Text numberOfLines={2} style={styles.cardName}>{nameVal}</Text>
-                          <Text numberOfLines={1} style={styles.cardRole}>{roleVal}</Text>
+                          <Text style={styles.availableTag}>AVAILABLE NOW</Text>
+                          <Text numberOfLines={2} style={styles.cardName}>
+                            {nameVal}
+                          </Text>
+                          <Text numberOfLines={1} style={styles.cardRole}>
+                            {roleVal}
+                          </Text>
+                          <View style={styles.ratingPill}>
+                            <Text style={styles.ratingText}>★ {ratingVal}</Text>
+                          </View>
                         </View>
 
-                        {/* Right Portrait block with Circular Backdrop */}
+                        {/* Portrait Image block */}
                         <View style={styles.cardPortraitCol}>
                           <View style={styles.circularBackdrop} />
                           <Image source={{ uri: imgUrl }} style={styles.portraitImg} />
                         </View>
-                      </View>
+                      </LinearGradient>
                     </Pressable>
                   );
                 })}
@@ -150,108 +220,167 @@ export default function MySessionsScreen() {
             )}
           </View>
 
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={theme.primary} />
-            </View>
+          {/* Upcoming Session card */}
+          {nextSession ? (
+            <Card variant="raised" padding="four" style={styles.upcomingCard}>
+              <View style={styles.upcomingTopRow}>
+                <View style={styles.upcomingTextBlock}>
+                  <Text style={styles.upcomingLabel}>Upcoming Session</Text>
+                  <Text style={styles.upcomingCounselor}>
+                    {nextSession.counselor_profile?.name || 'Counselor'} — Student counselor
+                  </Text>
+                </View>
+                <View style={styles.datePill}>
+                  <Text style={styles.datePillText}>
+                    📅 {new Date(nextSession.appointment_date).toLocaleDateString([], {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Inner Focus Concern Sub-card */}
+              <View style={styles.focusConcernCard}>
+                <View style={styles.videoIconCircle}>
+                  <MaterialCommunityIcons name="video" size={20} color="#FFFFFF" />
+                </View>
+                <View style={styles.focusTextContainer}>
+                  <Text style={styles.focusLabel}>FOCUS CONCERN</Text>
+                  <Text style={styles.focusTopic} numberOfLines={2}>
+                    {nextSession.topic || 'Academic Stress Management'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.upcomingFooter}>
+                <View style={styles.timeRow}>
+                  <MaterialCommunityIcons name="clock-outline" size={16} color="#FFFFFF" />
+                  <Text style={styles.upcomingTime}>
+                    {nextSession.time_slot} ({nextSession.status.toUpperCase()})
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() =>
+                    router.push({
+                      pathname: '/video-call',
+                      params: {
+                        counselorName: nextSession.counselor_profile?.name || 'Counselor',
+                        counselorId: nextSession.counselor_id,
+                        callType: 'video',
+                      },
+                    })
+                  }
+                  style={({ pressed }) => [
+                    styles.joinButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.joinButtonText}>Join call</Text>
+                </Pressable>
+              </View>
+            </Card>
           ) : (
-            <>
-              {/* Upcoming Session card */}
-              {nextSession ? (
-                <Card variant="raised" padding="four" style={styles.upcomingCard}>
-                  <View style={styles.upcomingTopRow}>
-                    <View style={styles.upcomingTextBlock}>
-                      <Text style={styles.upcomingLabel}>Upcoming Session</Text>
-                      <Text style={styles.upcomingCounselor}>
-                        {nextSession.counselor_profile?.name || "Counselor"} - Student counselor
-                      </Text>
-                    </View>
-                    <View style={styles.datePill}>
-                      <MaterialCommunityIcons name="video" size={Size.iconSm} color={Colors.light.surfaceRaised} />
-                      <Text style={styles.datePillText}>
-                        {new Date(nextSession.appointment_date).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.upcomingNote}>
-                    Focus concern: {nextSession.topic || 'General Support Check-in'}
-                  </Text>
-                  <View style={styles.upcomingFooter}>
-                    <View style={styles.timeRow}>
-                      <MaterialCommunityIcons name="clock-outline" size={Size.iconSm} color={Colors.light.surfaceRaised} />
-                      <Text style={styles.upcomingTime}>
-                        {nextSession.time_slot} ({nextSession.status.toUpperCase()})
-                      </Text>
-                    </View>
-                    <Button
-                      label="Join call"
-                      onPress={() => router.push({ pathname: '/video-call', params: { counselorName: nextSession.counselor_profile?.name || 'Counselor', counselorId: nextSession.counselor_id, callType: 'video' } })}
-                      variant="secondary"
-                      style={styles.joinButton}
-                    />
-                  </View>
-                </Card>
-              ) : (
-                <Card variant="surface" padding="four" style={styles.emptyCard}>
-                  <MaterialCommunityIcons name="calendar-question" size={32} color={theme.textSecondary} />
-                  <Text style={[styles.emptyCardTitle, { color: theme.text }]}>No upcoming sessions</Text>
-                  <Text style={[styles.emptyCardText, { color: theme.textSecondary }]}>
-                    Select an active counselor from the carousel above to schedule your next wellness appointment.
-                  </Text>
-                </Card>
-              )}
-
-              {/* Counseling plans details */}
-              <Card variant="surface" padding="four">
-                <SectionHeader title="Counseling plan" />
-                <View style={styles.planRow}>
-                  <Tag label="Wellbeing" active />
-                  <Tag label="Routine" />
-                  <Tag label="Progress" />
+            <Card variant="surface" padding="four" style={[styles.upcomingCard, styles.upcomingEmptyCard]}>
+              <View style={styles.upcomingTopRow}>
+                <View style={styles.upcomingTextBlock}>
+                  <Text style={styles.upcomingLabel}>Upcoming Session</Text>
+                  <Text style={styles.upcomingCounselor}>No upcoming sessions</Text>
                 </View>
-                <Text style={styles.planTitle}>What we are focusing on</Text>
-                <Text style={styles.planBody}>
-                  Build a calmer weekday routine, reduce study pressure, and keep weekly check-ins moving.
-                </Text>
-              </Card>
-
-              {/* History sessions lists */}
-              {historySessions.length > 0 && (
-                <View style={styles.historyBlock}>
-                  <SectionHeader title="Recent sessions" />
-                  <View style={styles.cardStack}>
-                    {historySessions.map((session) => (
-                      <Card key={session.id} variant="raised" padding="three" style={styles.historyCard}>
-                        <View style={styles.historyTopRow}>
-                          <View style={styles.historyTitleBlock}>
-                            <Text style={styles.historyTitle}>
-                              {session.topic || 'Counseling Session'}
-                            </Text>
-                            <Text style={styles.historyCounselor}>
-                              {session.counselor_profile?.name || 'Counselor'}
-                            </Text>
-                          </View>
-                          <View style={styles.historyDatePill}>
-                            <MaterialCommunityIcons name="calendar" size={Size.iconSm} color={Colors.light.primary} />
-                            <Text style={styles.historyDateText}>
-                              {new Date(session.appointment_date).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                            </Text>
-                          </View>
-                        </View>
-                        <Text style={styles.historyNote}>
-                          Session completed. Topic was academic support and boundaries plan.
-                        </Text>
-                        <View style={styles.historyFooter}>
-                          <Text style={styles.historyTime}>{session.time_slot}</Text>
-                          <Button label="Review note" variant="secondary" />
-                        </View>
-                      </Card>
-                    ))}
-                  </View>
+              </View>
+              <View style={[styles.focusConcernCard, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+                <View style={styles.videoIconCircle}>
+                  <MaterialCommunityIcons name="calendar-question" size={20} color="#FFFFFF" />
                 </View>
-              )}
-            </>
+                <View style={styles.focusTextContainer}>
+                  <Text style={styles.focusLabel}>GET STARTED</Text>
+                  <Text style={styles.focusTopic}>Choose a counselor to schedule a call</Text>
+                </View>
+              </View>
+              <View style={styles.upcomingFooter}>
+                <View style={styles.timeRow}>
+                  <MaterialCommunityIcons name="clock-outline" size={16} color="#FFFFFF" />
+                  <Text style={styles.upcomingTime}>No appointments accepted</Text>
+                </View>
+                <Pressable
+                  onPress={() => router.push('/search' as any)}
+                  style={({ pressed }) => [
+                    styles.joinButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.joinButtonText}>Schedule</Text>
+                </Pressable>
+              </View>
+            </Card>
           )}
+
+          {/* Counseling Plan section */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Counseling plan</Text>
+              <Text style={styles.progressText}>Step 3 of 5</Text>
+            </View>
+
+            {/* List of Step Cards */}
+            <View style={styles.stepsList}>
+              {/* Step 1 */}
+              <View style={[styles.stepCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={styles.stepIconRow}>
+                  <View style={[styles.statusIconCircle, styles.completedCircle]}>
+                    <MaterialCommunityIcons name="check" size={18} color="#3F8C7A" />
+                  </View>
+                  <View style={styles.stepTextContainer}>
+                    <Text style={[styles.stepTitle, { color: theme.text }]}>Initial Intake</Text>
+                    <Text style={[styles.stepSubtext, { color: theme.textSecondary }]}>Completed on June 12</Text>
+                  </View>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+              </View>
+
+              {/* Step 2 */}
+              <View style={[styles.stepCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={styles.stepIconRow}>
+                  <View style={[styles.statusIconCircle, styles.completedCircle]}>
+                    <MaterialCommunityIcons name="check" size={18} color="#3F8C7A" />
+                  </View>
+                  <View style={styles.stepTextContainer}>
+                    <Text style={[styles.stepTitle, { color: theme.text }]}>Assessment Review</Text>
+                    <Text style={[styles.stepSubtext, { color: theme.textSecondary }]}>Completed on June 20</Text>
+                  </View>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+              </View>
+
+              {/* Step 3 */}
+              <View style={[styles.stepCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={styles.stepIconRow}>
+                  <View style={[styles.statusIconCircle, styles.ongoingCircle]}>
+                    <MaterialCommunityIcons name="clock-outline" size={18} color="#5B4FE5" />
+                  </View>
+                  <View style={styles.stepTextContainer}>
+                    <Text style={[styles.stepTitle, { color: theme.text }]}>Individual Therapy</Text>
+                    <Text style={[styles.stepSubtext, { color: theme.textSecondary }]}>Ongoing — 4 sessions left</Text>
+                  </View>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+              </View>
+            </View>
+
+            {/* Dashed Border Button */}
+            <Pressable
+              onPress={handleViewFullJourney}
+              style={({ pressed }) => [
+                styles.journeyButton,
+                { borderColor: theme.border },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.journeyButtonText, { color: theme.textSecondary }]}>
+                View Full Journey →
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </View>
@@ -275,40 +404,65 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   eyebrow: {
-    color: Colors.light.primary,
-    fontSize: FontSize.small + 1,
+    fontSize: FontSize.small,
     fontWeight: FontWeight.bold,
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   title: {
-    color: Colors.light.text,
-    fontSize: FontSize.h1,
-    lineHeight: 36,
+    fontSize: 32,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.8,
   },
+  overflowBtn: {
+    padding: Spacing.one,
+  },
   subtitle: {
-    color: Colors.light.textSecondary,
     fontSize: FontSize.body - 1,
     lineHeight: 22,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
-    minHeight: 54,
-    borderRadius: BorderRadius.md + 4,
-    paddingHorizontal: Spacing.four,
+    minHeight: 52,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.three,
     borderWidth: 1,
+    ...Shadows.light.card,
+  },
+  searchIcon: {
+    marginRight: Spacing.two,
   },
   searchInput: {
     flex: 1,
     fontSize: FontSize.body - 1,
     paddingVertical: 0,
   },
-  carouselSection: {
-    gap: Spacing.two,
+  sectionContainer: {
+    gap: Spacing.three,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    fontSize: FontSize.h3 + 1,
+    fontWeight: FontWeight.bold,
+  },
+  viewAllText: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.semibold,
+  },
+  progressText: {
+    fontSize: FontSize.caption,
+    color: '#6B7280',
+    fontWeight: FontWeight.medium,
   },
   carouselContainer: {
     paddingRight: Spacing.four,
@@ -316,16 +470,15 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   carouselCardWrapper: {
-    width: 240,
-    height: 136,
-    borderRadius: BorderRadius.md + 4,
+    width: 250,
+    height: 140,
+    borderRadius: BorderRadius.lg,
     overflow: 'hidden',
     ...Shadows.light.card,
   },
   carouselCard: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#8B1C28', // Maroon Red KNUST branding
     paddingLeft: Spacing.four,
     paddingRight: Spacing.two,
     paddingVertical: Spacing.three,
@@ -334,57 +487,80 @@ const styles = StyleSheet.create({
   },
   cardInfoCol: {
     flex: 1.2,
-    gap: 4,
+    gap: 2,
     justifyContent: 'center',
   },
+  availableTag: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: 'rgba(255, 255, 255, 0.76)',
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
   cardName: {
-    fontSize: 16,
+    fontSize: FontSize.body + 1,
     fontWeight: 'bold',
     color: '#FFFFFF',
     lineHeight: 20,
   },
   cardRole: {
-    fontSize: 11,
-    color: 'rgba(255, 255, 255, 0.76)',
+    fontSize: FontSize.caption,
+    color: 'rgba(255, 255, 255, 0.72)',
     fontWeight: '500',
+    marginBottom: 4,
+  },
+  ratingPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  ratingText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: 'bold',
   },
   cardPortraitCol: {
-    flex: 1,
-    height: '100%',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
+    width: 86,
+    height: 86,
+    borderRadius: 43,
     position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: Spacing.one,
   },
   circularBackdrop: {
     position: 'absolute',
-    bottom: -10,
-    width: 84,
-    height: 84,
-    borderRadius: 42,
+    width: 86,
+    height: 86,
+    borderRadius: 43,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   portraitImg: {
     width: 82,
-    height: 110,
+    height: 82,
     borderRadius: 41,
     resizeMode: 'cover',
-    zIndex: 1,
   },
   emptyCarouselText: {
     fontSize: FontSize.caption + 1,
     fontStyle: 'italic',
     paddingVertical: Spacing.three,
   },
-  loadingContainer: {
-    paddingVertical: Spacing.five,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   upcomingCard: {
+    backgroundColor: '#5B5FEF',
+    borderColor: '#5B5FEF',
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.four,
     gap: Spacing.three,
-    backgroundColor: Colors.light.primary,
-    borderColor: Colors.light.primary,
     ...Shadows.light.raised,
+  },
+  upcomingEmptyCard: {
+    backgroundColor: '#7679F4',
+    borderColor: '#7679F4',
   },
   upcomingTopRow: {
     flexDirection: 'row',
@@ -394,147 +570,142 @@ const styles = StyleSheet.create({
   },
   upcomingTextBlock: {
     flex: 1,
-    gap: 4,
+    gap: 2,
   },
   upcomingLabel: {
-    color: Colors.light.surfaceRaised,
-    fontSize: FontSize.h2,
+    color: '#FFFFFF',
+    fontSize: FontSize.h3 + 1,
     fontWeight: FontWeight.bold,
-    letterSpacing: -0.2,
   },
   upcomingCounselor: {
-    color: 'rgba(255,255,255,0.9)',
+    color: 'rgba(255,255,255,0.84)',
     fontSize: FontSize.body - 1,
   },
   datePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: BorderRadius.full,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   datePillText: {
-    color: Colors.light.surfaceRaised,
+    color: '#FFFFFF',
     fontSize: FontSize.caption,
     fontWeight: FontWeight.bold,
   },
-  upcomingNote: {
-    color: 'rgba(255,255,255,0.94)',
+  focusConcernCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.three,
+    gap: Spacing.three,
+  },
+  videoIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  focusTextContainer: {
+    flex: 1,
+    gap: 2,
+  },
+  focusLabel: {
+    fontSize: FontSize.small - 1,
+    fontWeight: 'bold',
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 0.8,
+  },
+  focusTopic: {
     fontSize: FontSize.body - 1,
-    lineHeight: 22,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
   },
   upcomingFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
+    marginTop: Spacing.one,
   },
   timeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.one,
-    flex: 1,
+    gap: Spacing.two,
   },
   upcomingTime: {
-    color: Colors.light.surfaceRaised,
-    fontSize: FontSize.caption,
+    color: '#FFFFFF',
+    fontSize: FontSize.caption + 1,
     fontWeight: FontWeight.bold,
-    marginRight: 4,
   },
   joinButton: {
-    minWidth: 120,
+    backgroundColor: '#FFFFFF',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    ...Shadows.light.card,
   },
-  planRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-    marginBottom: Spacing.three,
-  },
-  planTitle: {
-    color: Colors.light.text,
-    fontSize: FontSize.h3,
+  joinButtonText: {
+    color: '#5B5FEF',
+    fontSize: FontSize.body - 1,
     fontWeight: FontWeight.bold,
-    marginBottom: 4,
   },
-  planBody: {
-    color: Colors.light.textSecondary,
-    fontSize: FontSize.body - 2,
-    lineHeight: 21,
-  },
-  historyBlock: {
+  stepsList: {
     gap: Spacing.two,
   },
-  cardStack: {
+  stepCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.three,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    ...Shadows.light.card,
+  },
+  stepIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.three,
   },
-  historyCard: {
-    gap: 10,
-  },
-  historyTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  historyTitleBlock: {
-    flex: 1,
-  },
-  historyTitle: {
-    color: Colors.light.text,
-    fontSize: FontSize.body,
-    fontWeight: FontWeight.bold,
-  },
-  historyCounselor: {
-    color: Colors.light.textSecondary,
-    fontSize: FontSize.caption,
-    marginTop: 2,
-  },
-  historyDatePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.light.surfaceSoft,
-  },
-  historyDateText: {
-    color: Colors.light.text,
-    fontSize: FontSize.small + 1,
-    fontWeight: FontWeight.bold,
-  },
-  historyNote: {
-    color: Colors.light.textSecondary,
-    fontSize: FontSize.body - 2,
-    lineHeight: 20,
-  },
-  historyFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  historyTime: {
-    color: Colors.light.text,
-    fontSize: FontSize.caption,
-    fontWeight: FontWeight.semibold,
-  },
-  emptyCard: {
+  statusIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing.five,
-    gap: Spacing.two,
   },
-  emptyCardTitle: {
-    fontSize: FontSize.body,
+  completedCircle: {
+    backgroundColor: '#E6F4EA',
+  },
+  ongoingCircle: {
+    backgroundColor: '#EAE8FF',
+  },
+  stepTextContainer: {
+    gap: 2,
+  },
+  stepTitle: {
+    fontSize: FontSize.body - 1,
     fontWeight: FontWeight.bold,
   },
-  emptyCardText: {
-    fontSize: FontSize.caption + 1,
-    textAlign: 'center',
-    paddingHorizontal: Spacing.three,
-    lineHeight: 18,
+  stepSubtext: {
+    fontSize: FontSize.caption,
+  },
+  journeyButton: {
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderRadius: BorderRadius.md,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Spacing.one,
+  },
+  journeyButtonText: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.semibold,
+  },
+  pressed: {
+    opacity: 0.76,
   },
 });

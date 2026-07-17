@@ -15,21 +15,25 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 
-import { Button, Card } from '@/components/ui';
+import { Avatar, Button, Card } from '@/components/ui';
 import { BorderRadius, FontSize, FontWeight, Shadows, Size, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { auth, hasFirebaseConfig } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
-import { upsertProfile, updateCounselorMetadata, fetchCounselors, hasSupabaseConfig } from '@/lib/supabase-db';
+import { upsertProfile, updateCounselorMetadata, fetchCounselors } from '@/lib/supabase-db';
+import { hasSupabaseConfig, supabase } from '@/lib/supabase';
+import { getPublicUrl, uploadFile } from '@/lib/supabase-storage';
 
 export default function EditProfileScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { role, userName, updateProfileName } = useMockAuth();
+  const { role, userName, avatarUrl, updateProfile } = useMockAuth();
 
   const [name, setName] = useState(userName);
+  const [photoUri, setPhotoUri] = useState<string | null>(avatarUrl);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
 
@@ -42,35 +46,99 @@ export default function EditProfileScreen() {
 
   useEffect(() => {
     setName(userName);
-  }, [userName]);
+    setPhotoUri(avatarUrl);
+  }, [userName, avatarUrl]);
 
   useEffect(() => {
-    async function loadCounselorData() {
-      if (!isCounselor || !hasSupabaseConfig) return;
+    async function loadProfileAndMetadata() {
+      const activeUserUid = auth?.currentUser?.uid || (isCounselor ? 'kwame-boateng' : 'student-user');
       setFetching(true);
       try {
-        const counselorsList = await fetchCounselors();
-        // Since it's a mock session, we look for 'kwame-boateng' or the matching profile
-        const activeUserUid = auth?.currentUser?.uid || 'kwame-boateng';
-        const currentCounselor = counselorsList.find(c => c.id === activeUserUid);
-        if (currentCounselor) {
-          setSpecialties(currentCounselor.specialties.join(', '));
-          setNote(currentCounselor.note || '');
-          setBio(currentCounselor.bio || '');
-        } else {
-          // Fallback placeholders for offline/sandbox testing
-          setSpecialties('Burnout, Confidence, Personal Growth');
-          setNote('Burnout, confidence, and personal growth');
-          setBio('Clinical wellness coach specializing in personal growth systems, student motivation, confidence building, and emotional wellbeing.');
+        // 1. Fetch main profile data (for Name and Avatar URL) from Supabase
+        if (hasSupabaseConfig && supabase) {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('name, avatar_url')
+            .eq('id', activeUserUid)
+            .maybeSingle();
+          if (!error && data) {
+            if (data.name) setName(data.name);
+            if (data.avatar_url) setPhotoUri(data.avatar_url);
+          }
+        }
+
+        // 2. Fetch Counselor metadata
+        if (isCounselor && hasSupabaseConfig) {
+          const counselorsList = await fetchCounselors();
+          const currentCounselor = counselorsList.find(c => c.id === activeUserUid);
+          if (currentCounselor) {
+            setSpecialties(currentCounselor.specialties.join(', '));
+            setNote(currentCounselor.note || '');
+            setBio(currentCounselor.bio || '');
+          } else {
+            // Fallback placeholders for offline/sandbox testing
+            setSpecialties('Burnout, Confidence, Personal Growth');
+            setNote('Burnout, confidence, and personal growth');
+            setBio('Clinical wellness coach specializing in personal growth systems, student motivation, confidence building, and emotional wellbeing.');
+          }
         }
       } catch (err) {
-        console.warn('Could not fetch counselor metadata from database:', err);
+        console.warn('Could not fetch profile metadata from database:', err);
       } finally {
         setFetching(false);
       }
     }
-    loadCounselorData();
+    loadProfileAndMetadata();
   }, [isCounselor]);
+
+  const handleSelectPhoto = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert('Permission Denied', 'Camera roll access is required to update your profile photo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      setPhotoUri(result.assets[0].uri);
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert('Permission Denied', 'Camera access is required to take a profile photo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      setPhotoUri(result.assets[0].uri);
+    }
+  };
+
+  const handleEditPhoto = () => {
+    Alert.alert(
+      'Profile Photo',
+      'Select a source to upload your profile picture:',
+      [
+        { text: 'Take Photo', onPress: handleTakePhoto },
+        { text: 'Choose from Gallery', onPress: handleSelectPhoto },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -80,20 +148,38 @@ export default function EditProfileScreen() {
 
     setLoading(true);
     try {
-      // 1. Update local mock store cache
-      await updateProfileName(name.trim());
-
       const activeUserUid = auth?.currentUser?.uid || (isCounselor ? 'kwame-boateng' : 'student-user');
       const activeUserEmail = auth?.currentUser?.email || (isCounselor ? 'kwame@counselcare.edu' : 'student@knust.edu');
 
+      let finalAvatarUrl = photoUri;
+
+      // Upload profile image to Supabase storage if it is a local path
+      if (photoUri && !photoUri.startsWith('http') && hasSupabaseConfig) {
+        try {
+          const response = await fetch(photoUri);
+          const blob = await response.blob();
+          const filename = `avatars/${activeUserUid}/${Date.now()}.jpg`;
+          await uploadFile('social-media', filename, blob, blob.type || 'image/jpeg');
+          finalAvatarUrl = getPublicUrl('social-media', filename);
+        } catch (uploadErr) {
+          console.warn('Storage image upload failed, using local URI fallback:', uploadErr);
+        }
+      }
+
+      // 1. Update local mock store cache
+      await updateProfile(name.trim(), finalAvatarUrl);
+
       // 2. Sync to Firebase display profile if active
-      if (hasFirebaseConfig && auth.currentUser) {
-        await firebaseUpdateProfile(auth.currentUser, { displayName: name.trim() });
+      if (hasFirebaseConfig && auth && auth.currentUser) {
+        await firebaseUpdateProfile(auth.currentUser, { 
+          displayName: name.trim(),
+          photoURL: finalAvatarUrl || undefined
+        });
       }
 
       // 3. Sync to Supabase profiles database table
       if (hasSupabaseConfig) {
-        await upsertProfile(activeUserUid, name.trim(), activeUserEmail, role || 'student');
+        await upsertProfile(activeUserUid, name.trim(), activeUserEmail, role || 'student', finalAvatarUrl || undefined);
 
         // 4. Sync counselor metadata properties
         if (isCounselor) {
@@ -140,6 +226,24 @@ export default function EditProfileScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.formContainer, { paddingBottom: insets.bottom + Spacing.four }]}>
           <Card variant="surface" padding="four" style={styles.formCard}>
+            
+            {/* Profile Photo Editor Section */}
+            <View style={styles.avatarSection}>
+              <Pressable onPress={handleEditPhoto} style={styles.avatarPressable}>
+                <Avatar
+                  name={name || 'User'}
+                  size="lg"
+                  source={photoUri ? { uri: photoUri } : undefined}
+                />
+                <View style={[styles.editIconBadge, { backgroundColor: theme.primary }]}>
+                  <MaterialCommunityIcons name="camera" size={16} color="#FFFFFF" />
+                </View>
+              </Pressable>
+              <Text style={[styles.avatarTip, { color: theme.textSecondary }]}>
+                Tap to update profile photo
+              </Text>
+            </View>
+
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Personal Details</Text>
 
             <View style={styles.inputGroup}>
@@ -255,6 +359,37 @@ const styles = StyleSheet.create({
   },
   formCard: {
     gap: Spacing.four,
+  },
+  avatarSection: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: Spacing.three,
+    gap: Spacing.two,
+  },
+  avatarPressable: {
+    position: 'relative',
+  },
+  editIconBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    elevation: 3,
+    shadowColor: '#000000',
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  avatarTip: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.medium,
+    marginTop: Spacing.one,
   },
   sectionTitle: {
     fontSize: FontSize.h3,

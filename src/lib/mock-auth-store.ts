@@ -8,6 +8,7 @@ import { supabase, hasSupabaseConfig } from '@/lib/supabase';
 const ROLE_KEY = 'counselcare_mock_role';
 const AUTH_KEY = 'counselcare_mock_authenticated';
 const USER_KEY = 'counselcare_mock_user_name';
+const AVATAR_KEY = 'counselcare_mock_avatar_url';
 
 export type UserRole = 'student' | 'counselor';
 
@@ -21,8 +22,9 @@ function notifyListeners() {
 if (hasFirebaseConfig && auth) {
   auth.onAuthStateChanged(async (firebaseUser) => {
     if (firebaseUser) {
-      // 1. Get the display name
+      // 1. Get the display name and photoURL
       let name = firebaseUser.displayName || firebaseUser.email || 'User';
+      let avatar = firebaseUser.photoURL || null;
 
       // 2. Query user role from Supabase if connected
       let resolvedRole: UserRole = firebaseUser.email?.endsWith('@counselcare.edu') ? 'counselor' : 'student';
@@ -30,7 +32,7 @@ if (hasFirebaseConfig && auth) {
         try {
           const { data, error } = await supabase
             .from('profiles')
-            .select('role, name')
+            .select('role, name, avatar_url')
             .eq('id', firebaseUser.uid)
             .maybeSingle();
 
@@ -38,6 +40,9 @@ if (hasFirebaseConfig && auth) {
             resolvedRole = data.role as UserRole;
             if (data.name) {
               name = data.name;
+            }
+            if (data.avatar_url) {
+              avatar = data.avatar_url;
             }
           } else {
             // Fallback: check email domain or cached value
@@ -65,11 +70,17 @@ if (hasFirebaseConfig && auth) {
       await safeStorage.setItem(ROLE_KEY, resolvedRole);
       await safeStorage.setItem(AUTH_KEY, 'true');
       await safeStorage.setItem(USER_KEY, name);
+      if (avatar) {
+        await safeStorage.setItem(AVATAR_KEY, avatar);
+      } else {
+        await safeStorage.removeItem(AVATAR_KEY);
+      }
     } else {
       // User is logged out, clear cache
       await safeStorage.removeItem(ROLE_KEY);
       await safeStorage.removeItem(AUTH_KEY);
       await safeStorage.removeItem(USER_KEY);
+      await safeStorage.removeItem(AVATAR_KEY);
     }
     notifyListeners();
   });
@@ -95,18 +106,39 @@ export const mockAuth = {
     }
     return (await safeStorage.getItem(USER_KEY)) || 'Guest';
   },
-  login: async (role: UserRole, email: string, name?: string) => {
+  getAvatarUrl: async (): Promise<string | null> => {
+    if (hasFirebaseConfig && auth?.currentUser) {
+      return (await safeStorage.getItem(AVATAR_KEY)) || auth.currentUser.photoURL || null;
+    }
+    return (await safeStorage.getItem(AVATAR_KEY)) || null;
+  },
+  login: async (role: UserRole, email: string, name?: string, avatarUrl?: string) => {
     // If Firebase is active, we rely on register/login screens to sign in via Firebase,
     // which triggers onAuthStateChanged dynamically.
     // For mock testing, we write manually:
     const userName = name || (role === 'student' ? 'Adjoa D.' : 'Kwame Boateng');
+    const userAvatar = avatarUrl || (role === 'student' ? null : 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150');
     await safeStorage.setItem(ROLE_KEY, role);
     await safeStorage.setItem(AUTH_KEY, 'true');
     await safeStorage.setItem(USER_KEY, userName);
+    if (userAvatar) {
+      await safeStorage.setItem(AVATAR_KEY, userAvatar);
+    } else {
+      await safeStorage.removeItem(AVATAR_KEY);
+    }
     notifyListeners();
   },
   updateProfileName: async (name: string) => {
     await safeStorage.setItem(USER_KEY, name);
+    notifyListeners();
+  },
+  updateProfile: async (name: string, avatarUrl: string | null) => {
+    await safeStorage.setItem(USER_KEY, name);
+    if (avatarUrl) {
+      await safeStorage.setItem(AVATAR_KEY, avatarUrl);
+    } else {
+      await safeStorage.removeItem(AVATAR_KEY);
+    }
     notifyListeners();
   },
   logout: async () => {
@@ -120,6 +152,7 @@ export const mockAuth = {
     await safeStorage.removeItem(ROLE_KEY);
     await safeStorage.removeItem(AUTH_KEY);
     await safeStorage.removeItem(USER_KEY);
+    await safeStorage.removeItem(AVATAR_KEY);
     notifyListeners();
   },
   subscribe: (listener: () => void) => {
@@ -134,6 +167,7 @@ export function useMockAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [userName, setUserName] = useState<string>('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -141,10 +175,12 @@ export function useMockAuth() {
       const isAuthed = await mockAuth.isAuthenticated();
       const userRole = await mockAuth.getRole();
       const name = await mockAuth.getUserName();
+      const avatar = await mockAuth.getAvatarUrl();
       if (active) {
         setIsAuthenticated(isAuthed);
         setRole(userRole);
         setUserName(name);
+        setAvatarUrl(avatar);
       }
     }
 
@@ -160,5 +196,14 @@ export function useMockAuth() {
     };
   }, []);
 
-  return { isAuthenticated, role, userName, login: mockAuth.login, logout: mockAuth.logout, updateProfileName: mockAuth.updateProfileName };
+  return {
+    isAuthenticated,
+    role,
+    userName,
+    avatarUrl,
+    login: mockAuth.login,
+    logout: mockAuth.logout,
+    updateProfile: mockAuth.updateProfile,
+    updateProfileName: mockAuth.updateProfileName,
+  };
 }

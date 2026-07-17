@@ -1,11 +1,9 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps as NavigatorBottomTabBarProps } from '@react-navigation/bottom-tabs';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import Animated, { FadeInLeft, FadeOutRight, Layout } from 'react-native-reanimated';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
-  BorderRadius,
   FontSize,
   FontWeight,
   Shadows,
@@ -62,7 +60,7 @@ export function BottomTabBar(props: BottomTabBarProps) {
           const icon = options.tabBarIcon?.({
             focused: isActive,
             color: isActive ? theme.primary : theme.textSecondary,
-            size: 22,
+            size: 24,
           });
 
           return {
@@ -92,7 +90,6 @@ export function BottomTabBar(props: BottomTabBarProps) {
         {
           backgroundColor: theme.surfaceRaised,
           borderColor: theme.border,
-          borderRadius: BorderRadius.lg,
           height: Size.tabBarHeight,
           ...shadow.raised,
         },
@@ -107,50 +104,27 @@ export function BottomTabBar(props: BottomTabBarProps) {
               styles.item,
               pressed && styles.pressed,
             ]}>
-            <Animated.View
-              layout={Layout.springify().damping(28).mass(0.8).stiffness(160)}
-              style={styles.itemInner}>
-              {active ? (
-                <Animated.View
-                  layout={Layout.springify().damping(28).mass(0.8).stiffness(160)}
-                  style={[styles.activePill, { backgroundColor: theme.primary }]}>
-                  <View style={styles.badge}>
-                    {item.iconNode ?? (item.icon ? (
-                      <MaterialCommunityIcons
-                        name={item.icon}
-                        size={22}
-                        color={theme.primary}
-                      />
-                    ) : null)}
-                  </View>
-                  <Animated.Text
-                    entering={FadeInLeft.delay(50).duration(200)}
-                    exiting={FadeOutRight.duration(150)}
-                    style={[
-                      styles.activeLabel,
-                      {
-                        color: '#FFFFFF',
-                        fontSize: FontSize.caption + 1,
-                        fontWeight: FontWeight.semibold,
-                      },
-                    ]}>
-                    {item.label}
-                  </Animated.Text>
-                </Animated.View>
-              ) : (
-                <Animated.View
-                  layout={Layout.springify().damping(28).mass(0.8).stiffness(160)}
-                  style={styles.inactiveIconWrap}>
-                  {item.iconNode ?? (item.icon ? (
-                    <MaterialCommunityIcons
-                      name={item.icon}
-                      size={22}
-                      color={theme.textSecondary}
-                    />
-                  ) : null)}
-                </Animated.View>
-              )}
-            </Animated.View>
+            <View style={styles.itemInner}>
+              <View style={styles.iconContainer}>
+                {item.iconNode ?? (item.icon ? (
+                  <MaterialCommunityIcons
+                    name={item.icon}
+                    size={24}
+                    color={active ? theme.primary : theme.textSecondary}
+                  />
+                ) : null)}
+              </View>
+              <Text
+                style={[
+                  styles.label,
+                  {
+                    color: active ? theme.primary : theme.textSecondary,
+                    fontWeight: active ? FontWeight.bold : FontWeight.medium,
+                  },
+                ]}>
+                {item.label}
+              </Text>
+            </View>
           </Pressable>
         );
       })}
@@ -163,44 +137,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingHorizontal: Spacing.four,
-    borderWidth: 1,
+    paddingHorizontal: Spacing.two,
+    borderWidth: 0,
+    borderTopWidth: 1,
   },
   item: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   itemInner: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 4,
   },
-  activePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    gap: 8,
-  },
-  inactiveIconWrap: {
+  iconContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 44,
-    height: 44,
+    height: 28,
   },
-  badge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activeLabel: {
+  label: {
+    fontSize: FontSize.small,
     letterSpacing: 0.1,
   },
   pressed: {
-    opacity: 0.84,
+    opacity: 0.72,
   },
 });

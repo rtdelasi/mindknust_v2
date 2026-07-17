@@ -3,9 +3,6 @@ import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import CounselorScheduleScreen from '../(counselor-tabs)/schedule';
-import { useMockAuth } from '@/lib/mock-auth-store';
-
 import { CounselorCardData, CounselorCard } from '@/components/counseling-ui';
 import { Card, SearchBar, SectionHeader } from '@/components/ui';
 import { BorderRadius, Colors, MaxContentWidth, Shadows, Size, Spacing } from '@/constants/theme';
@@ -59,14 +56,9 @@ const counselors: CounselorCardData[] = [
 
 
 export default function SearchCounselorScreen() {
-  const { role } = useMockAuth();
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-
-  if (role === 'counselor') {
-    return <CounselorScheduleScreen />;
-  }
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>

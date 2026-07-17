@@ -14,11 +14,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Avatar, Card } from '@/components/ui';
+import { Avatar, Badge, Card } from '@/components/ui';
 import { BorderRadius, FontSize, FontWeight, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
-import { useMockAuth } from '@/lib/mock-auth-store';
 import {
   fetchUserChats,
   fetchOrCreateChat,
@@ -26,10 +25,8 @@ import {
   SupabaseChat,
   SupabaseCounselor,
 } from '@/lib/supabase-db';
-import CounselorChatsScreen from '../(counselor-tabs)/chats';
 
 export default function StudentChatsScreen() {
-  const { role } = useMockAuth();
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -65,10 +62,6 @@ export default function StudentChatsScreen() {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
   );
-
-  if (role === 'counselor') {
-    return <CounselorChatsScreen />;
-  }
 
   const handleStartNewChat = async (counselorId: string, counselorName: string) => {
     setLoading(true);
@@ -219,11 +212,12 @@ export default function StudentChatsScreen() {
                                 ]}>
                                 {chat.last_message || 'Start messaging...'}
                               </Text>
-                              {unreadCount > 0 && (
-                                <View style={[styles.unreadBadge, { backgroundColor: theme.primary }]}>
-                                  <Text style={styles.unreadText}>{unreadCount}</Text>
-                                </View>
-                              )}
+                              <Badge
+                                count={unreadCount}
+                                color={theme.primary}
+                                size={18}
+                                textStyle={{ fontSize: 9, fontWeight: 'bold' }}
+                              />
                             </View>
                           </View>
                         </View>

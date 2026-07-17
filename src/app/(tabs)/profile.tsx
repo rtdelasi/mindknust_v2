@@ -20,10 +20,8 @@ import { useMockAuth } from '@/lib/mock-auth-store';
 import { fetchAppointments, fetchMoodLogs } from '@/lib/supabase-db';
 import { getCounselorPhoto } from './sessions';
 
-import CounselorProfileScreen from '../(counselor-tabs)/profile';
-
 export default function ProfileScreen() {
-  const { role, userName, logout } = useMockAuth();
+  const { userName, avatarUrl, logout } = useMockAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -77,10 +75,6 @@ export default function ProfileScreen() {
     }, [])
   );
 
-  if (role === 'counselor') {
-    return <CounselorProfileScreen />;
-  }
-
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* Header section */}
@@ -101,7 +95,11 @@ export default function ProfileScreen() {
           {/* Identity Card: Visual Anchor banner */}
           <Card variant="raised" padding="four" style={[styles.heroCard, { backgroundColor: theme.primary }]}>
             <View style={styles.profileTopRow}>
-              <Avatar name={userName || 'User'} size="lg" />
+              <Avatar
+                name={userName || 'User'}
+                size="lg"
+                source={avatarUrl ? { uri: avatarUrl } : undefined}
+              />
               <View style={styles.profileMeta}>
                 <View style={styles.badgeRow}>
                   <View style={styles.roleBadge}>

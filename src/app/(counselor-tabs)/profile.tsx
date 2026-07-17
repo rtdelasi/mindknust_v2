@@ -22,7 +22,7 @@ export default function CounselorProfileScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { logout, userName } = useMockAuth();
+  const { logout, userName, avatarUrl } = useMockAuth();
 
   const cName = userName || 'Kwame Ampofo';
 
@@ -78,6 +78,7 @@ export default function CounselorProfileScreen() {
             name={cName}
             status={status}
             onCycleStatus={handleCycleStatus}
+            avatarUrl={avatarUrl}
           />
 
           {/* 2. Stats widget section (Tappable dashboard rows) */}
@@ -130,7 +131,7 @@ export default function CounselorProfileScreen() {
             <Button
               label="Edit Profile Details"
               variant="secondary"
-              onPress={() => Alert.alert('Edit Profile', 'Personal info updates form is locked in demo mode.')}
+              onPress={() => router.push('/edit-profile')}
               style={styles.editBtn}
             />
 
@@ -156,10 +157,12 @@ function CounselorIdentityCard({
   name,
   status,
   onCycleStatus,
+  avatarUrl,
 }: {
   name: string;
   status: AvailabilityStatus;
   onCycleStatus: () => void;
+  avatarUrl?: string | null;
 }) {
   const theme = useTheme();
 
@@ -189,7 +192,7 @@ function CounselorIdentityCard({
       </View>
 
       <View style={styles.identityRow}>
-        <Avatar name={name} size="lg" />
+        <Avatar name={name} size="lg" source={avatarUrl ? { uri: avatarUrl } : undefined} />
         <View style={styles.identityInfo}>
           <View style={styles.nameRow}>
             <Text style={[styles.nameText, { color: theme.text }]}>{name}</Text>

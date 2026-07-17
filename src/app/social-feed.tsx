@@ -173,7 +173,7 @@ export default function SocialFeedScreen() {
         );
       }
 
-      const created = await createPost(currentUserId, newPostContent.trim(), mediaUrl);
+      const created = await createPost(currentUserId, newPostContent.trim(), mediaUrl, mod);
       if (created) {
         await loadFeed();
         setNewPostContent('');

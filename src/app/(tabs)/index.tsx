@@ -27,7 +27,7 @@ import {
   SupabaseAppointment,
   SupabaseCounselor
 } from '@/lib/supabase-db';
-import { getCounselorPhoto } from './sessions';
+import { getCounselorPhoto } from '@/lib/counselor-utils';
 
 const moods = [
   { emoji: '😢', label: 'Sad' },

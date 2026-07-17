@@ -85,7 +85,7 @@ export async function upsertProfile(
     .from('profiles')
     .upsert({ id, name, email, role, avatar_url: avatarUrl })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error upserting profile:', error);
@@ -194,7 +194,7 @@ export async function createCounselorMetadata(
     .from('counselors')
     .insert({ id, specialties, rating: 5.00, note, bio })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error creating counselor metadata:', error);
@@ -216,7 +216,7 @@ export async function updateCounselorMetadata(
     .update({ specialties, note, bio })
     .eq('id', id)
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error updating counselor metadata:', error);
@@ -255,7 +255,7 @@ export async function addAvailabilitySlot(
     .from('availability_slots')
     .insert({ counselor_id: counselorId, day_of_week: dayOfWeek, time_slot: timeSlot })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error adding availability slot:', error);
@@ -326,7 +326,7 @@ export async function createAppointment(
       status: 'pending',
     })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error creating appointment:', error);
@@ -407,7 +407,7 @@ export async function fetchOrCreateChat(studentId: string, counselorId: string):
       student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url),
       counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url)
     `)
-    .single();
+    .maybeSingle();
 
   if (createError) {
     console.error('Error creating chat:', createError);
@@ -445,7 +445,7 @@ export async function sendMessage(chatId: string, senderId: string, text: string
       delivered_at: new Date().toISOString(),
     })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error inserting message:', error);
@@ -496,7 +496,7 @@ export async function insertMoodLog(studentId: string, mood: string, note: strin
       is_flagged: sentiment.isFlagged,
     })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error logging mood:', error);
@@ -714,11 +714,16 @@ export async function fetchPostDetail(postId: string, currentUserId?: string): P
   return post;
 }
 
-export async function createPost(userId: string, content: string, mediaUrl?: string | null): Promise<SupabasePost | null> {
+export async function createPost(
+  userId: string,
+  content: string,
+  mediaUrl?: string | null,
+  moderationResult?: { status: 'approved' | 'flagged' | 'blocked'; isFlagged: boolean; reason?: string | null }
+): Promise<SupabasePost | null> {
   if (!hasSupabaseConfig || !supabase) return null;
 
-  // Run ML moderation analyzer (HF API → keyword fallback)
-  const mod = await moderateContent(content);
+  // Run ML moderation analyzer if not pre-moderated (HF API → keyword fallback)
+  const mod = moderationResult || await moderateContent(content);
 
   const { data, error } = await supabase
     .from('posts')
@@ -734,7 +739,7 @@ export async function createPost(userId: string, content: string, mediaUrl?: str
       *,
       profiles:user_id (name, role, avatar_url)
     `)
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error creating post:', error);
@@ -851,7 +856,7 @@ export async function createComment(postId: string, userId: string, content: str
       *,
       profiles:user_id (name, role, avatar_url)
     `)
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error creating comment:', error);
@@ -882,7 +887,7 @@ export async function incrementShareCount(postId: string): Promise<number> {
     .from('posts')
     .select('shares_count')
     .eq('id', postId)
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
 
