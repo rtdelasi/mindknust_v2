@@ -1,9 +1,14 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+// CameraView stubbed for Expo Go testing — restore when using dev build
+let CameraView: any = null;
+const useCameraPermissions = () => [
+  { granted: false, canAskAgain: true, status: 'unavailable' },
+  async () => ({ granted: false }),
+] as any;
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar, Button, Card } from '@/components/ui';
@@ -18,9 +23,15 @@ import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { supabase } from '@/lib/supabase';
+import {
+  createCall,
+  updateCallStatus,
+  subscribeToCallStatus,
+  SupabaseCall,
+} from '@/lib/supabase-db';
 import { getCounselorPhoto } from './(tabs)/sessions';
 
-type CallState = 'lobby' | 'dialing' | 'ringing' | 'connected' | 'reconnecting' | 'ended' | 'declined';
+type CallState = 'idle' | 'ringing' | 'connected' | 'declined' | 'missed' | 'ended';
 
 export default function VideoCallScreen() {
   const theme = useTheme();
@@ -40,150 +51,129 @@ export default function VideoCallScreen() {
     counselorId: string;
   }>();
 
-  // Call States Machine
-  const [callState, setCallState] = useState<CallState>('lobby');
-
+  const [callState, setCallState] = useState<CallState>('idle');
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [cameraOn, setCameraOn] = useState(callType === 'video');
   const [micOn, setMicOn] = useState(true);
   const [audioOn, setAudioOn] = useState(true);
   const [timeElapsed, setTimeElapsed] = useState(0);
-
-  // Voice animation scale
   const [pulseScale, setPulseScale] = useState(1);
 
-  // Signaling
   const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
   const roomId = useRef(`counselcare-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
-  const callerChannelRef = useRef<any>(null);
-  const remoteChannelRef = useRef<any>(null);
+  const callIdRef = useRef<string | null>(null);
+  const signalChannelRef = useRef<any>(null);
+  const statusUnsubRef = useRef<(() => void) | null>(null);
 
-  // 1. Connection timer (only runs when connected)
+  // 1. Connection timer
   useEffect(() => {
     let timer: any;
     if (callState === 'connected') {
-      timer = setInterval(() => {
-        setTimeElapsed((prev) => prev + 1);
-      }, 1000);
+      timer = setInterval(() => setTimeElapsed((p) => p + 1), 1000);
     }
     return () => clearInterval(timer);
   }, [callState]);
 
-  // 2. Voice pulse simulation
+  // 2. Voice pulse animation
   useEffect(() => {
     if (callType === 'voice' && callState === 'connected') {
-      const pulseTimer = setInterval(() => {
-        setPulseScale((s) => (s === 1 ? 1.15 : 1));
-      }, 600);
-      return () => clearInterval(pulseTimer);
+      const t = setInterval(() => setPulseScale((s) => (s === 1 ? 1.15 : 1)), 600);
+      return () => clearInterval(t);
     }
   }, [callType, callState]);
 
-  // 3. Request camera permissions in lobby if video call
+  // 3. Camera permission request
   useEffect(() => {
-    if (callType === 'video' && (!cameraPermission || !cameraPermission.granted)) {
-      requestCameraPermission();
+    if (callType === 'video') {
+      if (!cameraPermission) {
+        requestCameraPermission();
+      } else if (!cameraPermission.granted && !cameraPermission.canAskAgain) {
+        Alert.alert(
+          'Camera Permission Required',
+          'Camera access is needed for video calls. Please enable it in your device settings.',
+          [
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 4. Signaling: When dialing, broadcast incoming_call to the remote user
+  // 4. Create call in DB + subscribe to status changes
+  const callInitiated = useRef(false);
+
   useEffect(() => {
-    if (callState !== 'dialing' || !supabase || !counselorId) {
-      console.log('[Realtime Caller] Cannot dial: callState is', callState, 'supabase is', !!supabase, 'counselorId is', counselorId);
-      return;
-    }
+    if (callState !== 'ringing' || !supabase || !counselorId || callInitiated.current) return;
+    callInitiated.current = true;
 
-    console.log(`[Realtime Caller] Dialing: Subscribing to own channel calls-${currentUserId} and remote channel calls-${counselorId}`);
+    const startCall = async () => {
+      console.log('[VideoCall] Creating call in DB...');
+      const call = await createCall(currentUserId, counselorId, callType as 'voice' | 'video', roomId);
+      if (!call) {
+        console.warn('[VideoCall] Failed to create call');
+        setCallState('idle');
+        callInitiated.current = false;
+        return;
+      }
+      callIdRef.current = call.id;
+      console.log('[VideoCall] Call created:', call.id, 'status:', call.status);
 
-    // Subscribe to our own channel to listen for accept/decline responses
-    const callerChannel = supabase
-      .channel(`calls-${currentUserId}`)
-      .on('broadcast', { event: 'accept_call' }, (event) => {
-        console.log('[Realtime Caller] Received accept_call broadcast:', event);
-        const payload = event.payload;
-        if (payload.roomId === roomId) {
+      const unsub = subscribeToCallStatus(call.id, (updated) => {
+        console.log('[VideoCall] Call status updated:', updated.status);
+        if (updated.status === 'accepted') {
           setCallState('connected');
           launchJitsiRoom();
-        }
-      })
-      .on('broadcast', { event: 'decline_call' }, (event) => {
-        console.log('[Realtime Caller] Received decline_call broadcast:', event);
-        const payload = event.payload;
-        if (payload.roomId === roomId) {
+        } else if (updated.status === 'declined') {
           setCallState('declined');
-        }
-      })
-      .subscribe((status, err) => {
-        console.log(`[Realtime Caller] Own channel calls-${currentUserId} status:`, status, err || '');
-        if (status === 'SUBSCRIBED') {
-          // Send the incoming_call signal to the remote user's channel
-          console.log(`[Realtime Caller] Own channel subscribed. Now subscribing to remote channel calls-${counselorId}`);
-          const remoteChannel = supabase!.channel(`calls-${counselorId}`);
-          remoteChannel.subscribe((remoteStatus, remoteErr) => {
-            console.log(`[Realtime Caller] Remote channel calls-${counselorId} status:`, remoteStatus, remoteErr || '');
-            if (remoteStatus === 'SUBSCRIBED') {
-              console.log(`[Realtime Caller] Remote channel calls-${counselorId} subscribed. Sending incoming_call broadcast payload:`, {
-                roomId,
-                callerId: currentUserId,
-                callerName: userName || 'Student',
-                callType,
-              });
-              remoteChannel.send({
-                type: 'broadcast',
-                event: 'incoming_call',
-                payload: {
-                  roomId,
-                  callerId: currentUserId,
-                  callerName: userName || 'Student',
-                  callType,
-                },
-              });
-              remoteChannelRef.current = remoteChannel;
-
-              // Transition to ringing after a short delay
-              setTimeout(() => {
-                setCallState((prev) => (prev === 'dialing' ? 'ringing' : prev));
-              }, 1500);
-            }
-          });
+        } else if (updated.status === 'ended' || updated.status === 'missed') {
+          setCallState(updated.status);
+          WebBrowser.dismissBrowser()?.catch(() => {});
         }
       });
 
-    callerChannelRef.current = callerChannel;
-
-    return () => {
-      if (callerChannelRef.current) {
-        console.log(`[Realtime Caller] Removing callerChannel calls-${currentUserId}`);
-        supabase!.removeChannel(callerChannelRef.current);
-        callerChannelRef.current = null;
-      }
-      if (remoteChannelRef.current) {
-        console.log(`[Realtime Caller] Removing remoteChannel calls-${counselorId}`);
-        supabase!.removeChannel(remoteChannelRef.current);
-        remoteChannelRef.current = null;
-      }
+      statusUnsubRef.current = unsub;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callState === 'dialing']);
 
-  // 5. Auto-timeout: if ringing for 30s with no answer, show ended
+    startCall();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callState]);
+
+  // 5. Auto-timeout (35s)
   useEffect(() => {
-    if (callState !== 'ringing') return;
+    if (callState !== 'ringing' || !callIdRef.current) return;
     const timeout = setTimeout(() => {
-      setCallState((prev) => (prev === 'ringing' ? 'ended' : prev));
-    }, 30000);
+      updateCallStatus(callIdRef.current!, 'missed');
+      setCallState('missed');
+    }, 35000);
     return () => clearTimeout(timeout);
   }, [callState]);
 
-  // Cleanup on unmount
+  // 6. Broadcast hang-up listener
+  useEffect(() => {
+    if (!supabase) return;
+    const channel = supabase
+      .channel('calls-app')
+      .on('broadcast', { event: 'call_hangup' }, (event) => {
+        const payload = event.payload as { callId: string };
+        if (payload.callId === callIdRef.current) {
+          console.log('[VideoCall] Received call_hangup for our call');
+          setCallState('ended');
+          WebBrowser.dismissBrowser()?.catch(() => {});
+        }
+      })
+      .subscribe();
+    signalChannelRef.current = channel;
+    return () => { supabase!.removeChannel(channel); };
+  }, []);
+
+  // 7. Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (callerChannelRef.current && supabase) {
-        supabase.removeChannel(callerChannelRef.current);
-      }
-      if (remoteChannelRef.current && supabase) {
-        supabase.removeChannel(remoteChannelRef.current);
+      statusUnsubRef.current?.();
+      if (signalChannelRef.current && supabase) {
+        supabase.removeChannel(signalChannelRef.current);
       }
     };
   }, []);
@@ -211,31 +201,42 @@ export default function VideoCallScreen() {
     ].join(':');
   };
 
-  const handleEndCall = () => {
-    // Broadcast hang_up to remote user
-    if (remoteChannelRef.current) {
-      remoteChannelRef.current.send({
-        type: 'broadcast',
-        event: 'decline_call',
-        payload: { roomId, callerId: currentUserId },
-      });
+  const handleEndCall = useCallback(async () => {
+    const id = callIdRef.current;
+    if (id) {
+      await updateCallStatus(id, 'ended');
+      if (signalChannelRef.current) {
+        signalChannelRef.current.send({
+          type: 'broadcast',
+          event: 'call_hangup',
+          payload: { callId: id },
+        });
+      }
     }
     setCallState('ended');
-  };
+    WebBrowser.dismissBrowser()?.catch(() => {});
+  }, []);
 
-  const triggerReconnectTest = () => {
-    if (callState !== 'connected') return;
-    setCallState('reconnecting');
-    setTimeout(() => {
-      setCallState('connected');
-    }, 2500);
-  };
+  const handleCancelCall = useCallback(async () => {
+    const id = callIdRef.current;
+    if (id) {
+      await updateCallStatus(id, 'ended');
+      if (signalChannelRef.current) {
+        signalChannelRef.current.send({
+          type: 'broadcast',
+          event: 'call_hangup',
+          payload: { callId: id },
+        });
+      }
+    }
+    setCallState('ended');
+  }, []);
 
   const cPhoto = getCounselorPhoto(counselorName, avatarUrl);
   const initials = counselorName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
 
-  // Render Lobby screen (mic/camera testing)
-  if (callState === 'lobby') {
+  // ── Render: Idle / Lobby ──
+  if (callState === 'idle') {
     return (
       <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.lobbyHeader}>
@@ -249,13 +250,25 @@ export default function VideoCallScreen() {
           ) : (
             <View style={[styles.lobbyPreviewPlaceholder, { backgroundColor: theme.surfaceSoft }]}>
               <MaterialCommunityIcons
-                name={callType === 'video' ? 'camera-off' : 'microphone'}
+                name={callType === 'video' ? (cameraPermission && !cameraPermission.granted ? 'camera-lock' : 'camera-off') : 'microphone'}
                 size={48}
                 color={theme.primary}
               />
               <Text style={[styles.lobbyPlaceholderText, { color: theme.textSecondary }]}>
-                {callType === 'video' ? 'Camera is off' : 'Audio only session'}
+                {callType === 'video'
+                  ? (cameraPermission && !cameraPermission.granted ? 'Camera permission denied' : 'Camera is off')
+                  : 'Audio only session'}
               </Text>
+              {callType === 'video' && cameraPermission && !cameraPermission.granted && cameraPermission.canAskAgain && (
+                <Pressable onPress={() => requestCameraPermission()} style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 16, backgroundColor: theme.primarySoft, borderRadius: 8 }}>
+                  <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>Grant Permission</Text>
+                </Pressable>
+              )}
+              {callType === 'video' && cameraPermission && !cameraPermission.granted && !cameraPermission.canAskAgain && (
+                <Pressable onPress={() => Linking.openSettings()} style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 16, backgroundColor: theme.primarySoft, borderRadius: 8 }}>
+                  <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>Open Settings</Text>
+                </Pressable>
+              )}
             </View>
           )}
         </View>
@@ -295,13 +308,13 @@ export default function VideoCallScreen() {
 
         <View style={styles.lobbyActions}>
           <Button label="Back to Dashboard" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
-          <Button label="Call Now" variant="primary" onPress={() => setCallState('dialing')} style={{ flex: 1 }} />
+          <Button label="Call Now" variant="primary" onPress={() => setCallState('ringing')} style={{ flex: 1 }} />
         </View>
       </View>
     );
   }
 
-  // Render Declined screen
+  // ── Render: Declined ──
   if (callState === 'declined') {
     return (
       <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
@@ -315,14 +328,35 @@ export default function VideoCallScreen() {
           </Text>
           <View style={{ flexDirection: 'row', gap: Spacing.two, width: '100%' }}>
             <Button label="Go Back" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
-            <Button label="Retry" variant="primary" onPress={() => { setCallState('lobby'); setTimeElapsed(0); }} style={{ flex: 1 }} />
+            <Button label="Retry" variant="primary" onPress={() => { setCallState('idle'); setTimeElapsed(0); callInitiated.current = false; }} style={{ flex: 1 }} />
           </View>
         </Card>
       </View>
     );
   }
 
-  // Render Ended screen (summary report sheet)
+  // ── Render: Missed ──
+  if (callState === 'missed') {
+    return (
+      <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
+        <Card variant="raised" padding="four" style={styles.endedCard}>
+          <View style={[styles.endedIconBox, { backgroundColor: '#FEF3C7' }]}>
+            <MaterialCommunityIcons name="phone-missed" size={44} color="#D97706" />
+          </View>
+          <Text style={[styles.endedTitle, { color: theme.text }]}>No Answer</Text>
+          <Text style={[styles.endedDesc, { color: theme.textSecondary }]}>
+            No one answered. Try again later or send a message.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: Spacing.two, width: '100%' }}>
+            <Button label="Go Back" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
+            <Button label="Retry" variant="primary" onPress={() => { setCallState('idle'); setTimeElapsed(0); callInitiated.current = false; }} style={{ flex: 1 }} />
+          </View>
+        </Card>
+      </View>
+    );
+  }
+
+  // ── Render: Ended / Summary ──
   if (callState === 'ended') {
     return (
       <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
@@ -356,9 +390,8 @@ export default function VideoCallScreen() {
     );
   }
 
-  // Render dial state, ringing state, or active connected call state
-  const isDialingOrRinging = ['dialing', 'ringing'].includes(callState);
-  const isConnected = callState === 'connected' || callState === 'reconnecting';
+  // ── Render: Ringing or Connected ──
+  const isConnected = callState === 'connected';
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four }]}>
@@ -378,14 +411,6 @@ export default function VideoCallScreen() {
       {/* Main viewport */}
       <View style={styles.heroWrap}>
         <Card variant="raised" padding="four" style={[styles.heroCard, { backgroundColor: theme.primarySoft, borderColor: theme.primarySoft }]}>
-          
-          {/* Reconnecting overlay banner */}
-          {callState === 'reconnecting' && (
-            <View style={styles.reconnectBanner}>
-              <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 8 }} />
-              <Text style={styles.reconnectText}>Network issues. Reconnecting stream...</Text>
-            </View>
-          )}
 
           {/* Tag status */}
           <View style={[styles.sessionTag, { backgroundColor: theme.surfaceRaised }]}>
@@ -395,13 +420,13 @@ export default function VideoCallScreen() {
             </Text>
           </View>
 
-          {isDialingOrRinging ? (
-            /* Dialing / Ringing placeholder screen */
+          {callState === 'ringing' ? (
+            /* Ringing placeholder screen */
             <View style={[styles.portraitFrame, { backgroundColor: theme.surfaceRaised, justifyContent: 'center', alignItems: 'center' }]}>
               <View style={[styles.pulseCircle, { transform: [{ scale: pulseScale }], backgroundColor: `${theme.primary}1F` }]} />
               <Avatar name={counselorName} size="lg" source={{ uri: cPhoto }} />
               <Text style={[styles.voiceConnectedText, { color: theme.text, marginTop: Spacing.three }]}>
-                {callState === 'dialing' ? `Calling ${counselorName}...` : `Ringing...`}
+                Calling {counselorName}...
               </Text>
               <Text style={[styles.voiceStatusText, { color: theme.textSecondary, marginTop: Spacing.one }]}>
                 Waiting for answer
@@ -470,52 +495,84 @@ export default function VideoCallScreen() {
         </Pressable>
       )}
 
-      {/* Network testing button (only visible when connected) */}
-      {callState === 'connected' && (
-        <Pressable onPress={triggerReconnectTest} style={[styles.testBtn, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
-          <Text style={{ color: theme.primary, fontSize: 10, fontWeight: 'bold' }}>Simulate Drop Connection</Text>
-        </Pressable>
-      )}
-
       {/* Control panel buttons */}
-      <View style={[styles.controlsWrap, { paddingBottom: insets.bottom + Spacing.three }]}>
-        <View style={styles.controlsRow}>
-          <ControlButton
-            icon={cameraOn ? 'camera' : 'camera-off'}
-            label="Camera"
-            active={cameraOn}
-            onPress={() => setCameraOn(!cameraOn)}
-            disabled={!isConnected || callType === 'voice'}
-          />
-          <ControlButton
-            icon={micOn ? 'microphone' : 'microphone-off'}
-            label={micOn ? 'Mute' : 'Unmute'}
-            active={micOn}
-            onPress={() => setMicOn(!micOn)}
-            disabled={!isConnected}
-          />
-          <ControlButton
-            icon="phone-hangup"
-            label="End"
-            danger
-            onPress={handleEndCall}
-          />
-          <ControlButton
-            icon={audioOn ? 'volume-high' : 'volume-off'}
-            label="Speaker"
-            active={audioOn}
-            onPress={() => setAudioOn(!audioOn)}
-            disabled={!isConnected}
-          />
-          <ControlButton
-            icon="share-outline"
-            label="Share"
-            onPress={() => Alert.alert('Share Link', 'Room invitation link copied to clipboard!')}
-            disabled={!isConnected}
-          />
+      {isConnected ? (
+        <View style={[styles.controlsWrap, { paddingBottom: insets.bottom + Spacing.three }]}>
+          <View style={styles.controlsRow}>
+            <ControlButton
+              icon={cameraOn ? 'camera' : 'camera-off'}
+              label="Camera"
+              active={cameraOn}
+              onPress={() => setCameraOn(!cameraOn)}
+              disabled={callType === 'voice'}
+            />
+            <ControlButton
+              icon={micOn ? 'microphone' : 'microphone-off'}
+              label={micOn ? 'Mute' : 'Unmute'}
+              active={micOn}
+              onPress={() => setMicOn(!micOn)}
+            />
+            <ControlButton
+              icon="phone-hangup"
+              label="End"
+              danger
+              onPress={handleEndCall}
+            />
+            <ControlButton
+              icon={audioOn ? 'volume-high' : 'volume-off'}
+              label="Speaker"
+              active={audioOn}
+              onPress={() => setAudioOn(!audioOn)}
+            />
+            <ControlButton
+              icon="share-outline"
+              label="Share"
+              onPress={() => Alert.alert('Share Link', 'Room invitation link copied to clipboard!')}
+            />
+          </View>
+          <Button label="Back to sessions" variant="secondary" onPress={() => router.back()} />
         </View>
-        <Button label="Back to sessions" variant="secondary" onPress={() => router.back()} />
-      </View>
+      ) : (
+        /* Ringing controls — just Cancel */
+        <View style={[styles.controlsWrap, { paddingBottom: insets.bottom + Spacing.three }]}>
+          <View style={styles.controlsRow}>
+            <ControlButton
+              icon={cameraOn ? 'camera' : 'camera-off'}
+              label="Camera"
+              active={cameraOn}
+              onPress={() => setCameraOn(!cameraOn)}
+              disabled
+            />
+            <ControlButton
+              icon={micOn ? 'microphone' : 'microphone-off'}
+              label={micOn ? 'Mute' : 'Unmute'}
+              active={micOn}
+              onPress={() => setMicOn(!micOn)}
+              disabled
+            />
+            <ControlButton
+              icon="phone-hangup"
+              label="Cancel"
+              danger
+              onPress={handleCancelCall}
+            />
+            <ControlButton
+              icon={audioOn ? 'volume-high' : 'volume-off'}
+              label="Speaker"
+              active={audioOn}
+              onPress={() => setAudioOn(!audioOn)}
+              disabled
+            />
+            <ControlButton
+              icon="share-outline"
+              label="Share"
+              onPress={() => Alert.alert('Share Link', 'Room invitation link copied to clipboard!')}
+              disabled
+            />
+          </View>
+          <Button label="Back to sessions" variant="secondary" onPress={() => router.back()} />
+        </View>
+      )}
     </View>
   );
 }

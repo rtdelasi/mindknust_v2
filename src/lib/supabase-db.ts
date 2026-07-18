@@ -900,3 +900,125 @@ export async function incrementShareCount(postId: string): Promise<number> {
 
   return newSharesCount;
 }
+
+// ═══════════════════════════════════════════════
+// 12. Calls (video/voice call invites + state)
+// ═══════════════════════════════════════════════
+
+export interface SupabaseCall {
+  id: string;
+  caller_id: string;
+  callee_id: string;
+  call_type: 'voice' | 'video';
+  status: 'ringing' | 'accepted' | 'declined' | 'missed' | 'ended';
+  room_id: string;
+  created_at: string;
+  answered_at: string | null;
+  ended_at: string | null;
+  caller_profile?: SupabaseProfile;
+  callee_profile?: SupabaseProfile;
+}
+
+export async function createCall(
+  callerId: string,
+  calleeId: string,
+  callType: 'voice' | 'video',
+  roomId: string,
+): Promise<SupabaseCall | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('calls')
+    .insert({
+      caller_id: callerId,
+      callee_id: calleeId,
+      call_type: callType,
+      room_id: roomId,
+      status: 'ringing',
+    })
+    .select()
+    .single();
+  if (error) {
+    console.warn('[DB] createCall error:', error.message);
+    return null;
+  }
+  return data as unknown as SupabaseCall;
+}
+
+export async function updateCallStatus(
+  callId: string,
+  status: SupabaseCall['status'],
+): Promise<boolean> {
+  if (!supabase) return false;
+  const update: Record<string, unknown> = { status };
+  if (status === 'accepted') update.answered_at = new Date().toISOString();
+  if (status === 'ended' || status === 'missed' || status === 'declined') update.ended_at = new Date().toISOString();
+  const { error } = await supabase
+    .from('calls')
+    .update(update)
+    .eq('id', callId);
+  if (error) {
+    console.warn('[DB] updateCallStatus error:', error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function fetchCallById(callId: string): Promise<SupabaseCall | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('calls')
+    .select('*')
+    .eq('id', callId)
+    .single();
+  if (error || !data) return null;
+  return data as unknown as SupabaseCall;
+}
+
+/**
+ * Subscribe to status changes on a specific call.
+ * Returns the unsubscribe function.
+ */
+export function subscribeToCallStatus(
+  callId: string,
+  onUpdate: (call: SupabaseCall) => void,
+): () => void {
+  if (!supabase) return () => {};
+  const channel = supabase
+    .channel(`call-${callId}`)
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` },
+      (payload) => {
+        onUpdate(payload.new as unknown as SupabaseCall);
+      },
+    )
+    .subscribe();
+  return () => {
+    supabase!.removeChannel(channel);
+  };
+}
+
+/**
+ * Subscribe to incoming calls for a specific user (callee).
+ * Fires when a new row is inserted where callee_id matches.
+ * Returns the unsubscribe function.
+ */
+export function subscribeToIncomingCalls(
+  calleeId: string,
+  onIncoming: (call: SupabaseCall) => void,
+): () => void {
+  if (!supabase) return () => {};
+  const channel = supabase
+    .channel(`incoming-calls-${calleeId}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'calls', filter: `callee_id=eq.${calleeId}` },
+      (payload) => {
+        onIncoming(payload.new as unknown as SupabaseCall);
+      },
+    )
+    .subscribe();
+  return () => {
+    supabase!.removeChannel(channel);
+  };
+}

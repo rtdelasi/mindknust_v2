@@ -1,6 +1,8 @@
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { Audio } from 'expo-av';
+import * as Haptics from 'expo-haptics';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import 'react-native-reanimated';
@@ -11,6 +13,7 @@ import { Avatar } from '@/components/ui';
 import { supabase } from '@/lib/supabase';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
+import { subscribeToIncomingCalls, updateCallStatus, SupabaseCall } from '@/lib/supabase-db';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -26,19 +29,12 @@ export default function RootLayout() {
   );
 }
 
-interface IncomingCallData {
-  roomId: string;
-  callerId: string;
-  callerName: string;
-  callType: 'voice' | 'video';
-}
-
 function RootLayoutContent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { role } = useMockAuth();
   const [activeAlert, setActiveAlert] = useState<{ title: string; body: string } | null>(null);
-  const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
+  const [incomingCall, setIncomingCall] = useState<SupabaseCall | null>(null);
 
   // Pulse animation state for the ringing icon
   const [ringPulse, setRingPulse] = useState(1);
@@ -55,42 +51,16 @@ function RootLayoutContent() {
     return () => clearInterval(interval);
   }, [incomingCall]);
 
-  // Subscribe to incoming call signals on this user's call channel
+  // Subscribe to incoming call invites via the calls table
   useEffect(() => {
-    if (!supabase || !currentUserId) {
-      console.log('[Realtime Receiver] Cannot subscribe: supabase is', !!supabase, 'currentUserId is', currentUserId);
-      return;
-    }
+    if (!currentUserId) return;
 
-    console.log(`[Realtime Receiver] Subscribing to channel: calls-${currentUserId}`);
+    const unsub = subscribeToIncomingCalls(currentUserId, (call) => {
+      console.log('[Realtime Receiver] Incoming call:', call.id);
+      setIncomingCall(call);
+    });
 
-    const channel = supabase
-      .channel(`calls-${currentUserId}`)
-      .on('broadcast', { event: 'incoming_call' }, (event) => {
-        console.log('[Realtime Receiver] Received incoming_call event:', event);
-        const payload = event.payload as IncomingCallData;
-        if (payload && payload.roomId) {
-          setIncomingCall(payload);
-        }
-      })
-      .on('broadcast', { event: 'decline_call' }, (event) => {
-        console.log('[Realtime Receiver] Received decline_call event:', event);
-        // Remote side hung up before we answered
-        setIncomingCall(null);
-      })
-      .subscribe((status, err) => {
-        console.log(`[Realtime Receiver] Subscription status for calls-${currentUserId}:`, status, err || '');
-      });
-
-    callChannelRef.current = channel;
-
-    return () => {
-      if (callChannelRef.current) {
-        console.log(`[Realtime Receiver] Cleaning up channel calls-${currentUserId}`);
-        supabase!.removeChannel(callChannelRef.current);
-        callChannelRef.current = null;
-      }
-    };
+    return unsub;
   }, [currentUserId]);
 
   // Auto-dismiss incoming call after 30 seconds
@@ -102,66 +72,87 @@ function RootLayoutContent() {
     return () => clearTimeout(timeout);
   }, [incomingCall]);
 
+  // Ringtone
+  useEffect(() => {
+    if (!incomingCall) return;
+    let sound: Audio.Sound | null = null;
+
+    const playRing = async () => {
+      try {
+        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+        const { sound: s } = await Audio.Sound.createAsync(
+          require('@/assets/sounds/incoming-ring.mp3'),
+          { isLooping: true, volume: 0.8 }
+        );
+        sound = s;
+        await sound.playAsync();
+      } catch (e) {
+        console.warn('[Ringtone] Could not play:', e);
+      }
+    };
+
+    playRing();
+
+    return () => {
+      sound?.stopAsync();
+      sound?.unloadAsync();
+    };
+  }, [incomingCall]);
+
+  // Vibration
+  useEffect(() => {
+    if (!incomingCall) return;
+    let active = true;
+    const vibrate = async () => {
+      while (active) {
+        try {
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        } catch {}
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    };
+    vibrate();
+    return () => { active = false; };
+  }, [incomingCall]);
+
   const handleAcceptCall = useCallback(async () => {
     if (!incomingCall || !supabase) return;
-
-    // Send accept_call back to the caller's channel
-    const callerChannel = supabase.channel(`calls-${incomingCall.callerId}`);
-    callerChannel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        callerChannel.send({
-          type: 'broadcast',
-          event: 'accept_call',
-          payload: {
-            roomId: incomingCall.roomId,
-            acceptedBy: currentUserId,
-          },
-        });
-
-        // Open Jitsi Meet room
-        const videoMuted = incomingCall.callType === 'voice';
-        const jitsiUrl = `https://meet.jit.si/${incomingCall.roomId}#config.startWithVideoMuted=${videoMuted}&config.prejoinPageEnabled=false`;
-
-        WebBrowser.openBrowserAsync(jitsiUrl, {
-          presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-        }).catch((err) => {
-          console.warn('Could not open Jitsi room:', err);
-          Alert.alert('Error', 'Could not open the call room.');
-        });
-
-        // Clean up
-        setTimeout(() => {
-          supabase!.removeChannel(callerChannel);
-        }, 2000);
-      }
-    });
-
+    const saved = incomingCall;
     setIncomingCall(null);
-  }, [incomingCall, currentUserId]);
+
+    // Update DB status
+    await updateCallStatus(saved.id, 'accepted');
+
+    // Open Jitsi
+    const videoMuted = saved.call_type === 'voice';
+    const jitsiUrl = `https://meet.jit.si/${saved.room_id}#config.startWithVideoMuted=${videoMuted}&config.prejoinPageEnabled=false`;
+    WebBrowser.openBrowserAsync(jitsiUrl, {
+      presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+    }).catch((err) => {
+      console.warn('[Receiver] Jitsi open error:', err);
+      Alert.alert('Error', 'Could not open the call room.');
+    });
+  }, [incomingCall]);
 
   const handleDeclineCall = useCallback(() => {
     if (!incomingCall || !supabase) return;
-
-    // Send decline_call back to the caller's channel
-    const callerChannel = supabase.channel(`calls-${incomingCall.callerId}`);
-    callerChannel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        callerChannel.send({
-          type: 'broadcast',
-          event: 'decline_call',
-          payload: {
-            roomId: incomingCall.roomId,
-            declinedBy: currentUserId,
-          },
-        });
-        setTimeout(() => {
-          supabase!.removeChannel(callerChannel);
-        }, 2000);
-      }
-    });
-
+    const saved = incomingCall;
     setIncomingCall(null);
-  }, [incomingCall, currentUserId]);
+    updateCallStatus(saved.id, 'declined');
+  }, [incomingCall]);
+
+  // Broadcast hang-up listener
+  useEffect(() => {
+    if (!supabase) return;
+    const channel = supabase
+      .channel('calls-app')
+      .on('broadcast', { event: 'call_hangup' }, (event) => {
+        console.log('[Receiver] Received call_hangup:', event.payload);
+        WebBrowser.dismissBrowser()?.catch(() => {});
+      })
+      .subscribe();
+    return () => { supabase!.removeChannel(channel); };
+  }, []);
 
   // Announcement listener
   useEffect(() => {
@@ -234,11 +225,11 @@ function RootLayoutContent() {
           <View style={[styles.incomingCard, { paddingTop: insets.top + 40 }]}>
             {/* Pulse ring behind avatar */}
             <View style={[styles.incomingPulse, { transform: [{ scale: ringPulse }] }]} />
-            <Avatar name={incomingCall.callerName} size="lg" />
+            <Avatar name={incomingCall.caller_profile?.name || '?'} size="lg" />
 
-            <Text style={styles.incomingCallerName}>{incomingCall.callerName}</Text>
+            <Text style={styles.incomingCallerName}>{incomingCall.caller_profile?.name || 'Someone'}</Text>
             <Text style={styles.incomingCallType}>
-              Incoming {incomingCall.callType === 'video' ? 'Video' : 'Voice'} Call
+              Incoming {incomingCall.call_type === 'video' ? 'Video' : 'Voice'} Call
             </Text>
 
             {/* Accept / Decline buttons */}
@@ -249,7 +240,7 @@ function RootLayoutContent() {
               </Pressable>
               <Pressable style={styles.acceptBtn} onPress={handleAcceptCall}>
                 <MaterialCommunityIcons
-                  name={incomingCall.callType === 'video' ? 'video' : 'phone'}
+                  name={incomingCall.call_type === 'video' ? 'video' : 'phone'}
                   size={28}
                   color="#FFFFFF"
                 />

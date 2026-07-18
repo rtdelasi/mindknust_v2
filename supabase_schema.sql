@@ -134,3 +134,22 @@ alter table if exists public.posts add column if not exists moderation_status te
 alter table if exists public.posts add column if not exists is_flagged boolean default false;
 alter table if exists public.posts add column if not exists flag_reason text;
 alter table if exists public.notifications disable row level security;
+
+-- 12. Create Calls Table (video/voice call invites and state)
+create table if not exists public.calls (
+  id uuid default gen_random_uuid() primary key,
+  caller_id text not null references public.profiles(id),
+  callee_id text not null references public.profiles(id),
+  call_type text not null check (call_type in ('voice', 'video')),
+  status text not null check (status in ('ringing', 'accepted', 'declined', 'missed', 'ended')) default 'ringing',
+  room_id text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  answered_at timestamp with time zone,
+  ended_at timestamp with time zone
+);
+
+-- Enable Realtime for the calls table so clients receive postgres_changes events
+alter publication supabase_realtime add table public.calls;
+
+-- Disable RLS for sandbox dev (consistent with other tables)
+alter table if exists public.calls disable row level security;

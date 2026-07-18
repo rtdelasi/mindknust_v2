@@ -231,6 +231,7 @@ export default function CounselorSessionsScreen() {
                               counselorName: sName,
                               avatarUrl: studentAvatar || '',
                               callType: 'video',
+                              counselorId: item.student_id,
                             },
                           })
                         }

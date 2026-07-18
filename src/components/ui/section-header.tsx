@@ -1,10 +1,11 @@
+import { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BorderRadius, FontSize, FontWeight, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type SectionHeaderProps = {
-  title: string;
+  title: ReactNode;
   actionLabel?: string;
   onActionPress?: () => void;
 };
@@ -14,17 +15,21 @@ export function SectionHeader({ title, actionLabel, onActionPress }: SectionHead
 
   return (
     <View style={styles.row}>
-      <Text
-        style={[
-          styles.title,
-          {
-            color: theme.text,
-            fontSize: FontSize.h3,
-            fontWeight: FontWeight.bold,
-          },
-        ]}>
-        {title}
-      </Text>
+      {typeof title === 'string' ? (
+        <Text
+          style={[
+            styles.title,
+            {
+              color: theme.text,
+              fontSize: FontSize.h3,
+              fontWeight: FontWeight.bold,
+            },
+          ]}>
+          {title}
+        </Text>
+      ) : (
+        title
+      )}
       {actionLabel ? (
         <Pressable onPress={onActionPress} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
           <Text

@@ -4,13 +4,23 @@ import { Tabs } from 'expo-router';
 import { BottomTabBar } from '@/components/ui';
 
 function TabIcon({
-  name,
+  focused,
+  activeName,
+  inactiveName,
   color,
 }: {
-  name: keyof typeof MaterialCommunityIcons.glyphMap;
+  focused: boolean;
+  activeName: keyof typeof MaterialCommunityIcons.glyphMap;
+  inactiveName: keyof typeof MaterialCommunityIcons.glyphMap;
   color: string;
 }) {
-  return <MaterialCommunityIcons name={name} size={22} color={color} />;
+  return (
+    <MaterialCommunityIcons
+      name={focused ? activeName : inactiveName}
+      size={24}
+      color={color}
+    />
+  );
 }
 
 export default function CounselorTabLayout() {
@@ -24,35 +34,70 @@ export default function CounselorTabLayout() {
         name="index"
         options={{
           title: 'Dashboard',
-          tabBarIcon: ({ color }) => <TabIcon name="view-dashboard" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              focused={focused}
+              activeName="view-dashboard"
+              inactiveName="view-dashboard-outline"
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="sessions"
         options={{
           title: 'Sessions',
-          tabBarIcon: ({ color }) => <TabIcon name="calendar-clock" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              focused={focused}
+              activeName="calendar-clock"
+              inactiveName="calendar-clock-outline"
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="schedule"
         options={{
           title: 'Schedule',
-          tabBarIcon: ({ color }) => <TabIcon name="calendar-month" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              focused={focused}
+              activeName="calendar-month"
+              inactiveName="calendar-month-outline"
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="chats"
         options={{
           title: 'Chats',
-          tabBarIcon: ({ color }) => <TabIcon name="message-text" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              focused={focused}
+              activeName="message-text"
+              inactiveName="message-text-outline"
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <TabIcon name="account-circle" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              focused={focused}
+              activeName="account-circle"
+              inactiveName="account-circle-outline"
+              color={color}
+            />
+          ),
         }}
       />
     </Tabs>
