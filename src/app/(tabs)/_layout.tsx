@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
-import { BottomTabBar } from '@/components/ui';
+import { BottomTabBar } from '@/components/ui/bottom-tab-bar';
 
 function TabIcon({
   focused,

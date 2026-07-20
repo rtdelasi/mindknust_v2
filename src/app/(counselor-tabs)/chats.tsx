@@ -14,7 +14,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Avatar, Card } from '@/components/ui';
+import { Avatar } from '@/components/ui/avatar';
+import { Card } from '@/components/ui/card';
 import { BorderRadius, FontSize, FontWeight, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';

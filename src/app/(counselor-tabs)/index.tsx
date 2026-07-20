@@ -12,7 +12,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Avatar, Button, Card, SectionHeader } from '@/components/ui';
+import { Avatar } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { SectionHeader } from '@/components/ui/section-header';
 import {
   BorderRadius,
   FontSize,
@@ -23,6 +26,9 @@ import {
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
+import { Badge } from '@/components/ui/badge';
+import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   fetchAppointments,
   updateAppointmentStatus,
@@ -39,15 +45,40 @@ export default function CounselorDashboardScreen() {
     []
   );
   const [loading, setLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const currentUserId =
     auth?.currentUser?.uid ||
     (role === 'counselor' ? 'kwame-boateng' : 'student-user');
 
+  const fetchUnreadCount = async () => {
+    try {
+      if (!supabase) return;
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('id, is_read')
+        .or(`user_id.is.null,user_id.eq.${currentUserId}`);
+
+      if (!error && data) {
+        const localReadJson = await AsyncStorage.getItem('counselcare_read_notification_ids');
+        const localReadIds: string[] = localReadJson ? JSON.parse(localReadJson) : [];
+
+        const count = data.filter(
+          (n: any) => !n.is_read && !localReadIds.includes(n.id)
+        ).length;
+
+        setUnreadCount(count);
+      }
+    } catch (err) {
+      console.warn('Error fetching unread count:', err);
+    }
+  };
+
   const loadAppointmentsList = async () => {
     try {
       const list = await fetchAppointments(currentUserId, 'counselor');
       setAppointments(list);
+      await fetchUnreadCount();
     } catch (err) {
       console.warn('Error loading counselor appointments:', err);
     } finally {
@@ -177,11 +208,29 @@ export default function CounselorDashboardScreen() {
                 },
               ]}
               onPress={() => router.push('/notifications')}>
-              <MaterialCommunityIcons
-                name="bell-outline"
-                size={22}
-                color={theme.text}
-              />
+              <Badge
+                count={unreadCount}
+                size={19}
+                max={9}
+                color="#FF3B30"
+                style={{
+                  width: 19,
+                  height: 19,
+                  minWidth: 19,
+                  borderRadius: 9.5,
+                  paddingHorizontal: 0,
+                  top: -2,
+                  right: -2,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }}
+              >
+                <MaterialCommunityIcons
+                  name="bell-outline"
+                  size={22}
+                  color={theme.text}
+                />
+              </Badge>
             </Pressable>
           </View>
 

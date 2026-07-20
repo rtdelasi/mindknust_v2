@@ -122,7 +122,8 @@ create table if not exists public.notifications (
   title text not null,
   body text not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  user_id text references public.profiles(id) on delete cascade
+  user_id text references public.profiles(id) on delete cascade,
+  is_read boolean default false not null
 );
 
 -- Alterations for Sentiment and Moderation Engine

@@ -3,7 +3,9 @@ import { useState, useEffect } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, Pressable, Alert, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Card, SectionHeader } from '@/components/ui';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { SectionHeader } from '@/components/ui/section-header';
 import {
   BorderRadius,
   FontSize,

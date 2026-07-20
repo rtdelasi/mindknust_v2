@@ -9,7 +9,7 @@ import 'react-native-reanimated';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { Avatar } from '@/components/ui';
+import { Avatar } from '@/components/ui/avatar';
 import { supabase } from '@/lib/supabase';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';

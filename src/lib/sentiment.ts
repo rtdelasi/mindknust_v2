@@ -22,13 +22,27 @@ const POSITIVE_WORDS = new Set([
   'happy', 'excited', 'good', 'great', 'excellent', 'glad', 'joy', 'peaceful',
   'calm', 'relax', 'productive', 'success', 'wonderful', 'amazing', 'love',
   'hope', 'grateful', 'proud', 'healing', 'well', 'optimistic', 'better',
+  'safe', 'comfortable', 'confident', 'grateful', 'thankful', 'content',
+  'energetic', 'motivated', 'relieved', 'supported', 'cared', 'loved',
+  'accepted', 'proud', 'strong', 'brave', 'kind', 'bright', 'cheerful',
 ]);
 
 const NEGATIVE_WORDS = new Set([
   'sad', 'bad', 'lonely', 'angry', 'stressed', 'anxious', 'depressed', 'failure',
   'hate', 'scared', 'fear', 'worry', 'tired', 'exhausted', 'pain', 'hurt', 'broke',
   'struggle', 'empty', 'hopeless', 'worthless', 'heavy', 'crying', 'cry', 'worst',
-  'die', 'dying', 'death', 'kill',
+  'die', 'dying', 'death', 'kill', 'unsafe', 'afraid', 'terrified', 'panicking',
+  'overwhelmed', 'helpless', 'trapped', 'stuck', 'lost', 'confused', 'numb',
+  'broken', 'shattered', 'ruined', 'miserable', 'suffering', 'agony',
+  'frustrated', 'irritated', 'resentful', 'bitter', 'jealous', 'envious',
+  'disappointed', 'regret', 'guilty', 'ashamed', 'embarrassed', 'humiliated',
+  'rejected', 'abandoned', 'ignored', 'neglected', 'unwanted', 'invisible',
+]);
+
+const NEGATION_WORDS = new Set([
+  'not', "n't", 'dont', "don't", 'doesnt', "doesn't", 'didnt', "didn't",
+  'cant', "can't", 'couldnt', "couldn't", 'wouldnt', "wouldn't", 'wont', "won't",
+  'never', 'neither', 'nor', 'hardly', 'barely', 'scarcely',
 ]);
 
 const CRISIS_WORDS = [
@@ -79,12 +93,34 @@ function keywordSentiment(note: string): SentimentResult {
   const tokens = tokenize(note);
   const lower = note.toLowerCase();
 
+  // Negation-aware scoring: if a negation word appears before a sentiment word
+  // within a 3-token window, flip its polarity.
   let pos = 0;
   let neg = 0;
-  tokens.forEach((t) => {
-    if (POSITIVE_WORDS.has(t)) pos++;
-    if (NEGATIVE_WORDS.has(t)) neg++;
-  });
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const isPositive = POSITIVE_WORDS.has(t);
+    const isNegative = NEGATIVE_WORDS.has(t);
+
+    if (!isPositive && !isNegative) continue;
+
+    // Check for negation in the 3 preceding tokens
+    let negated = false;
+    const lookback = Math.max(0, i - 3);
+    for (let j = lookback; j < i; j++) {
+      if (NEGATION_WORDS.has(tokens[j])) {
+        negated = true;
+        break;
+      }
+    }
+
+    if (isPositive) {
+      if (negated) neg++; else pos++;
+    }
+    if (isNegative) {
+      if (negated) pos++; else neg++;
+    }
+  }
 
   const total = pos + neg;
   const score = total > 0 ? (pos - neg) / total : 0;

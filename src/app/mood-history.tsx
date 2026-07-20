@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Card } from '@/components/ui';
+import { Card } from '@/components/ui/card';
 import { BorderRadius, FontSize, FontWeight, Size, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
@@ -118,8 +118,8 @@ export default function MoodHistoryScreen() {
 
   const getMoodLabel = (emoji: string) => {
     const map: Record<string, string> = {
-      '😢': 'Sad',
-      '😕': 'Meh',
+      '😟': 'Distressed',
+      '😔': 'Down',
       '🙂': 'Okay',
       '😊': 'Good',
       '😁': 'Great',

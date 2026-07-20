@@ -4,7 +4,9 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CounselorCardData, CounselorCard } from '@/components/counseling-ui';
-import { Card, SearchBar, SectionHeader } from '@/components/ui';
+import { Card } from '@/components/ui/card';
+import { SearchBar } from '@/components/ui/search-bar';
+import { SectionHeader } from '@/components/ui/section-header';
 import { BorderRadius, Colors, MaxContentWidth, Shadows, Size, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 

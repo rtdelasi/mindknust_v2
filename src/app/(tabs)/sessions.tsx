@@ -15,7 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { Card } from '@/components/ui';
+import { Card } from '@/components/ui/card';
 import {
   BorderRadius,
   FontSize,
@@ -30,8 +30,10 @@ import { useMockAuth } from '@/lib/mock-auth-store';
 import {
   fetchAppointments,
   fetchCounselors,
+  fetchMoodLogs,
   SupabaseAppointment,
   SupabaseCounselor,
+  SupabaseMoodLog,
 } from '@/lib/supabase-db';
 
 import { getCounselorPhoto } from '@/lib/counselor-utils';
@@ -45,6 +47,7 @@ export default function MySessionsScreen() {
 
   const [appointments, setAppointments] = useState<SupabaseAppointment[]>([]);
   const [counselors, setCounselors] = useState<SupabaseCounselor[]>([]);
+  const [moodLogs, setMoodLogs] = useState<SupabaseMoodLog[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -57,6 +60,9 @@ export default function MySessionsScreen() {
 
       const counselorList = await fetchCounselors();
       setCounselors(counselorList);
+
+      const logs = await fetchMoodLogs(currentUserId);
+      setMoodLogs(logs);
     } catch (err) {
       console.warn('Error fetching appointments list:', err);
     } finally {
@@ -85,6 +91,18 @@ export default function MySessionsScreen() {
     );
   });
 
+  // Derived progress data
+  const completedSessions = appointments.filter((a) => a.status === 'completed');
+  const recentCompleted = completedSessions.slice(-3).reverse();
+  const recentMoods = moodLogs.slice(0, 7);
+  const activeCounselorId = (() => {
+    const latest = appointments.find((a) => ['accepted', 'completed'].includes(a.status));
+    return latest?.counselor_id || null;
+  })();
+  const activeCounselor = activeCounselorId
+    ? counselors.find((c) => c.id === activeCounselorId)
+    : null;
+
   const getCardGradient = (index: number) => {
     const gradients = [
       ['#8B1C28', '#4A0A10'], // Maroon/red for John Doe
@@ -104,14 +122,6 @@ export default function MySessionsScreen() {
         { text: 'Help & Support', onPress: () => console.log('Help pressed') },
         { text: 'Cancel', style: 'cancel' },
       ]
-    );
-  };
-
-  const handleViewFullJourney = () => {
-    Alert.alert(
-      'Counseling Journey',
-      'Step 3 of 5: Individual Therapy. You have completed Initial Intake and Assessment Review.',
-      [{ text: 'Close', style: 'default' }]
     );
   };
 
@@ -315,71 +325,98 @@ export default function MySessionsScreen() {
             </Card>
           )}
 
-          {/* Counseling Plan section */}
+          {/* Your Progress section */}
           <View style={styles.sectionContainer}>
             <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Counseling plan</Text>
-              <Text style={styles.progressText}>Step 3 of 5</Text>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Your progress</Text>
             </View>
 
-            {/* List of Step Cards */}
-            <View style={styles.stepsList}>
-              {/* Step 1 */}
-              <View style={[styles.stepCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <View style={styles.stepIconRow}>
-                  <View style={[styles.statusIconCircle, styles.completedCircle]}>
-                    <MaterialCommunityIcons name="check" size={18} color="#3F8C7A" />
-                  </View>
-                  <View style={styles.stepTextContainer}>
-                    <Text style={[styles.stepTitle, { color: theme.text }]}>Initial Intake</Text>
-                    <Text style={[styles.stepSubtext, { color: theme.textSecondary }]}>Completed on June 12</Text>
-                  </View>
+            {/* Stats row */}
+            <View style={styles.statsRow}>
+              <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={[styles.statIconCircle, { backgroundColor: '#E6F4EA' }]}>
+                  <MaterialCommunityIcons name="check-circle-outline" size={18} color="#3F8C7A" />
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+                <Text style={[styles.statValue, { color: theme.text }]}>{completedSessions.length}</Text>
+                <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Sessions{'\n'}completed</Text>
               </View>
 
-              {/* Step 2 */}
-              <View style={[styles.stepCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <View style={styles.stepIconRow}>
-                  <View style={[styles.statusIconCircle, styles.completedCircle]}>
-                    <MaterialCommunityIcons name="check" size={18} color="#3F8C7A" />
-                  </View>
-                  <View style={styles.stepTextContainer}>
-                    <Text style={[styles.stepTitle, { color: theme.text }]}>Assessment Review</Text>
-                    <Text style={[styles.stepSubtext, { color: theme.textSecondary }]}>Completed on June 20</Text>
-                  </View>
+              <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={[styles.statIconCircle, { backgroundColor: '#EAE8FF' }]}>
+                  <MaterialCommunityIcons name="notebook-outline" size={18} color="#5B4FE5" />
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+                <Text style={[styles.statValue, { color: theme.text }]}>{moodLogs.length}</Text>
+                <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Mood{'\n'}entries</Text>
               </View>
 
-              {/* Step 3 */}
-              <View style={[styles.stepCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <View style={styles.stepIconRow}>
-                  <View style={[styles.statusIconCircle, styles.ongoingCircle]}>
-                    <MaterialCommunityIcons name="clock-outline" size={18} color="#5B4FE5" />
-                  </View>
-                  <View style={styles.stepTextContainer}>
-                    <Text style={[styles.stepTitle, { color: theme.text }]}>Individual Therapy</Text>
-                    <Text style={[styles.stepSubtext, { color: theme.textSecondary }]}>Ongoing — 4 sessions left</Text>
-                  </View>
+              <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={[styles.statIconCircle, { backgroundColor: '#FEF3C7' }]}>
+                  <MaterialCommunityIcons name="account-heart-outline" size={18} color="#D97706" />
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+                <Text style={[styles.statValue, { color: theme.text }]} numberOfLines={1}>
+                  {activeCounselor?.profile?.name?.split(' ')[0] || '—'}
+                </Text>
+                <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Active{'\n'}counselor</Text>
               </View>
             </View>
 
-            {/* Dashed Border Button */}
-            <Pressable
-              onPress={handleViewFullJourney}
-              style={({ pressed }) => [
-                styles.journeyButton,
-                { borderColor: theme.border },
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={[styles.journeyButtonText, { color: theme.textSecondary }]}>
-                View Full Journey →
-              </Text>
-            </Pressable>
+            {/* Recent Sessions Timeline */}
+            {recentCompleted.length > 0 && (
+              <View style={[styles.progressSubSection, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={[styles.progressSubTitle, { color: theme.text }]}>Recent sessions</Text>
+                <View style={styles.timeline}>
+                  {recentCompleted.map((session, index) => {
+                    const counselorName = session.counselor_profile?.name || 'Counselor';
+                    const isLast = index === recentCompleted.length - 1;
+                    return (
+                      <View key={session.id} style={styles.timelineItem}>
+                        <View style={styles.timelineLeft}>
+                          <View style={[styles.timelineDot, { backgroundColor: theme.primary }]} />
+                          {!isLast && <View style={[styles.timelineLine, { backgroundColor: theme.border }]} />}
+                        </View>
+                        <View style={styles.timelineContent}>
+                          <Text style={[styles.timelineTitle, { color: theme.text }]} numberOfLines={1}>
+                            {session.topic || 'General session'}
+                          </Text>
+                          <Text style={[styles.timelineMeta, { color: theme.textSecondary }]}>
+                            {counselorName.split(' ')[0]} · {new Date(session.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* Mood Trend */}
+            {recentMoods.length > 0 && (
+              <View style={[styles.progressSubSection, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={[styles.progressSubTitle, { color: theme.text }]}>Mood this week</Text>
+                <View style={styles.moodTrendRow}>
+                  {recentMoods.map((log) => {
+                    const date = new Date(log.created_at);
+                    const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short' });
+                    return (
+                      <View key={log.id} style={styles.moodTrendItem}>
+                        <Text style={styles.moodTrendEmoji}>{log.mood}</Text>
+                        <Text style={[styles.moodTrendDay, { color: theme.textSecondary }]}>{dayLabel}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* Empty state when no data */}
+            {completedSessions.length === 0 && moodLogs.length === 0 && (
+              <View style={[styles.progressEmpty, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <MaterialCommunityIcons name="chart-line-variant" size={32} color={theme.textSecondary} />
+                <Text style={[styles.progressEmptyText, { color: theme.textSecondary }]}>
+                  Complete sessions and log moods to see your progress here.
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -458,11 +495,6 @@ const styles = StyleSheet.create({
   viewAllText: {
     fontSize: FontSize.body - 1,
     fontWeight: FontWeight.semibold,
-  },
-  progressText: {
-    fontSize: FontSize.caption,
-    color: '#6B7280',
-    fontWeight: FontWeight.medium,
   },
   carouselContainer: {
     paddingRight: Spacing.four,
@@ -652,58 +684,107 @@ const styles = StyleSheet.create({
     fontSize: FontSize.body - 1,
     fontWeight: FontWeight.bold,
   },
-  stepsList: {
+  /* ── Your Progress ── */
+  statsRow: {
+    flexDirection: 'row',
     gap: Spacing.two,
   },
-  stepCard: {
-    flexDirection: 'row',
+  statCard: {
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'space-between',
     padding: Spacing.three,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
+    gap: Spacing.one,
     ...Shadows.light.card,
   },
-  stepIconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-  },
-  statusIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  statIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  completedCircle: {
-    backgroundColor: '#E6F4EA',
+  statValue: {
+    fontSize: FontSize.h3,
+    fontWeight: FontWeight.bold,
   },
-  ongoingCircle: {
-    backgroundColor: '#EAE8FF',
+  statLabel: {
+    fontSize: FontSize.small,
+    textAlign: 'center',
+    lineHeight: 14,
   },
-  stepTextContainer: {
-    gap: 2,
+  progressSubSection: {
+    padding: Spacing.three,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    gap: Spacing.two,
+    ...Shadows.light.card,
   },
-  stepTitle: {
+  progressSubTitle: {
     fontSize: FontSize.body - 1,
     fontWeight: FontWeight.bold,
   },
-  stepSubtext: {
-    fontSize: FontSize.caption,
+  timeline: {
+    gap: 0,
   },
-  journeyButton: {
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderRadius: BorderRadius.md,
-    height: 48,
+  timelineItem: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  timelineLeft: {
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: Spacing.one,
+    width: 16,
   },
-  journeyButtonText: {
-    fontSize: FontSize.body - 1,
+  timelineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 20,
+  },
+  timelineContent: {
+    flex: 1,
+    paddingBottom: Spacing.two,
+    gap: 2,
+  },
+  timelineTitle: {
+    fontSize: FontSize.body - 2,
     fontWeight: FontWeight.semibold,
+  },
+  timelineMeta: {
+    fontSize: FontSize.small,
+  },
+  moodTrendRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    justifyContent: 'space-between',
+  },
+  moodTrendItem: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  moodTrendEmoji: {
+    fontSize: 22,
+  },
+  moodTrendDay: {
+    fontSize: FontSize.small - 1,
+    fontWeight: FontWeight.medium,
+  },
+  progressEmpty: {
+    alignItems: 'center',
+    padding: Spacing.four,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    gap: Spacing.two,
+  },
+  progressEmptyText: {
+    fontSize: FontSize.caption,
+    textAlign: 'center',
   },
   pressed: {
     opacity: 0.76,
