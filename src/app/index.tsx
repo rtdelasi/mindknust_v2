@@ -6,7 +6,7 @@ import { useMockAuth } from '@/lib/mock-auth-store';
 import { safeStorage } from '@/lib/safe-storage';
 
 export default function Index() {
-  const { isAuthenticated, role } = useMockAuth();
+  const { isAuthenticated, role, approvalStatus } = useMockAuth();
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
 
@@ -42,6 +42,9 @@ export default function Index() {
   }
 
   if (role === 'counselor') {
+    if (approvalStatus !== 'approved') {
+      return <Redirect href="/counselor-pending" />;
+    }
     return <Redirect href="/(counselor-tabs)" />;
   }
 

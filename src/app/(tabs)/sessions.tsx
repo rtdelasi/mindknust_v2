@@ -37,6 +37,7 @@ import {
 } from '@/lib/supabase-db';
 
 import { getCounselorPhoto } from '@/lib/counselor-utils';
+import { getDisplayIdentity } from '@/lib/display-identity';
 export { getCounselorPhoto };
 
 export default function MySessionsScreen() {
@@ -236,9 +237,19 @@ export default function MySessionsScreen() {
               <View style={styles.upcomingTopRow}>
                 <View style={styles.upcomingTextBlock}>
                   <Text style={styles.upcomingLabel}>Upcoming Session</Text>
-                  <Text style={styles.upcomingCounselor}>
-                    {nextSession.counselor_profile?.name || 'Counselor'} — Student counselor
-                  </Text>
+                  {nextSession.is_anonymous_display && role === 'student' ? (
+                    <Text style={styles.upcomingCounselor}>
+                      {getDisplayIdentity(
+                        { name: nextSession.student_profile?.name, anonymous_id: nextSession.student_profile?.anonymous_id },
+                        nextSession.is_anonymous_display,
+                        'student'
+                      )} — Anonymous student
+                    </Text>
+                  ) : (
+                    <Text style={styles.upcomingCounselor}>
+                      {nextSession.counselor_profile?.name || 'Counselor'} — Student counselor
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.datePill}>
                   <Text style={styles.datePillText}>

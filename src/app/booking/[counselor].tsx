@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/avatar';
@@ -19,6 +19,7 @@ import {
 } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
+import { useMockAuth } from '@/lib/mock-auth-store';
 import {
   fetchCounselors,
   fetchAvailabilitySlots,
@@ -33,6 +34,7 @@ export default function BookingScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ counselor?: string }>();
   const counselor = params.counselor ?? 'Counselor';
+  const { role, anonymousId, userName } = useMockAuth();
 
   const [loading, setLoading] = useState(true);
   const [counselorData, setCounselorData] = useState<SupabaseCounselor | null>(null);
@@ -40,6 +42,7 @@ export default function BookingScreen() {
   const [selectedSlotText, setSelectedSlotText] = useState('');
   const [selectedTopic, setSelectedTopic] = useState('Academic stress');
   const [submitting, setSubmitting] = useState(false);
+  const [anonDisplay, setAnonDisplay] = useState(false);
 
   const formatCounselorName = (value: string) => {
     return value
@@ -100,7 +103,7 @@ export default function BookingScreen() {
     const date = new Date().toISOString().split('T')[0]; // Today's date
 
     try {
-      await createAppointment(studentId, cId, date, selectedSlotText, selectedTopic);
+      await createAppointment(studentId, cId, date, selectedSlotText, selectedTopic, anonDisplay);
       Alert.alert(
         'Booking Confirmed',
         `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} at ${selectedSlotText} has been scheduled.`,
@@ -222,6 +225,30 @@ export default function BookingScreen() {
             </View>
           </Card>
 
+          {role === 'student' && anonymousId ? (
+            <Card variant="surface" padding="four">
+              <View style={styles.anonRow}>
+                <View style={styles.anonInfo}>
+                  <MaterialCommunityIcons name="incognito" size={22} color={theme.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.anonLabel, { color: theme.text }]}>
+                      Show my name as {anonDisplay ? anonymousId : userName}
+                    </Text>
+                    <Text style={[styles.anonHint, { color: theme.textSecondary }]}>
+                      Other students see your anonymous ID. Your counselor always sees your real name.
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={anonDisplay}
+                  onValueChange={setAnonDisplay}
+                  trackColor={{ false: theme.surfaceSoft, true: `${theme.primary}40` }}
+                  thumbColor={anonDisplay ? theme.primary : '#f4f3f4'}
+                />
+              </View>
+            </Card>
+          ) : null}
+
           <Button
             label={submitting ? 'Booking...' : 'Confirm booking'}
             disabled={submitting || slots.length === 0}
@@ -337,5 +364,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
+  },
+  anonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  anonInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    flex: 1,
+  },
+  anonLabel: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.semibold,
+  },
+  anonHint: {
+    fontSize: FontSize.small,
+    lineHeight: 16,
+    marginTop: 2,
   },
 });

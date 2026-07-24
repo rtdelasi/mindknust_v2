@@ -1,39 +1,53 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useState, useCallback } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View, Switch } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View, Switch, TextInput, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/avatar';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import {
   BorderRadius,
   FontSize,
   FontWeight,
   MaxContentWidth,
-  Shadows,
   Size,
   Spacing,
 } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useThemeContext } from '@/contexts/theme-context';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
-import { fetchAppointments, fetchMoodLogs } from '@/lib/supabase-db';
+import {
+  fetchAppointments,
+  fetchMoodLogs,
+  fetchStudentProfile,
+  createStudentProfile,
+  SupabaseStudentProfile,
+} from '@/lib/supabase-db';
 import { getCounselorPhoto } from './sessions';
 
 export default function ProfileScreen() {
-  const { userName, avatarUrl, logout } = useMockAuth();
+  const { userName, avatarUrl, anonymousId, logout } = useMockAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { mode: themeMode, setMode: setThemeMode } = useThemeContext();
 
   const [sessionsCount, setSessionsCount] = useState(0);
   const [moodStreak, setMoodStreak] = useState(0);
   const [connectedCounselor, setConnectedCounselor] = useState<any>(null);
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+
+  // Student Profile Edit State
+  const [studentDetails, setStudentDetails] = useState<SupabaseStudentProfile | null>(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [studentIndexInput, setStudentIndexInput] = useState('');
+  const [programInput, setProgramInput] = useState('');
+  const [yearInput, setYearInput] = useState<number>(1);
+  const [emergencyNameInput, setEmergencyNameInput] = useState('');
+  const [emergencyPhoneInput, setEmergencyPhoneInput] = useState('');
+  const [savingDetails, setSavingDetails] = useState(false);
 
   const currentUserId = auth?.currentUser?.uid || 'student-user';
 
@@ -54,8 +68,38 @@ export default function ProfileScreen() {
 
       const logs = await fetchMoodLogs(currentUserId);
       setMoodStreak(logs.length);
+
+      const sData = await fetchStudentProfile(currentUserId);
+      if (sData) {
+        setStudentDetails(sData);
+        setStudentIndexInput(sData.student_index_number || '');
+        setProgramInput(sData.program || '');
+        setYearInput(sData.year_of_study || 1);
+        setEmergencyNameInput(sData.emergency_contact_name || '');
+        setEmergencyPhoneInput(sData.emergency_contact_phone || '');
+      }
     } catch (e) {
       console.warn('Profile stats sync failed:', e);
+    }
+  };
+
+  const handleSaveStudentDetails = async () => {
+    setSavingDetails(true);
+    try {
+      await createStudentProfile({
+        userId: currentUserId,
+        studentIndexNumber: studentIndexInput,
+        program: programInput,
+        yearOfStudy: yearInput,
+        emergencyContactName: emergencyNameInput,
+        emergencyContactPhone: emergencyPhoneInput,
+      });
+      setEditModalVisible(false);
+      await loadProfileData();
+    } catch (e) {
+      console.warn('Failed saving student details:', e);
+    } finally {
+      setSavingDetails(false);
     }
   };
 
@@ -179,6 +223,46 @@ export default function ProfileScreen() {
             </View>
           )}
 
+          {/* ── Student Identity & Safety Contact Card ── */}
+          <Text style={[styles.sectionHeader, { color: theme.textSecondary }]}>STUDENT IDENTITY & SAFETY CONTACT</Text>
+          <View style={[styles.settingsGroup, { backgroundColor: theme.surface, borderColor: theme.border, padding: Spacing.three, gap: Spacing.two }]}>
+            <View style={styles.anonRow}>
+              <View style={styles.anonInfo}>
+                <Text style={[styles.anonLabel, { color: theme.textSecondary }]}>Anonymous Identity ID</Text>
+                <Text style={[styles.anonCode, { color: theme.primary }]}>{anonymousId || 'KNUST-ANON-7K9A2'}</Text>
+              </View>
+              <MaterialCommunityIcons name="incognito" size={28} color={theme.primary} />
+            </View>
+
+            <View style={styles.detailsGrid}>
+              <Text style={[styles.detailText, { color: theme.text }]}>
+                <Text style={{ fontWeight: FontWeight.bold }}>Index Number: </Text>
+                {studentDetails?.student_index_number || 'Not provided'}
+              </Text>
+              <Text style={[styles.detailText, { color: theme.text }]}>
+                <Text style={{ fontWeight: FontWeight.bold }}>Program: </Text>
+                {studentDetails?.program || 'Not provided'}
+              </Text>
+              <Text style={[styles.detailText, { color: theme.text }]}>
+                <Text style={{ fontWeight: FontWeight.bold }}>Year of Study: </Text>
+                {studentDetails?.year_of_study ? `Year ${studentDetails.year_of_study}` : 'Not provided'}
+              </Text>
+              <Text style={[styles.detailText, { color: theme.text }]}>
+                <Text style={{ fontWeight: FontWeight.bold }}>Emergency Contact: </Text>
+                {studentDetails?.emergency_contact_name
+                  ? `${studentDetails.emergency_contact_name} (${studentDetails.emergency_contact_phone || 'No Phone'})`
+                  : 'Not provided'}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={() => setEditModalVisible(true)}
+              style={[styles.editDetailsBtn, { borderColor: theme.primary, backgroundColor: theme.primarySoft }]}>
+              <MaterialCommunityIcons name="square-edit-outline" size={16} color={theme.primary} />
+              <Text style={[styles.editDetailsBtnText, { color: theme.primary }]}>Update Student Details</Text>
+            </Pressable>
+          </View>
+
           {/* ── Account Section ── */}
           <Text style={[styles.sectionHeader, { color: theme.textSecondary }]}>ACCOUNT</Text>
           <View style={[styles.settingsGroup, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -216,8 +300,8 @@ export default function ProfileScreen() {
               iconColor="#CBD5E1"
             >
               <Switch
-                value={darkModeEnabled}
-                onValueChange={setDarkModeEnabled}
+                value={themeMode === 'dark'}
+                onValueChange={(val) => setThemeMode(val ? 'dark' : 'light')}
                 trackColor={{ true: theme.primary, false: theme.surfaceMuted }}
                 thumbColor="#FFFFFF"
               />
@@ -267,6 +351,14 @@ export default function ProfileScreen() {
               iconColor="#D97706"
               showChevron
               onPress={() => Alert.alert('Data Export', 'An offline archive containing all your counselor charts and daily logs will be compiled and sent to your university inbox within 24 hours.')}
+            />
+            <SettingsRow
+              icon="shield-account"
+              label="Admin Approvals Queue (Mobile)"
+              iconBg="#EAE8FF"
+              iconColor={theme.primary}
+              showChevron
+              onPress={() => router.push('/admin/approvals')}
               isLast
             />
           </View>
@@ -295,6 +387,83 @@ export default function ProfileScreen() {
 
         </View>
       </ScrollView>
+
+      {/* ── Edit Student Details Modal ── */}
+      <Modal visible={editModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: theme.surfaceRaised }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Update Student Details</Text>
+
+            <View style={styles.inputContainer}>
+              <Text style={[styles.inputLabel, { color: theme.text }]}>Student Index Number</Text>
+              <View style={[styles.inputWrapper, { borderColor: theme.border, backgroundColor: theme.surfaceSoft }]}>
+                <TextInput
+                  placeholder="e.g. 20847291"
+                  placeholderTextColor={theme.textSecondary}
+                  value={studentIndexInput}
+                  onChangeText={setStudentIndexInput}
+                  style={[styles.input, { color: theme.text }]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={[styles.inputLabel, { color: theme.text }]}>Program / Department</Text>
+              <View style={[styles.inputWrapper, { borderColor: theme.border, backgroundColor: theme.surfaceSoft }]}>
+                <TextInput
+                  placeholder="e.g. BSc Computer Science"
+                  placeholderTextColor={theme.textSecondary}
+                  value={programInput}
+                  onChangeText={setProgramInput}
+                  style={[styles.input, { color: theme.text }]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={[styles.inputLabel, { color: theme.text }]}>Emergency Contact Name</Text>
+              <View style={[styles.inputWrapper, { borderColor: theme.border, backgroundColor: theme.surfaceSoft }]}>
+                <TextInput
+                  placeholder="Parent / Guardian Name"
+                  placeholderTextColor={theme.textSecondary}
+                  value={emergencyNameInput}
+                  onChangeText={setEmergencyNameInput}
+                  style={[styles.input, { color: theme.text }]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={[styles.inputLabel, { color: theme.text }]}>Emergency Contact Phone</Text>
+              <View style={[styles.inputWrapper, { borderColor: theme.border, backgroundColor: theme.surfaceSoft }]}>
+                <TextInput
+                  placeholder="+233 24 000 0000"
+                  placeholderTextColor={theme.textSecondary}
+                  value={emergencyPhoneInput}
+                  onChangeText={setEmergencyPhoneInput}
+                  keyboardType="phone-pad"
+                  style={[styles.input, { color: theme.text }]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.modalActionRow}>
+              <Pressable
+                onPress={() => setEditModalVisible(false)}
+                style={[styles.modalCancelBtn, { borderColor: theme.border }]}>
+                <Text style={[styles.modalCancelBtnText, { color: theme.text }]}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleSaveStudentDetails}
+                disabled={savingDetails}
+                style={[styles.modalSaveBtn, { backgroundColor: theme.primary }]}>
+                <Text style={styles.modalSaveBtnText}>{savingDetails ? 'Saving...' : 'Save Changes'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -585,6 +754,116 @@ const styles = StyleSheet.create({
   logoutText: {
     color: '#FF3B30',
     fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.bold,
+  },
+
+  /* ── Student Identity & Modal ── */
+  anonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: Spacing.one,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  anonInfo: {
+    gap: 2,
+  },
+  anonLabel: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
+    textTransform: 'uppercase',
+  },
+  anonCode: {
+    fontSize: FontSize.h3,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 1,
+  },
+  detailsGrid: {
+    gap: 6,
+    paddingVertical: 4,
+  },
+  detailText: {
+    fontSize: FontSize.caption + 1,
+  },
+  editDetailsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: Spacing.two,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    marginTop: Spacing.one,
+  },
+  editDetailsBtnText: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.bold,
+  },
+
+  /* Modal */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.four,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    gap: Spacing.three,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.four,
+  },
+  modalTitle: {
+    fontSize: FontSize.h3,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.one,
+  },
+  inputContainer: {
+    gap: 6,
+  },
+  inputLabel: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: Size.inputHeight,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.three,
+  },
+  input: {
+    flex: 1,
+    fontSize: FontSize.body - 1,
+  },
+  modalActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  modalCancelBtn: {
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.two,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  modalCancelBtnText: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.bold,
+  },
+  modalSaveBtn: {
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.two,
+    borderRadius: BorderRadius.full,
+  },
+  modalSaveBtnText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.caption + 1,
     fontWeight: FontWeight.bold,
   },
 });

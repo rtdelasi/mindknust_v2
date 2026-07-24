@@ -3,15 +3,31 @@
   --font-rounded: 'Avenir Next Rounded', 'SF Pro Rounded', 'Segoe UI', sans-serif;
   --font-serif: Georgia, 'Times New Roman', serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+  --bg: #FAFAFA;
+  --surface: #FFFFFF;
+  --text: #1A1A1A;
+  --text-secondary: #6B7280;
 }
 
 html,
 body {
-  background: #f7f1e8;
+  background: var(--bg);
 }
 
 body {
   margin: 0;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0B0F14;
+    --surface: #111722;
+    --text: #F8FAFC;
+    --text-secondary: #CBD5E1;
+  }
+  html, body {
+    background: var(--bg);
+  }
 }

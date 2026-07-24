@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, Alert } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, Alert, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/avatar';
@@ -16,6 +16,7 @@ import {
   Spacing,
 } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useThemeContext } from '@/contexts/theme-context';
 import { useMockAuth } from '@/lib/mock-auth-store';
 
 type AvailabilityStatus = 'online' | 'busy' | 'offline';
@@ -25,6 +26,7 @@ export default function CounselorProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { logout, userName, avatarUrl } = useMockAuth();
+  const { mode: themeMode, setMode: setThemeMode } = useThemeContext();
 
   const cName = userName || 'Kwame Ampofo';
 
@@ -127,6 +129,27 @@ export default function CounselorProfileScreen() {
             <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>TRUST & LICENSING</Text>
           </View>
           <VerificationPanel />
+
+          {/* Dark Mode Toggle */}
+          <View style={styles.sectionDivider}>
+            <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>APPEARANCE</Text>
+          </View>
+          <Card variant="surface" padding="three" style={{ borderRadius: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+                  <MaterialCommunityIcons name="theme-light-dark" size={18} color="#CBD5E1" />
+                </View>
+                <Text style={{ fontSize: 15, fontWeight: '500', color: theme.text }}>Dark Mode</Text>
+              </View>
+              <Switch
+                value={themeMode === 'dark'}
+                onValueChange={(val) => setThemeMode(val ? 'dark' : 'light')}
+                trackColor={{ true: theme.primary, false: theme.surfaceMuted }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </Card>
 
           {/* Actions */}
           <View style={styles.actionsBox}>

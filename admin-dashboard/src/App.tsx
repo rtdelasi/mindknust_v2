@@ -114,6 +114,7 @@ export default function App() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [flaggedContent, setFlaggedContent] = useState<FlaggedContent[]>([]);
+  const [counselorApps, setCounselorApps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Flagged Content sub-filter
@@ -188,6 +189,16 @@ export default function App() {
         .order('created_at', { ascending: false });
       setFlaggedContent((flagData || []) as FlaggedContent[]);
 
+      // 7. Fetch pending counselor applications
+      const { data: cAppData } = await supabase
+        .from('counselor_profiles')
+        .select(`
+          *,
+          profile:profiles!user_id(name, email, avatar_url)
+        `)
+        .order('created_at', { ascending: false });
+      setCounselorApps(cAppData || []);
+
     } catch (err) {
       console.error('Error fetching database tables:', err);
     } finally {
@@ -254,6 +265,37 @@ export default function App() {
     }
   };
 
+  const handleApproveCounselorApp = async (userId: string) => {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase
+        .from('counselor_profiles')
+        .update({ approval_status: 'approved', reviewed_at: new Date().toISOString() })
+        .eq('user_id', userId);
+      if (error) throw error;
+      alert('Counselor application approved!');
+      loadData();
+    } catch (err: any) {
+      alert('Approval error: ' + err.message);
+    }
+  };
+
+  const handleRejectCounselorApp = async (userId: string) => {
+    if (!supabase) return;
+    const reason = window.prompt('Enter rejection reason for applicant:') || '';
+    try {
+      const { error } = await supabase
+        .from('counselor_profiles')
+        .update({ approval_status: 'rejected', rejection_reason: reason, reviewed_at: new Date().toISOString() })
+        .eq('user_id', userId);
+      if (error) throw error;
+      alert('Counselor application set to rejected.');
+      loadData();
+    } catch (err: any) {
+      alert('Rejection error: ' + err.message);
+    }
+  };
+
   // Counselors actions
   const handleApproveAppointment = async (apptId: string) => {
     try {
@@ -267,6 +309,21 @@ export default function App() {
       );
     } catch (err: any) {
       alert('Update failed: ' + err.message);
+    }
+  };
+
+  const handleDeclineAppointment = async (apptId: string) => {
+    try {
+      const { error } = await supabase
+        .from('appointments')
+        .update({ status: 'declined' })
+        .eq('id', apptId);
+      if (error) throw error;
+      setAppointments(prev =>
+        prev.map(a => a.id === apptId ? { ...a, status: 'declined' } : a)
+      );
+    } catch (err: any) {
+      alert('Decline failed: ' + err.message);
     }
   };
 
@@ -1003,6 +1060,87 @@ export default function App() {
               {/* TAB 4: COUNSELORS & APPOINTMENT SLOTS APPROVAL */}
               {activeTab === 'counselors' && (
                 <div className="space-y-6">
+                  {/* Counselor Applications Review Table */}
+                  <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
+                    <h4 className="font-bold text-slate-200 mb-4 flex items-center gap-2">
+                      <UserCheck className="w-4 h-4 text-brand-500" />
+                      Counselor Applications Approvals Queue
+                    </h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-slate-400 text-xs font-semibold uppercase">
+                            <th className="py-3 px-4">Applicant</th>
+                            <th className="py-3 px-4">License #</th>
+                            <th className="py-3 px-4">Qualification</th>
+                            <th className="py-3 px-4">Specializations</th>
+                            <th className="py-3 px-4">Status</th>
+                            <th className="py-3 px-4 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {counselorApps.map((cApp) => (
+                            <tr key={cApp.user_id} className="border-b border-slate-850 hover:bg-slate-800/20 transition-colors">
+                              <td className="py-3.5 px-4 font-semibold text-sm text-slate-200">
+                                {cApp.profile?.name || cApp.user_id}
+                                <div className="text-xs text-slate-500 font-normal">{cApp.profile?.email}</div>
+                              </td>
+                              <td className="py-3.5 px-4 font-mono text-xs text-slate-300">
+                                {cApp.license_number}
+                              </td>
+                              <td className="py-3.5 px-4 text-slate-300 text-xs">
+                                {cApp.qualification}
+                              </td>
+                              <td className="py-3.5 px-4 text-slate-300 text-xs">
+                                {Array.isArray(cApp.specializations) ? cApp.specializations.join(', ') : cApp.specializations}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                  cApp.approval_status === 'approved'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                    : cApp.approval_status === 'rejected'
+                                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                }`}>
+                                  {cApp.approval_status || 'pending'}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-right">
+                                <div className="inline-flex items-center justify-end gap-2">
+                                  {cApp.approval_status !== 'approved' && (
+                                    <button
+                                      onClick={() => handleApproveCounselorApp(cApp.user_id)}
+                                      className="bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs px-3.5 py-1.5 rounded-lg shadow-sm shadow-brand-600/30 transition-all inline-flex items-center gap-1.5 active:scale-95"
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5" />
+                                      Approve
+                                    </button>
+                                  )}
+                                  {cApp.approval_status !== 'rejected' && (
+                                    <button
+                                      onClick={() => handleRejectCounselorApp(cApp.user_id)}
+                                      className="bg-transparent border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 font-semibold text-xs px-3.5 py-1.5 rounded-lg transition-all inline-flex items-center gap-1.5 active:scale-95"
+                                    >
+                                      <Ban className="w-3.5 h-3.5" />
+                                      Reject
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                          {counselorApps.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="py-8 text-center text-slate-500 text-xs italic">
+                                No pending counselor applications in review queue.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
                   {/* Appointment approval table */}
                   <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
                     <h4 className="font-bold text-slate-200 mb-4 flex items-center gap-2">
@@ -1036,22 +1174,46 @@ export default function App() {
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
                                   appt.status === 'approved'
                                     ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                    : 'bg-amber-500/10 text-amber-400 border border-emerald-500/20'
+                                    : appt.status === 'declined'
+                                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                                 }`}>
                                   {appt.status}
                                 </span>
                               </td>
                               <td className="py-3.5 px-4 text-right">
-                                {appt.status === 'pending' ? (
-                                  <button
-                                    onClick={() => handleApproveAppointment(appt.id)}
-                                    className="bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
-                                  >
-                                    Approve Slot
-                                  </button>
-                                ) : (
-                                  <span className="text-slate-500 text-xs">Approved</span>
-                                )}
+                                <div className="inline-flex items-center justify-end gap-2">
+                                  {appt.status !== 'approved' && (
+                                    <button
+                                      onClick={() => handleApproveAppointment(appt.id)}
+                                      className="bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs px-3.5 py-1.5 rounded-lg shadow-sm shadow-brand-600/30 transition-all inline-flex items-center gap-1.5 active:scale-95"
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5" />
+                                      Approve Slot
+                                    </button>
+                                  )}
+                                  {appt.status !== 'declined' && appt.status !== 'approved' && (
+                                    <button
+                                      onClick={() => handleDeclineAppointment(appt.id)}
+                                      className="bg-transparent border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 font-semibold text-xs px-3.5 py-1.5 rounded-lg transition-all inline-flex items-center gap-1.5 active:scale-95"
+                                    >
+                                      <Ban className="w-3.5 h-3.5" />
+                                      Decline Slot
+                                    </button>
+                                  )}
+                                  {appt.status === 'approved' && (
+                                    <span className="inline-flex items-center gap-1 text-emerald-400 text-xs font-semibold">
+                                      <CheckCircle className="w-3.5 h-3.5" />
+                                      Approved
+                                    </span>
+                                  )}
+                                  {appt.status === 'declined' && (
+                                    <span className="inline-flex items-center gap-1 text-rose-400 text-xs font-semibold">
+                                      <Ban className="w-3.5 h-3.5" />
+                                      Declined
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}

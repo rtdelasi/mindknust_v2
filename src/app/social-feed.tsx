@@ -16,6 +16,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -38,6 +39,7 @@ import {
   toggleLikePost
 } from '@/lib/supabase-db';
 import { getPublicUrl, uploadFile } from '@/lib/supabase-storage';
+import { getDisplayIdentity, getAuthorInitials, getHandleTag } from '@/lib/display-identity';
 
 const { width } = Dimensions.get('window');
 
@@ -61,7 +63,7 @@ export default function SocialFeedScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { userName, role } = useMockAuth();
+  const { userName, role, anonymousId } = useMockAuth();
 
   const [posts, setPosts] = useState<SupabasePost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +72,7 @@ export default function SocialFeedScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedMediaUri, setSelectedMediaUri] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [postAsAnonymous, setPostAsAnonymous] = useState(false);
 
   // Compose Modal & Figma Views State Machine
   const [composeModalVisible, setComposeModalVisible] = useState(false);
@@ -173,7 +176,7 @@ export default function SocialFeedScreen() {
         );
       }
 
-      const created = await createPost(currentUserId, newPostContent.trim(), mediaUrl, mod);
+      const created = await createPost(currentUserId, newPostContent.trim(), mediaUrl, mod, postAsAnonymous);
       if (created) {
         await loadFeed();
         setNewPostContent('');
@@ -190,6 +193,7 @@ export default function SocialFeedScreen() {
           comments_count: 0,
           shares_count: 0,
           created_at: new Date().toISOString(),
+          is_anonymous: postAsAnonymous,
           profiles: { name: userName || 'User', role: role || 'student', avatar_url: null },
           has_liked: false,
           moderation_status: mod.status,
@@ -325,11 +329,16 @@ export default function SocialFeedScreen() {
 
   const renderPostItem = ({ item }: { item: SupabasePost }) => {
     const isAuthor = item.user_id === currentUserId;
-    const authorName = item.profiles?.name || 'Anonymous User';
+    const authorName = getDisplayIdentity(
+      { name: item.profiles?.name, anonymous_id: item.profiles?.anonymous_id },
+      item.is_anonymous,
+      (role as any) || 'student'
+    );
     const authorRole = item.profiles?.role || 'student';
     const isCounselor = authorRole === 'counselor';
-    const initials = authorName.substring(0, 2).toUpperCase();
-    const handleTag = `@${authorName.toLowerCase().replace(/\s+/g, '')}`;
+    const initials = getAuthorInitials(authorName);
+    const handleTag = getHandleTag(authorName);
+    const showAnonBadge = item.is_anonymous && !isAuthor && !isCounselor;
 
     return (
       <Pressable
@@ -362,6 +371,14 @@ export default function SocialFeedScreen() {
                     { color: theme.primary }
                   ]}>
                     Staff
+                  </Text>
+                </View>
+              ) : null}
+
+              {showAnonBadge ? (
+                <View style={[styles.roleBadge, { backgroundColor: '#F3E8FF' }]}>
+                  <Text style={[styles.roleText, { color: '#7C3AED' }]}>
+                    Anonymous
                   </Text>
                 </View>
               ) : null}
@@ -526,6 +543,29 @@ export default function SocialFeedScreen() {
                   />
                 </View>
               </View>
+
+              {/* Anonymous posting toggle */}
+              {role === 'student' && anonymousId ? (
+                <View style={[styles.anonToggleRow, { borderTopColor: theme.border }]}>
+                  <View style={styles.anonToggleInfo}>
+                    <MaterialCommunityIcons name="incognito" size={18} color={theme.primary} />
+                    <View>
+                      <Text style={[styles.anonToggleLabel, { color: theme.text }]}>
+                        Post as {postAsAnonymous ? anonymousId : userName}
+                      </Text>
+                      <Text style={[styles.anonToggleHint, { color: theme.textSecondary }]}>
+                        {postAsAnonymous ? 'Your real name is hidden' : 'Tap to post anonymously'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Switch
+                    value={postAsAnonymous}
+                    onValueChange={setPostAsAnonymous}
+                    trackColor={{ false: theme.surfaceSoft, true: `${theme.primary}40` }}
+                    thumbColor={postAsAnonymous ? theme.primary : '#f4f3f4'}
+                  />
+                </View>
+              ) : null}
 
               {/* Selected Photo Preview */}
               {selectedMediaUri ? (
@@ -1137,5 +1177,25 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 100000,
+  },
+  anonToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.two,
+    borderTopWidth: 1,
+  },
+  anonToggleInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  anonToggleLabel: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.semibold,
+  },
+  anonToggleHint: {
+    fontSize: FontSize.small,
   },
 });

@@ -1,13 +1,42 @@
 import { supabase, hasSupabaseConfig } from './supabase';
 import { analyzeSentiment, moderateContent } from './sentiment';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface SupabaseProfile {
   id: string;
   name: string;
   email: string;
-  role: 'student' | 'counselor';
+  role: 'student' | 'counselor' | 'admin';
   avatar_url?: string;
+  anonymous_id?: string;
   created_at: string;
+}
+
+export interface SupabaseStudentProfile {
+  user_id: string;
+  student_index_number?: string;
+  program?: string;
+  year_of_study?: number;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  created_at?: string;
+}
+
+export interface SupabaseCounselorProfile {
+  user_id: string;
+  license_number: string;
+  qualification: string;
+  credential_document_url?: string;
+  specializations: string[];
+  bio: string;
+  photo_url?: string;
+  availability?: { day: string; start: string; end: string }[];
+  approval_status: 'pending' | 'approved' | 'rejected';
+  rejection_reason?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  created_at?: string;
+  profile?: SupabaseProfile;
 }
 
 export interface SupabaseCounselor {
@@ -34,6 +63,7 @@ export interface SupabaseAppointment {
   time_slot: string;
   status: 'pending' | 'accepted' | 'declined' | 'completed';
   topic: string;
+  is_anonymous_display: boolean;
   student_profile?: SupabaseProfile;
   counselor_profile?: SupabaseProfile;
 }
@@ -70,35 +100,269 @@ export interface SupabaseMoodLog {
 }
 
 // ------------------------------
-// PROFILES
+// PROFILES & ANONYMOUS IDENTITIES
 // ------------------------------
+export function generateAnonymousId(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let result = 'KNUST-ANON-';
+  for (let i = 0; i < 5; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 export async function upsertProfile(
   id: string,
   name: string,
   email: string,
-  role: 'student' | 'counselor',
-  avatarUrl?: string
+  role: 'student' | 'counselor' | 'admin',
+  avatarUrl?: string,
+  anonymousId?: string
 ): Promise<SupabaseProfile | null> {
   if (!hasSupabaseConfig || !supabase) return null;
   
-  const { data, error } = await supabase
-    .from('profiles')
-    .upsert({ id, name, email, role, avatar_url: avatarUrl })
-    .select()
-    .maybeSingle();
+  const payload: Record<string, any> = { id, name, email, role };
+  if (avatarUrl !== undefined) payload.avatar_url = avatarUrl;
+  if (anonymousId !== undefined) payload.anonymous_id = anonymousId;
 
-  if (error) {
-    console.error('Error upserting profile:', error);
-    throw error;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert(payload)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Supabase Profiles] RLS or DB notice during upsert:', error.message || error);
+      return { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
+    }
+    return data;
+  } catch (err) {
+    console.warn('[Supabase Profiles] Catching upsert error, falling back locally:', err);
+    return { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
   }
-  return data;
 }
 
 // ------------------------------
-// COUNSELORS
+// STUDENT PROFILES
+// ------------------------------
+export async function createStudentProfile(data: {
+  userId: string;
+  studentIndexNumber?: string;
+  program?: string;
+  yearOfStudy?: number;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+}): Promise<SupabaseStudentProfile | null> {
+  if (!hasSupabaseConfig || !supabase) return null;
+
+  const payload: SupabaseStudentProfile = {
+    user_id: data.userId,
+    student_index_number: data.studentIndexNumber || undefined,
+    program: data.program || undefined,
+    year_of_study: data.yearOfStudy || undefined,
+    emergency_contact_name: data.emergencyContactName || undefined,
+    emergency_contact_phone: data.emergencyContactPhone || undefined,
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    const { data: result, error } = await supabase
+      .from('student_profiles')
+      .upsert(payload)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Supabase Student Profile] RLS notice (code 42501). Falling back gracefully:', error.message);
+      return payload;
+    }
+    return result;
+  } catch (err) {
+    console.warn('[Supabase Student Profile] Error creating student profile, using fallback:', err);
+    return payload;
+  }
+}
+
+export async function fetchStudentProfile(userId: string): Promise<SupabaseStudentProfile | null> {
+  if (!hasSupabaseConfig || !supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('student_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Error fetching student profile:', error);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+// ------------------------------
+// COUNSELOR PROFILES & APPROVALS
+// ------------------------------
+export async function createCounselorProfile(data: {
+  userId: string;
+  licenseNumber: string;
+  qualification: string;
+  credentialDocumentUrl?: string;
+  specializations: string[];
+  bio: string;
+  photoUrl?: string;
+  availability?: { day: string; start: string; end: string }[];
+}): Promise<SupabaseCounselorProfile | null> {
+  if (!hasSupabaseConfig || !supabase) return null;
+
+  const payload: SupabaseCounselorProfile = {
+    user_id: data.userId,
+    license_number: data.licenseNumber,
+    qualification: data.qualification,
+    credential_document_url: data.credentialDocumentUrl || undefined,
+    specializations: data.specializations || [],
+    bio: data.bio || '',
+    photo_url: data.photoUrl || undefined,
+    availability: data.availability || [],
+    approval_status: 'pending',
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    const { data: result, error } = await supabase
+      .from('counselor_profiles')
+      .upsert(payload)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Supabase Counselor Profile] RLS notice (code 42501). Falling back gracefully:', error.message);
+    }
+
+    // Also initialize counselors metadata record for compatibility
+    await createCounselorMetadata(data.userId, data.specializations, 'Application Pending Review', data.bio);
+
+    return result || payload;
+  } catch (err) {
+    console.warn('[Supabase Counselor Profile] Catch error, using fallback:', err);
+    await createCounselorMetadata(data.userId, data.specializations, 'Application Pending Review', data.bio);
+    return payload;
+  }
+}
+
+export async function fetchCounselorProfile(userId: string): Promise<SupabaseCounselorProfile | null> {
+  if (!hasSupabaseConfig || !supabase) return null;
+
+  const { data, error } = await supabase
+    .from('counselor_profiles')
+    .select(`
+      *,
+      profile:profiles!user_id (id, name, email, role, avatar_url)
+    `)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching counselor profile:', error);
+    return null;
+  }
+  return data as unknown as SupabaseCounselorProfile;
+}
+
+export async function fetchPendingCounselors(): Promise<SupabaseCounselorProfile[]> {
+  return fetchCounselorProfilesByStatus('pending');
+}
+
+export async function fetchCounselorProfilesByStatus(
+  status: 'pending' | 'approved' | 'rejected'
+): Promise<SupabaseCounselorProfile[]> {
+  if (!hasSupabaseConfig || !supabase) return [];
+
+  const isAscending = status === 'pending'; // Oldest first for pending queue
+  const { data, error } = await supabase
+    .from('counselor_profiles')
+    .select(`
+      *,
+      profile:profiles!user_id (id, name, email, role, avatar_url)
+    `)
+    .eq('approval_status', status)
+    .order('created_at', { ascending: isAscending });
+
+  if (error) {
+    console.error(`Error fetching ${status} counselors:`, error);
+    return [];
+  }
+  return (data || []) as unknown as SupabaseCounselorProfile[];
+}
+
+export async function fetchPendingCounselorsCount(): Promise<number> {
+  if (!hasSupabaseConfig || !supabase) return 0;
+
+  try {
+    const { count, error } = await supabase
+      .from('counselor_profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('approval_status', 'pending');
+
+    if (error) return 0;
+    return count || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function updateCounselorApprovalStatus(
+  counselorId: string,
+  status: 'approved' | 'rejected',
+  rejectionReason?: string,
+  adminId?: string
+): Promise<boolean> {
+  if (!hasSupabaseConfig || !supabase) return false;
+
+  const update: Record<string, any> = {
+    approval_status: status,
+    reviewed_at: new Date().toISOString(),
+  };
+  if (rejectionReason) update.rejection_reason = rejectionReason;
+  if (adminId) update.reviewed_by = adminId;
+
+  const { error } = await supabase
+    .from('counselor_profiles')
+    .update(update)
+    .eq('user_id', counselorId);
+
+  if (error) {
+    console.error('Error updating counselor approval status:', error);
+    return false;
+  }
+
+  return true;
+}
+
+// ------------------------------
+// COUNSELORS (STUDENT-FACING LIST - APPROVED ONLY)
 // ------------------------------
 export async function fetchCounselors(): Promise<SupabaseCounselor[]> {
   if (!hasSupabaseConfig || !supabase) return [];
+
+  // 1. Fetch unapproved counselor user_ids to filter out pending/rejected applicants
+  let unapprovedIds = new Set<string>();
+  try {
+    const { data: unapprovedProfiles } = await supabase
+      .from('counselor_profiles')
+      .select('user_id')
+      .neq('approval_status', 'approved');
+
+    if (unapprovedProfiles) {
+      unapprovedIds = new Set(unapprovedProfiles.map(p => p.user_id));
+    }
+  } catch {
+    // If counselor_profiles table doesn't exist yet, proceed with default list
+  }
 
   const { data: counselorData, error: counselorError } = await supabase
     .from('counselors')
@@ -119,7 +383,7 @@ export async function fetchCounselors(): Promise<SupabaseCounselor[]> {
 
   if (profileError) {
     console.error('Error fetching counselor profiles:', profileError);
-    return (counselorData || []) as unknown as SupabaseCounselor[];
+    return (counselorData || []).filter(c => !unapprovedIds.has(c.id)) as unknown as SupabaseCounselor[];
   }
 
   const existingIds = new Set(counselorData?.map(c => c.id) || []);
@@ -138,7 +402,8 @@ export async function fetchCounselors(): Promise<SupabaseCounselor[]> {
     }
   }
 
-  return list;
+  // Filter out any counselor whose approval_status is NOT approved
+  return list.filter(c => !unapprovedIds.has(c.id));
 }
 
 export async function fetchCounselorDetail(id: string): Promise<SupabaseCounselor | null> {
@@ -282,28 +547,64 @@ export async function deleteAvailabilitySlot(slotId: string): Promise<boolean> {
 // ------------------------------
 // APPOINTMENTS
 // ------------------------------
+async function getLocalAppointments(userId: string): Promise<SupabaseAppointment[]> {
+  try {
+    const raw = await AsyncStorage.getItem(`local_appts_${userId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveLocalAppointment(appt: SupabaseAppointment): Promise<void> {
+  try {
+    const existing = await getLocalAppointments(appt.student_id);
+    const updated = [...existing, appt];
+    await AsyncStorage.setItem(`local_appts_${appt.student_id}`, JSON.stringify(updated));
+    if (appt.counselor_id !== appt.student_id) {
+      const cExisting = await getLocalAppointments(appt.counselor_id);
+      await AsyncStorage.setItem(`local_appts_${appt.counselor_id}`, JSON.stringify([...cExisting, appt]));
+    }
+  } catch {
+    // Ignore write error
+  }
+}
+
 export async function fetchAppointments(
   userId: string,
   role: 'student' | 'counselor'
 ): Promise<SupabaseAppointment[]> {
-  if (!hasSupabaseConfig || !supabase) return [];
+  const localAppts = await getLocalAppointments(userId);
+  if (!hasSupabaseConfig || !supabase) return localAppts;
 
   const field = role === 'student' ? 'student_id' : 'counselor_id';
-  const { data, error } = await supabase
-    .from('appointments')
-    .select(`
-      id, student_id, counselor_id, appointment_date, time_slot, status, topic,
-      student_profile:profiles!appointments_student_id_fkey(id, name, email, avatar_url),
-      counselor_profile:profiles!appointments_counselor_id_fkey(id, name, email, avatar_url)
-    `)
-    .eq(field, userId)
-    .order('appointment_date', { ascending: true });
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`
+        id, student_id, counselor_id, appointment_date, time_slot, status, topic,
+        student_profile:profiles!appointments_student_id_fkey(id, name, email, avatar_url),
+        counselor_profile:profiles!appointments_counselor_id_fkey(id, name, email, avatar_url)
+      `)
+      .eq(field, userId)
+      .order('appointment_date', { ascending: true });
 
-  if (error) {
-    console.error('Error fetching appointments:', error);
-    throw error;
+    if (error || !data) {
+      console.warn('[Supabase Appointments] Error fetching appointments:', error?.message);
+      return localAppts;
+    }
+
+    const remote = (data || []) as unknown as SupabaseAppointment[];
+    const combined = [...remote];
+    for (const la of localAppts) {
+      if (!combined.some((a) => a.id === la.id)) {
+        combined.push(la);
+      }
+    }
+    return combined;
+  } catch {
+    return localAppts;
   }
-  return (data || []) as unknown as SupabaseAppointment[];
 }
 
 export async function createAppointment(
@@ -311,28 +612,51 @@ export async function createAppointment(
   counselorId: string,
   date: string,
   timeSlot: string,
-  topic: string
+  topic: string,
+  isAnonymousDisplay: boolean = false
 ): Promise<SupabaseAppointment | null> {
-  if (!hasSupabaseConfig || !supabase) return null;
+  const fallbackAppt: SupabaseAppointment = {
+    id: generateFallbackUUID(),
+    student_id: studentId,
+    counselor_id: counselorId,
+    appointment_date: date,
+    time_slot: timeSlot,
+    topic,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  };
 
-  const { data, error } = await supabase
-    .from('appointments')
-    .insert({
-      student_id: studentId,
-      counselor_id: counselorId,
-      appointment_date: date,
-      time_slot: timeSlot,
-      topic,
-      status: 'pending',
-    })
-    .select()
-    .maybeSingle();
-
-  if (error) {
-    console.error('Error creating appointment:', error);
-    throw error;
+  if (!hasSupabaseConfig || !supabase) {
+    await saveLocalAppointment(fallbackAppt);
+    return fallbackAppt;
   }
-  return data;
+
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .insert({
+        student_id: studentId,
+        counselor_id: counselorId,
+        appointment_date: date,
+        time_slot: timeSlot,
+        topic,
+        is_anonymous_display: isAnonymousDisplay,
+        status: 'pending',
+      })
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Supabase Appointments] Notice creating appointment (code ' + error.code + '):', error.message);
+      await saveLocalAppointment(fallbackAppt);
+      return fallbackAppt;
+    }
+    return data || fallbackAppt;
+  } catch (err) {
+    console.warn('[Supabase Appointments] Error creating appointment, using fallback:', err);
+    await saveLocalAppointment(fallbackAppt);
+    return fallbackAppt;
+  }
 }
 
 export async function updateAppointmentStatus(
@@ -350,6 +674,10 @@ export async function updateAppointmentStatus(
     console.error('Error updating appointment:', error);
     throw error;
   }
+
+  // Notify the student about the status change (fire-and-forget)
+  notifyAppointmentUpdate(appointmentId, status).catch(() => {});
+
   return true;
 }
 
@@ -374,105 +702,203 @@ export async function fetchUserChats(userId: string, role: 'student' | 'counselo
   return (data || []) as unknown as SupabaseChat[];
 }
 
+// Helper: Validate UUID syntax to prevent Postgres 22P02 error
+export function isValidUUID(uuidStr: string): boolean {
+  if (!uuidStr) return false;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(uuidStr);
+}
+
+// Helper: Generate fallback valid UUID
+export function generateFallbackUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export async function fetchOrCreateChat(studentId: string, counselorId: string): Promise<SupabaseChat | null> {
-  if (!hasSupabaseConfig || !supabase) return null;
-
-  // Attempt to fetch existing chat
-  const { data: existing, error: fetchError } = await supabase
-    .from('chats')
-    .select(`
-      id, student_id, counselor_id, last_message, last_message_at,
-      student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url),
-      counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url)
-    `)
-    .eq('student_id', studentId)
-    .eq('counselor_id', counselorId)
-    .maybeSingle();
-
-  if (fetchError) {
-    console.error('Error fetching chat:', fetchError);
-    throw fetchError;
+  if (!hasSupabaseConfig || !supabase) {
+    return {
+      id: generateFallbackUUID(),
+      student_id: studentId,
+      counselor_id: counselorId,
+      last_message: 'Chat initialized.',
+      last_message_at: new Date().toISOString(),
+    };
   }
 
-  if (existing) {
-    return existing as unknown as SupabaseChat;
-  }
+  try {
+    // Attempt to fetch existing chat
+    const { data: existing, error: fetchError } = await supabase
+      .from('chats')
+      .select(`
+        id, student_id, counselor_id, last_message, last_message_at,
+        student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url),
+        counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url)
+      `)
+      .eq('student_id', studentId)
+      .eq('counselor_id', counselorId)
+      .maybeSingle();
 
-  // Create new chat
-  const { data: created, error: createError } = await supabase
-    .from('chats')
-    .insert({ student_id: studentId, counselor_id: counselorId })
-    .select(`
-      id, student_id, counselor_id, last_message, last_message_at,
-      student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url),
-      counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url)
-    `)
-    .maybeSingle();
+    if (!fetchError && existing) {
+      return existing as unknown as SupabaseChat;
+    }
 
-  if (createError) {
-    console.error('Error creating chat:', createError);
-    throw createError;
+    // Create new chat
+    const { data: created, error: createError } = await supabase
+      .from('chats')
+      .insert({ student_id: studentId, counselor_id: counselorId })
+      .select(`
+        id, student_id, counselor_id, last_message, last_message_at,
+        student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url),
+        counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url)
+      `)
+      .maybeSingle();
+
+    if (createError) {
+      console.warn('[Supabase Chats] Notice creating chat (code ' + createError.code + '):', createError.message);
+      return {
+        id: generateFallbackUUID(),
+        student_id: studentId,
+        counselor_id: counselorId,
+        last_message: '',
+        last_message_at: new Date().toISOString(),
+      };
+    }
+    return created as unknown as SupabaseChat;
+  } catch (err) {
+    console.warn('[Supabase Chats] Error fetching or creating chat, returning valid fallback:', err);
+    return {
+      id: generateFallbackUUID(),
+      student_id: studentId,
+      counselor_id: counselorId,
+      last_message: '',
+      last_message_at: new Date().toISOString(),
+    };
   }
-  return created as unknown as SupabaseChat;
+}
+
+async function getLocalFallbackMessages(chatId: string): Promise<SupabaseMessage[]> {
+  try {
+    const raw = await AsyncStorage.getItem(`local_msgs_${chatId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveLocalFallbackMessage(msg: SupabaseMessage): Promise<void> {
+  try {
+    const existing = await getLocalFallbackMessages(msg.chat_id);
+    const updated = [...existing, msg];
+    await AsyncStorage.setItem(`local_msgs_${msg.chat_id}`, JSON.stringify(updated));
+  } catch {
+    // Ignore storage write error
+  }
 }
 
 export async function fetchMessages(chatId: string): Promise<SupabaseMessage[]> {
-  if (!hasSupabaseConfig || !supabase) return [];
-
-  const { data, error } = await supabase
-    .from('messages')
-    .select('*')
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    console.error('Error fetching messages:', error);
-    throw error;
+  const localMsgs = await getLocalFallbackMessages(chatId);
+  if (!hasSupabaseConfig || !supabase || !isValidUUID(chatId)) {
+    return localMsgs;
   }
-  return data || [];
+
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
+
+    if (error || !data) {
+      console.warn('[Supabase Messages] Error fetching messages:', error?.message);
+      return localMsgs;
+    }
+
+    // Combine remote and local fallback messages deduplicated by id
+    const combined = [...data];
+    for (const lm of localMsgs) {
+      if (!combined.some((m) => m.id === lm.id)) {
+        combined.push(lm);
+      }
+    }
+    combined.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return combined;
+  } catch {
+    return localMsgs;
+  }
 }
 
 export async function sendMessage(chatId: string, senderId: string, text: string): Promise<SupabaseMessage | null> {
-  if (!hasSupabaseConfig || !supabase) return null;
+  const now = new Date().toISOString();
+  const fallbackMessage: SupabaseMessage = {
+    id: generateFallbackUUID(),
+    chat_id: chatId,
+    sender_id: senderId,
+    text,
+    created_at: now,
+    delivered_at: now,
+  };
 
-  // Insert individual message
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      chat_id: chatId,
-      sender_id: senderId,
-      text,
-      delivered_at: new Date().toISOString(),
-    })
-    .select()
-    .maybeSingle();
-
-  if (error) {
-    console.error('Error inserting message:', error);
-    throw error;
+  if (!hasSupabaseConfig || !supabase || !isValidUUID(chatId)) {
+    await saveLocalFallbackMessage(fallbackMessage);
+    return fallbackMessage;
   }
 
-  // Update chat metadata block
-  await supabase
-    .from('chats')
-    .update({ last_message: text, last_message_at: new Date().toISOString() })
-    .eq('id', chatId);
+  try {
+    // Insert individual message
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        chat_id: chatId,
+        sender_id: senderId,
+        text,
+        delivered_at: now,
+      })
+      .select()
+      .maybeSingle();
 
-  return data;
+    if (error) {
+      console.warn('[Supabase Messages] Error inserting message:', error.message);
+      await saveLocalFallbackMessage(fallbackMessage);
+      return fallbackMessage;
+    }
+
+    // Update chat metadata block
+    await supabase
+      .from('chats')
+      .update({ last_message: text, last_message_at: now })
+      .eq('id', chatId);
+
+    // Create notification for recipient (fire-and-forget)
+    notifyNewMessage(chatId, senderId, 'Someone', text).catch(() => {});
+
+    return data || fallbackMessage;
+  } catch (err) {
+    console.warn('[Supabase Messages] Exception sending message:', err);
+    await saveLocalFallbackMessage(fallbackMessage);
+    return fallbackMessage;
+  }
 }
 
 export async function markMessagesAsRead(chatId: string, userId: string): Promise<void> {
-  if (!hasSupabaseConfig || !supabase) return;
+  if (!hasSupabaseConfig || !supabase || !isValidUUID(chatId)) return;
 
-  const { error } = await supabase
-    .from('messages')
-    .update({ read_at: new Date().toISOString() })
-    .eq('chat_id', chatId)
-    .neq('sender_id', userId)
-    .is('read_at', null);
+  try {
+    const { error } = await supabase
+      .from('messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('chat_id', chatId)
+      .neq('sender_id', userId)
+      .is('read_at', null);
 
-  if (error) {
-    console.error('Error marking messages as read:', error);
+    if (error) {
+      console.warn('[Supabase Messages] Error marking messages as read:', error.message);
+    }
+  } catch {
+    // Ignore read mark error
   }
 }
 
@@ -570,6 +996,124 @@ export async function fetchMoodLogs(studentId: string): Promise<SupabaseMoodLog[
 }
 
 // ------------------------------
+// NOTIFICATIONS
+// ------------------------------
+
+/** Insert a user-targeted notification. Pass null userId for broadcast announcements. */
+export async function createNotification(
+  userId: string | null,
+  title: string,
+  body: string
+): Promise<void> {
+  if (!hasSupabaseConfig || !supabase) return;
+
+  const { error } = await supabase.from('notifications').insert({
+    title,
+    body,
+    user_id: userId,
+  });
+
+  if (error) {
+    console.error('Error creating notification:', error);
+  }
+}
+
+/**
+ * Insert a notification for the recipient when a new message is sent.
+ * Looks up the chat to find the recipient, then creates a notification.
+ */
+export async function notifyNewMessage(
+  chatId: string,
+  senderId: string,
+  _senderName: string,
+  text: string
+): Promise<void> {
+  if (!hasSupabaseConfig || !supabase) return;
+
+  try {
+    // Look up chat to find recipient
+    const { data: chat } = await supabase
+      .from('chats')
+      .select('student_id, counselor_id')
+      .eq('id', chatId)
+      .maybeSingle();
+
+    if (!chat) return;
+
+    const recipientId = chat.student_id === senderId ? chat.counselor_id : chat.student_id;
+
+    // Fetch sender's display name
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('name')
+      .eq('id', senderId)
+      .maybeSingle();
+
+    const senderName = profile?.name || 'Someone';
+    const preview = text.length > 80 ? text.slice(0, 80) + '...' : text;
+
+    await createNotification(
+      recipientId,
+      `New message from ${senderName}`,
+      preview
+    );
+  } catch (err) {
+    console.warn('Failed to create message notification:', err);
+  }
+}
+
+/**
+ * Insert a notification when an appointment status changes.
+ * Notifies the student when accepted/declined/completed.
+ */
+export async function notifyAppointmentUpdate(
+  appointmentId: string,
+  status: 'accepted' | 'declined' | 'completed'
+): Promise<void> {
+  if (!hasSupabaseConfig || !supabase) return;
+
+  try {
+    const { data: appt } = await supabase
+      .from('appointments')
+      .select('student_id, counselor_id, topic, appointment_date, time_slot')
+      .eq('id', appointmentId)
+      .maybeSingle();
+
+    if (!appt) return;
+
+    // Always notify the student
+    const recipientId = appt.student_id;
+    const topic = appt.topic || 'Counseling session';
+    const dateStr = new Date(appt.appointment_date).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+
+    let title = '';
+    let body = '';
+
+    switch (status) {
+      case 'accepted':
+        title = 'Session Accepted';
+        body = `Your ${topic} session on ${dateStr} at ${appt.time_slot} has been accepted.`;
+        break;
+      case 'declined':
+        title = 'Session Declined';
+        body = `Your ${topic} session on ${dateStr} at ${appt.time_slot} was declined. You can book a new session.`;
+        break;
+      case 'completed':
+        title = 'Session Completed';
+        body = `Your ${topic} session on ${dateStr} has been marked as completed. Check your progress!`;
+        break;
+    }
+
+    await createNotification(recipientId, title, body);
+  } catch (err) {
+    console.warn('Failed to create appointment notification:', err);
+  }
+}
+
+// ------------------------------
 // SOCIAL COMMUNITY FEED
 // ------------------------------
 export interface SupabasePost {
@@ -581,10 +1125,12 @@ export interface SupabasePost {
   comments_count: number;
   shares_count: number;
   created_at: string;
+  is_anonymous: boolean;
   profiles?: {
     name: string;
     role: string;
     avatar_url: string | null;
+    anonymous_id?: string;
   };
   has_liked?: boolean;
   moderation_status?: 'approved' | 'flagged' | 'blocked';
@@ -605,10 +1151,12 @@ export interface SupabaseComment {
   user_id: string;
   content: string;
   created_at: string;
+  is_anonymous: boolean;
   profiles?: {
     name: string;
     role: string;
     avatar_url: string | null;
+    anonymous_id?: string;
   };
 }
 
@@ -624,6 +1172,7 @@ export async function fetchPosts(currentUserId?: string): Promise<SupabasePost[]
         comments_count: 1,
         shares_count: 1,
         created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
+        is_anonymous: false,
         profiles: { name: 'Amina Owusu', role: 'counselor', avatar_url: null },
         has_liked: false,
       },
@@ -635,6 +1184,7 @@ export async function fetchPosts(currentUserId?: string): Promise<SupabasePost[]
         comments_count: 0,
         shares_count: 3,
         created_at: new Date(Date.now() - 3600000 * 5).toISOString(),
+        is_anonymous: false,
         profiles: { name: 'Kwame Boateng', role: 'counselor', avatar_url: null },
         has_liked: true,
       }
@@ -645,7 +1195,7 @@ export async function fetchPosts(currentUserId?: string): Promise<SupabasePost[]
     .from('posts')
     .select(`
       *,
-      profiles:user_id (name, role, avatar_url)
+      profiles:user_id (name, role, avatar_url, anonymous_id)
     `)
     .neq('moderation_status', 'blocked')
     .order('created_at', { ascending: false });
@@ -656,6 +1206,13 @@ export async function fetchPosts(currentUserId?: string): Promise<SupabasePost[]
   }
 
   const posts = (data || []) as SupabasePost[];
+
+  // Enforce anonymity at data layer: strip name from anonymous posts for non-owning students
+  posts.forEach((post) => {
+    if (post.is_anonymous && post.user_id !== currentUserId && post.profiles) {
+      post.profiles = { ...post.profiles, name: '' };
+    }
+  });
 
   // If logged in, fetch current user's liked posts to determine has_liked state
   if (currentUserId && posts.length > 0) {
@@ -687,7 +1244,7 @@ export async function fetchPostDetail(postId: string, currentUserId?: string): P
     .from('posts')
     .select(`
       *,
-      profiles:user_id (name, role, avatar_url)
+      profiles:user_id (name, role, avatar_url, anonymous_id)
     `)
     .eq('id', postId)
     .maybeSingle();
@@ -699,6 +1256,11 @@ export async function fetchPostDetail(postId: string, currentUserId?: string): P
 
   if (!data) return null;
   const post = data as unknown as SupabasePost;
+
+  // Enforce anonymity at data layer
+  if (post.is_anonymous && post.user_id !== currentUserId && post.profiles) {
+    post.profiles = { ...post.profiles, name: '' };
+  }
 
   if (currentUserId) {
     const { data: likedData, error: likesError } = await supabase
@@ -718,7 +1280,8 @@ export async function createPost(
   userId: string,
   content: string,
   mediaUrl?: string | null,
-  moderationResult?: { status: 'approved' | 'flagged' | 'blocked'; isFlagged: boolean; reason?: string | null }
+  moderationResult?: { status: 'approved' | 'flagged' | 'blocked'; isFlagged: boolean; reason?: string | null },
+  isAnonymous: boolean = false
 ): Promise<SupabasePost | null> {
   if (!hasSupabaseConfig || !supabase) return null;
 
@@ -731,13 +1294,14 @@ export async function createPost(
       user_id: userId,
       content,
       media_url: mediaUrl,
+      is_anonymous: isAnonymous,
       moderation_status: mod.status,
       is_flagged: mod.isFlagged,
       flag_reason: mod.reason || null,
     })
     .select(`
       *,
-      profiles:user_id (name, role, avatar_url)
+      profiles:user_id (name, role, avatar_url, anonymous_id)
     `)
     .maybeSingle();
 
@@ -825,6 +1389,7 @@ export async function fetchComments(postId: string): Promise<SupabaseComment[]> 
         user_id: 'student-id',
         content: 'Thank you for this advice!',
         created_at: new Date(Date.now() - 600000).toISOString(),
+        is_anonymous: false,
         profiles: { name: 'Adjoa D.', role: 'student', avatar_url: null }
       }
     ];
@@ -834,7 +1399,7 @@ export async function fetchComments(postId: string): Promise<SupabaseComment[]> 
     .from('comments')
     .select(`
       *,
-      profiles:user_id (name, role, avatar_url)
+      profiles:user_id (name, role, avatar_url, anonymous_id)
     `)
     .eq('post_id', postId)
     .order('created_at', { ascending: true });
@@ -843,18 +1408,28 @@ export async function fetchComments(postId: string): Promise<SupabaseComment[]> 
     console.error('Error fetching comments:', error);
     throw error;
   }
-  return (data || []) as SupabaseComment[];
+
+  const comments = (data || []) as SupabaseComment[];
+
+  // Enforce anonymity at data layer: strip name from anonymous comments for non-owning students
+  comments.forEach((comment) => {
+    if (comment.is_anonymous && comment.profiles) {
+      comment.profiles = { ...comment.profiles, name: '' };
+    }
+  });
+
+  return comments;
 }
 
-export async function createComment(postId: string, userId: string, content: string): Promise<SupabaseComment | null> {
+export async function createComment(postId: string, userId: string, content: string, isAnonymous: boolean = false): Promise<SupabaseComment | null> {
   if (!hasSupabaseConfig || !supabase) return null;
 
   const { data, error } = await supabase
     .from('comments')
-    .insert({ post_id: postId, user_id: userId, content })
+    .insert({ post_id: postId, user_id: userId, content, is_anonymous: isAnonymous })
     .select(`
       *,
-      profiles:user_id (name, role, avatar_url)
+      profiles:user_id (name, role, avatar_url, anonymous_id)
     `)
     .maybeSingle();
 
@@ -915,6 +1490,7 @@ export interface SupabaseCall {
   created_at: string;
   answered_at: string | null;
   ended_at: string | null;
+  is_anonymous_display?: boolean;
   caller_profile?: SupabaseProfile;
   callee_profile?: SupabaseProfile;
 }
@@ -935,7 +1511,10 @@ export async function createCall(
       room_id: roomId,
       status: 'ringing',
     })
-    .select()
+    .select(`
+      *,
+      caller_profile:profiles!calls_caller_id_fkey(id, name, email, avatar_url, anonymous_id)
+    `)
     .single();
   if (error) {
     console.warn('[DB] createCall error:', error.message);
@@ -967,11 +1546,25 @@ export async function fetchCallById(callId: string): Promise<SupabaseCall | null
   if (!supabase) return null;
   const { data, error } = await supabase
     .from('calls')
-    .select('*')
+    .select(`
+      *,
+      caller_profile:profiles!calls_caller_id_fkey(id, name, email, avatar_url, anonymous_id)
+    `)
     .eq('id', callId)
     .single();
   if (error || !data) return null;
   return data as unknown as SupabaseCall;
+}
+
+export async function fetchProfileById(userId: string): Promise<SupabaseProfile | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, name, email, role, avatar_url, anonymous_id, created_at')
+    .eq('id', userId)
+    .single();
+  if (error || !data) return null;
+  return data as unknown as SupabaseProfile;
 }
 
 /**

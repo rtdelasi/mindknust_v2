@@ -9,6 +9,7 @@ import {
   ScrollView,
   Share,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -27,6 +28,7 @@ import {
 } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
+import { useMockAuth } from '@/lib/mock-auth-store';
 import {
   fetchCounselorDetail,
   fetchOrCreateChat,
@@ -42,6 +44,7 @@ export default function CounselorDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id: counselorId } = useLocalSearchParams<{ id: string }>();
+  const { role, anonymousId } = useMockAuth();
 
   const [counselor, setCounselor] = useState<SupabaseCounselor | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,6 +54,7 @@ export default function CounselorDetailScreen() {
   const [selectedSlotText, setSelectedSlotText] = useState('');
   const [selectedTopic, setSelectedTopic] = useState('');
   const [booking, setBooking] = useState(false);
+  const [anonDisplay, setAnonDisplay] = useState(false);
 
   const currentUserId = auth?.currentUser?.uid || 'student-user';
 
@@ -131,7 +135,8 @@ export default function CounselorDetailScreen() {
         counselor.id,
         date,
         selectedSlotText || slots[0]?.time_slot || '09:00',
-        selectedTopic || counselor.specialties[0] || 'General Support'
+        selectedTopic || counselor.specialties[0] || 'General Support',
+        anonDisplay
       );
       Alert.alert(
         'Session Booked',
@@ -409,6 +414,29 @@ export default function CounselorDetailScreen() {
             </Card>
           )}
         </View>
+
+        {/* Anonymity toggle for students */}
+        {role === 'student' && anonymousId ? (
+          <View style={[styles.anonRow, { borderTopColor: theme.border, borderBottomColor: theme.border }]}>
+            <View style={styles.anonInfo}>
+              <MaterialCommunityIcons name="incognito" size={20} color={theme.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.anonLabel, { color: theme.text }]}>
+                  Show name as {anonDisplay ? anonymousId : 'your real name'}
+                </Text>
+                <Text style={[styles.anonHint, { color: theme.textSecondary }]}>
+                  Counselor always sees your real identity
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={anonDisplay}
+              onValueChange={setAnonDisplay}
+              trackColor={{ false: theme.surfaceSoft, true: `${theme.primary}40` }}
+              thumbColor={anonDisplay ? theme.primary : '#f4f3f4'}
+            />
+          </View>
+        ) : null}
       </ScrollView>
 
       {/* ── Bottom bar: Chat + Book ── */}
@@ -622,5 +650,28 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 52,
     borderRadius: BorderRadius.full,
+  },
+  anonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.three,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+  },
+  anonInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    flex: 1,
+  },
+  anonLabel: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.semibold,
+  },
+  anonHint: {
+    fontSize: FontSize.small,
+    marginTop: 2,
   },
 });

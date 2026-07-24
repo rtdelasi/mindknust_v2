@@ -11,6 +11,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -33,13 +34,14 @@ import {
   SupabasePost,
   SupabaseComment
 } from '@/lib/supabase-db';
+import { getDisplayIdentity, getAuthorInitials, getHandleTag } from '@/lib/display-identity';
 
 export default function PostDetailScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id: postId } = useLocalSearchParams<{ id: string }>();
-  const { userName, role } = useMockAuth();
+  const { userName, role, anonymousId } = useMockAuth();
 
   const [post, setPost] = useState<SupabasePost | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
@@ -47,6 +49,7 @@ export default function PostDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [replyText, setReplyText] = useState('');
   const [submittingReply, setSubmittingReply] = useState(false);
+  const [replyAsAnonymous, setReplyAsAnonymous] = useState(false);
 
   const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
 
@@ -125,7 +128,7 @@ export default function PostDetailScreen() {
     if (!replyText.trim() || !post) return;
     setSubmittingReply(true);
     try {
-      const created = await createComment(post.id, currentUserId, replyText.trim());
+      const created = await createComment(post.id, currentUserId, replyText.trim(), replyAsAnonymous);
       let finalReply: SupabaseComment;
       if (created) {
         finalReply = created;
@@ -136,6 +139,7 @@ export default function PostDetailScreen() {
           user_id: currentUserId,
           content: replyText.trim(),
           created_at: new Date().toISOString(),
+          is_anonymous: replyAsAnonymous,
           profiles: { name: userName || 'User', role: role || 'student', avatar_url: null }
         };
       }
@@ -182,11 +186,16 @@ export default function PostDetailScreen() {
   }
 
   const isPostAuthor = post.user_id === currentUserId;
-  const authorName = post.profiles?.name || 'Anonymous User';
+  const authorName = getDisplayIdentity(
+    { name: post.profiles?.name, anonymous_id: post.profiles?.anonymous_id },
+    post.is_anonymous,
+    (role as any) || 'student'
+  );
   const authorRole = post.profiles?.role || 'student';
   const isCounselor = authorRole === 'counselor';
-  const initials = authorName.substring(0, 2).toUpperCase();
-  const handleTag = `@${authorName.toLowerCase().replace(/\s+/g, '')}`;
+  const initials = getAuthorInitials(authorName);
+  const handleTag = getHandleTag(authorName);
+  const showAnonBadge = post.is_anonymous && !isPostAuthor && !isCounselor;
 
   return (
     <KeyboardAvoidingView
@@ -224,6 +233,11 @@ export default function PostDetailScreen() {
               {isCounselor && (
                 <View style={[styles.roleBadge, { backgroundColor: `${theme.primary}1D` }]}>
                   <Text style={[styles.roleText, { color: theme.primary }]}>Staff</Text>
+                </View>
+              )}
+              {showAnonBadge && (
+                <View style={[styles.roleBadge, { backgroundColor: '#F3E8FF' }]}>
+                  <Text style={[styles.roleText, { color: '#7C3AED' }]}>Anonymous</Text>
                 </View>
               )}
               {isPostAuthor && (
@@ -271,9 +285,14 @@ export default function PostDetailScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const comInitials = (item.profiles?.name || 'User').substring(0, 2).toUpperCase();
+          const comName = getDisplayIdentity(
+            { name: item.profiles?.name, anonymous_id: item.profiles?.anonymous_id },
+            item.is_anonymous,
+            (role as any) || 'student'
+          );
+          const comInitials = getAuthorInitials(comName);
           const isComCounselor = item.profiles?.role === 'counselor';
-          const comHandle = `@${(item.profiles?.name || 'anonymous').toLowerCase().replace(/\s+/g, '')}`;
+          const comHandle = getHandleTag(comName);
 
           return (
             <View style={[styles.replyItem, { borderBottomColor: theme.border }]}>
@@ -282,9 +301,14 @@ export default function PostDetailScreen() {
               </View>
               <View style={styles.replyContentBlock}>
                 <View style={styles.replyHeaderRow}>
-                  <Text style={[styles.replyAuthorName, { color: theme.text }]}>{item.profiles?.name || 'Anonymous'}</Text>
+                  <Text style={[styles.replyAuthorName, { color: theme.text }]}>{comName}</Text>
                   <Text style={[styles.replyHandle, { color: theme.textSecondary }]}>{comHandle}</Text>
                   <Text style={[styles.replyTime, { color: theme.textSecondary }]}>· {formatTime(item.created_at)}</Text>
+                  {item.is_anonymous && (
+                    <View style={[styles.anonDot, { backgroundColor: '#7C3AED' }]}>
+                      <Text style={styles.anonDotText}>A</Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={[styles.replyContentText, { color: theme.text }]}>{item.content}</Text>
               </View>
@@ -317,6 +341,18 @@ export default function PostDetailScreen() {
             style={[styles.replyInput, { color: theme.text }]}
           />
         </View>
+        {role === 'student' && (<Pressable
+          onPress={() => setReplyAsAnonymous(!replyAsAnonymous)}
+          style={[
+            styles.anonReplyToggle,
+            replyAsAnonymous && { backgroundColor: `${theme.primary}1D` }
+          ]}>
+          <MaterialCommunityIcons
+            name={replyAsAnonymous ? 'incognito' : 'incognito-off'}
+            size={20}
+            color={replyAsAnonymous ? theme.primary : theme.textSecondary}
+          />
+        </Pressable>)}
         <Button
           label={submittingReply ? "..." : "Reply"}
           variant="primary"
@@ -584,5 +620,24 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 100000,
+  },
+  anonReplyToggle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  anonDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  anonDotText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: 'bold',
   },
 });

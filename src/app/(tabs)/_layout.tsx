@@ -1,7 +1,11 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import { useState, useEffect } from 'react';
 
 import { BottomTabBar } from '@/components/ui/bottom-tab-bar';
+import { useMockAuth } from '@/lib/mock-auth-store';
+import { fetchPendingCounselorsCount } from '@/lib/supabase-db';
+import { supabase } from '@/lib/supabase';
 
 function TabIcon({
   focused,
@@ -24,6 +28,37 @@ function TabIcon({
 }
 
 export default function TabLayout() {
+  const { role } = useMockAuth();
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const loadPendingBadge = async () => {
+      if (role === 'admin') {
+        const cnt = await fetchPendingCounselorsCount();
+        setPendingCount(cnt);
+      }
+    };
+
+    loadPendingBadge();
+
+    if (role === 'admin' && supabase) {
+      const channel = supabase
+        .channel('admin_badge_count')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'counselor_profiles' },
+          () => {
+            loadPendingBadge();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [role]);
+
   return (
     <Tabs
       tabBar={(props) => <BottomTabBar {...props} />}
@@ -67,6 +102,22 @@ export default function TabLayout() {
               focused={focused}
               activeName="calendar"
               inactiveName="calendar-outline"
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="approvals"
+        options={{
+          title: 'Approvals',
+          href: role === 'admin' ? '/(tabs)/approvals' : null,
+          tabBarBadge: pendingCount > 0 ? pendingCount : undefined,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              focused={focused}
+              activeName="shield-check"
+              inactiveName="shield-check-outline"
               color={color}
             />
           ),

@@ -272,6 +272,34 @@ export default function HomeScreen() {
     }
   };
 
+  // Real-time notification badge updates
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel('home-notifications')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+        },
+        (payload) => {
+          const notif = payload.new as { user_id: string | null };
+          // Only increment for broadcasts or notifications targeted at this user
+          if (!notif.user_id || notif.user_id === currentUserId) {
+            setUnreadCount((prev) => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId]);
+
   useFocusEffect(
     useCallback(() => {
       loadDashboardData();

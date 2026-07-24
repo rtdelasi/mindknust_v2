@@ -1,7 +1,9 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
 
 import { BottomTabBar } from '@/components/ui/bottom-tab-bar';
+import { useMockAuth } from '@/lib/mock-auth-store';
 
 function TabIcon({
   focused,
@@ -24,6 +26,20 @@ function TabIcon({
 }
 
 export default function CounselorTabLayout() {
+  const { approvalStatus, role } = useMockAuth();
+
+  if (role === null) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#5B4FE5" />
+      </View>
+    );
+  }
+
+  if (role === 'counselor' && approvalStatus !== 'approved') {
+    return <Redirect href="/counselor-pending" />;
+  }
+
   return (
     <Tabs
       tabBar={(props) => <BottomTabBar {...props} />}

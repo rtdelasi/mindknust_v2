@@ -9,8 +9,11 @@ const ROLE_KEY = 'counselcare_mock_role';
 const AUTH_KEY = 'counselcare_mock_authenticated';
 const USER_KEY = 'counselcare_mock_user_name';
 const AVATAR_KEY = 'counselcare_mock_avatar_url';
+const ANON_ID_KEY = 'counselcare_mock_anonymous_id';
+const APPROVAL_STATUS_KEY = 'counselcare_mock_approval_status';
 
-export type UserRole = 'student' | 'counselor';
+export type UserRole = 'student' | 'counselor' | 'admin';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 let listeners: (() => void)[] = [];
 
@@ -25,14 +28,15 @@ if (hasFirebaseConfig && auth) {
       // 1. Get the display name and photoURL
       let name = firebaseUser.displayName || firebaseUser.email || 'User';
       let avatar = firebaseUser.photoURL || null;
+      let approvalStatus: ApprovalStatus = 'approved';
 
-      // 2. Query user role from Supabase if connected
+      // 2. Query user role and status from Supabase if connected
       let resolvedRole: UserRole = firebaseUser.email?.endsWith('@counselcare.edu') ? 'counselor' : 'student';
       if (hasSupabaseConfig && supabase) {
         try {
           const { data, error } = await supabase
             .from('profiles')
-            .select('role, name, avatar_url')
+            .select('role, name, avatar_url, anonymous_id')
             .eq('id', firebaseUser.uid)
             .maybeSingle();
 
@@ -44,25 +48,24 @@ if (hasFirebaseConfig && auth) {
             if (data.avatar_url) {
               avatar = data.avatar_url;
             }
-          } else {
-            // Fallback: check email domain or cached value
-            const cached = await safeStorage.getItem(ROLE_KEY);
-            if (cached === 'counselor' || cached === 'student') {
-              resolvedRole = cached as UserRole;
-            } else if (firebaseUser.email?.endsWith('@counselcare.edu')) {
-              resolvedRole = 'counselor';
+            if (data.anonymous_id) {
+              await safeStorage.setItem(ANON_ID_KEY, data.anonymous_id);
+            }
+          }
+
+          if (resolvedRole === 'counselor') {
+            const { data: cData } = await supabase
+              .from('counselor_profiles')
+              .select('approval_status')
+              .eq('user_id', firebaseUser.uid)
+              .maybeSingle();
+
+            if (cData && cData.approval_status) {
+              approvalStatus = cData.approval_status as ApprovalStatus;
             }
           }
         } catch (e) {
-          console.warn('Could not query role from Supabase, using fallbacks:', e);
-        }
-      } else {
-        // Safe fallback in offline mode
-        const cached = await safeStorage.getItem(ROLE_KEY);
-        if (cached === 'counselor' || cached === 'student') {
-          resolvedRole = cached as UserRole;
-        } else if (firebaseUser.email?.endsWith('@counselcare.edu')) {
-          resolvedRole = 'counselor';
+          console.warn('Could not query role/status from Supabase, using fallbacks:', e);
         }
       }
 
@@ -70,6 +73,7 @@ if (hasFirebaseConfig && auth) {
       await safeStorage.setItem(ROLE_KEY, resolvedRole);
       await safeStorage.setItem(AUTH_KEY, 'true');
       await safeStorage.setItem(USER_KEY, name);
+      await safeStorage.setItem(APPROVAL_STATUS_KEY, approvalStatus);
       if (avatar) {
         await safeStorage.setItem(AVATAR_KEY, avatar);
       } else {
@@ -112,19 +116,30 @@ export const mockAuth = {
     }
     return (await safeStorage.getItem(AVATAR_KEY)) || null;
   },
-  login: async (role: UserRole, email: string, name?: string, avatarUrl?: string) => {
-    // If Firebase is active, we rely on register/login screens to sign in via Firebase,
-    // which triggers onAuthStateChanged dynamically.
-    // For mock testing, we write manually:
+  getAnonymousId: async (): Promise<string | null> => {
+    return (await safeStorage.getItem(ANON_ID_KEY)) || null;
+  },
+  getApprovalStatus: async (): Promise<ApprovalStatus> => {
+    const status = await safeStorage.getItem(APPROVAL_STATUS_KEY);
+    if (status === 'pending' || status === 'approved' || status === 'rejected') {
+      return status;
+    }
+    return 'approved';
+  },
+  login: async (role: UserRole, email: string, name?: string, avatarUrl?: string, anonymousId?: string, approvalStatus: ApprovalStatus = 'approved') => {
     const userName = name || (role === 'student' ? 'Adjoa D.' : 'Kwame Boateng');
     const userAvatar = avatarUrl || (role === 'student' ? null : 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150');
     await safeStorage.setItem(ROLE_KEY, role);
     await safeStorage.setItem(AUTH_KEY, 'true');
     await safeStorage.setItem(USER_KEY, userName);
+    await safeStorage.setItem(APPROVAL_STATUS_KEY, approvalStatus);
     if (userAvatar) {
       await safeStorage.setItem(AVATAR_KEY, userAvatar);
     } else {
       await safeStorage.removeItem(AVATAR_KEY);
+    }
+    if (anonymousId) {
+      await safeStorage.setItem(ANON_ID_KEY, anonymousId);
     }
     notifyListeners();
   },
@@ -153,6 +168,8 @@ export const mockAuth = {
     await safeStorage.removeItem(AUTH_KEY);
     await safeStorage.removeItem(USER_KEY);
     await safeStorage.removeItem(AVATAR_KEY);
+    await safeStorage.removeItem(ANON_ID_KEY);
+    await safeStorage.removeItem(APPROVAL_STATUS_KEY);
     notifyListeners();
   },
   subscribe: (listener: () => void) => {
@@ -168,6 +185,8 @@ export function useMockAuth() {
   const [role, setRole] = useState<UserRole | null>(null);
   const [userName, setUserName] = useState<string>('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [anonymousId, setAnonymousId] = useState<string | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus>('approved');
 
   useEffect(() => {
     let active = true;
@@ -176,11 +195,15 @@ export function useMockAuth() {
       const userRole = await mockAuth.getRole();
       const name = await mockAuth.getUserName();
       const avatar = await mockAuth.getAvatarUrl();
+      const anonId = await mockAuth.getAnonymousId();
+      const status = await mockAuth.getApprovalStatus();
       if (active) {
         setIsAuthenticated(isAuthed);
         setRole(userRole);
         setUserName(name);
         setAvatarUrl(avatar);
+        setAnonymousId(anonId);
+        setApprovalStatus(status);
       }
     }
 
@@ -201,6 +224,8 @@ export function useMockAuth() {
     role,
     userName,
     avatarUrl,
+    anonymousId,
+    approvalStatus,
     login: mockAuth.login,
     logout: mockAuth.logout,
     updateProfile: mockAuth.updateProfile,

@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -85,6 +85,33 @@ export default function CounselorDashboardScreen() {
       setLoading(false);
     }
   };
+
+  // Real-time notification badge updates
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel('counselor-notifications')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+        },
+        (payload) => {
+          const notif = payload.new as { user_id: string | null };
+          if (!notif.user_id || notif.user_id === currentUserId) {
+            setUnreadCount((prev) => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId]);
 
   useFocusEffect(
     useCallback(() => {

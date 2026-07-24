@@ -63,10 +63,22 @@ export function BottomTabBar(props: BottomTabBarProps) {
             size: 24,
           });
 
+          const badge = options.tabBarBadge;
+
           return {
             key: route.key,
             label,
             iconNode: icon ?? null,
+            badgeNode:
+              badge !== undefined &&
+              badge !== null &&
+              (typeof badge === 'string' || (typeof badge === 'number' && badge > 0)) ? (
+                <View style={styles.badgeContainer}>
+                  <Text style={styles.badgeText}>
+                    {typeof badge === 'number' && badge > 9 ? '9+' : String(badge)}
+                  </Text>
+                </View>
+              ) : null,
             active: isActive,
             onPress: () => {
               const event = props.navigation.emit({
@@ -79,8 +91,8 @@ export function BottomTabBar(props: BottomTabBarProps) {
                 props.navigation.navigate(route.name);
               }
             },
-          } satisfies RenderedBottomTabItem;
-        }) as RenderedBottomTabItem[]
+          } satisfies RenderedBottomTabItem & { badgeNode?: ReactNode };
+        }) as (RenderedBottomTabItem & { badgeNode?: ReactNode })[]
       : props.items;
 
   return (
@@ -113,6 +125,7 @@ export function BottomTabBar(props: BottomTabBarProps) {
                     color={active ? theme.primary : theme.textSecondary}
                   />
                 ) : null)}
+                {item.badgeNode}
               </View>
               <Text
                 style={[
@@ -155,6 +168,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     height: 28,
+    position: 'relative',
   },
   label: {
     fontSize: FontSize.small,
@@ -162,5 +176,25 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.72,
+  },
+  badgeContainer: {
+    position: 'absolute',
+    top: -4,
+    right: -10,
+    backgroundColor: '#FF3B30',
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    zIndex: 10,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: FontWeight.bold,
   },
 });

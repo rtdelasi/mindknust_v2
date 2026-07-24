@@ -27,7 +27,9 @@ import {
   sendMessage as submitDbMessage,
   SupabaseMessage,
   markMessagesAsRead,
+  isValidUUID,
 } from '@/lib/supabase-db';
+import { usePresence } from '@/contexts/presence-context';
 
 interface ChatMessage {
   id: string;
@@ -44,8 +46,8 @@ export default function ChatRoomScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ id: string; name?: string; role?: string; recipientId?: string }>();
-  const chatId = params.id;
+  const params = useLocalSearchParams<{ id: string; name: string; role: string; recipientId: string }>();
+  const chatId = params.id || '';
   const { role } = useMockAuth();
 
   const [text, setText] = useState('');
@@ -54,7 +56,6 @@ export default function ChatRoomScreen() {
   
   // Realtime States
   const [otherUserTyping, setOtherUserTyping] = useState(false);
-  const [otherUserStatus, setOtherUserStatus] = useState<'Online' | 'Offline' | 'In session'>('Online');
 
   // Options Dropdown Menu
   const [menuVisible, setMenuVisible] = useState(false);
@@ -66,6 +67,9 @@ export default function ChatRoomScreen() {
   const recipientName = params.name || 'Wellbeing Advisor';
   const recipientRole = params.role || 'Counselor';
   const recipientId = params.recipientId || '';
+  const isMockChat = !isValidUUID(chatId);
+  const { isUserOnline } = usePresence();
+  const otherUserStatus: 'Online' | 'Offline' = isUserOnline(recipientId) ? 'Online' : 'Offline';
 
   const loadChatThread = async () => {
     if (!chatId) return;
@@ -168,21 +172,7 @@ export default function ChatRoomScreen() {
           setOtherUserTyping(payload.typing);
         }
       })
-      .on('broadcast', { event: 'presence' }, (event) => {
-        const payload = event.payload;
-        if (payload.userId !== currentUserId) {
-          setOtherUserStatus(payload.status);
-        }
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          channel.send({
-            type: 'broadcast',
-            event: 'presence',
-            payload: { userId: currentUserId, status: 'Online' },
-          });
-        }
-      });
+      .subscribe();
 
     channelRef.current = channel;
 

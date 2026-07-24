@@ -21,6 +21,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { fetchUserChats, SupabaseChat } from '@/lib/supabase-db';
+import { usePresence } from '@/contexts/presence-context';
 
 export default function CounselorChatsScreen() {
   const theme = useTheme();
@@ -31,6 +32,7 @@ export default function CounselorChatsScreen() {
   const [search, setSearch] = useState('');
   const [chats, setChats] = useState<SupabaseChat[]>([]);
   const [loading, setLoading] = useState(true);
+  const { onlineUsers } = usePresence();
 
   // Long-press options popup
   const [selectedChat, setSelectedChat] = useState<SupabaseChat | null>(null);
@@ -157,7 +159,7 @@ export default function CounselorChatsScreen() {
                           {/* Avatar with status indicator */}
                           <View style={styles.avatarWrapper}>
                             <Avatar name={studentName} size="md" />
-                            <View style={[styles.statusDot, { backgroundColor: '#34C759', borderColor: theme.surfaceRaised }]} />
+                            <View style={[styles.statusDot, { backgroundColor: onlineUsers.includes(chat.student_id) ? '#34C759' : '#8E8E93', borderColor: theme.surfaceRaised }]} />
                           </View>
 
                           <View style={styles.chatDetails}>

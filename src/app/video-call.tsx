@@ -1,5 +1,4 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-// CameraView stubbed for Expo Go testing — restore when using dev build
 let CameraView: any = null;
 const useCameraPermissions = () => [
   { granted: false, canAskAgain: true, status: 'unavailable' },
@@ -31,7 +30,7 @@ import {
   subscribeToCallStatus,
   SupabaseCall,
 } from '@/lib/supabase-db';
-import { getCounselorPhoto } from './(tabs)/sessions';
+import { getCounselorPhoto } from '@/lib/counselor-utils';
 
 type CallState = 'idle' | 'ringing' | 'connected' | 'declined' | 'missed' | 'ended';
 
@@ -39,7 +38,7 @@ export default function VideoCallScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { role, userName } = useMockAuth();
+  const { role, userName, avatarUrl: userAvatarUrl } = useMockAuth();
 
   const {
     counselorName = 'Amina Owusu',
@@ -66,6 +65,19 @@ export default function VideoCallScreen() {
   const callIdRef = useRef<string | null>(null);
   const signalChannelRef = useRef<any>(null);
   const statusUnsubRef = useRef<(() => void) | null>(null);
+
+  const isStudent = role === 'student';
+  const displayName = isStudent ? counselorName : userName || 'Student';
+  const displayRole = isStudent ? 'Counselor' : 'Student';
+
+  // Resolve avatar: prefer param, then photo from utils, then initials fallback from <Avatar>
+  const cPhoto = getCounselorPhoto(counselorName, avatarUrl);
+  const callerAvatarSource = isStudent
+    ? { uri: cPhoto }
+    : userAvatarUrl
+      ? { uri: userAvatarUrl }
+      : undefined;
+  const callerAvatarName = isStudent ? counselorName : userName || undefined;
 
   // 1. Connection timer
   useEffect(() => {
@@ -234,9 +246,6 @@ export default function VideoCallScreen() {
     setCallState('ended');
   }, []);
 
-  const cPhoto = getCounselorPhoto(counselorName, avatarUrl);
-  const initials = counselorName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
-
   // ── Render: Idle / Lobby ──
   if (callState === 'idle') {
     return (
@@ -374,7 +383,7 @@ export default function VideoCallScreen() {
           <View style={[styles.summaryBox, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Participant:</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{counselorName}</Text>
+              <Text style={[styles.summaryValue, { color: theme.text }]}>{displayName}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Session Type:</Text>
@@ -386,7 +395,7 @@ export default function VideoCallScreen() {
             </View>
           </View>
 
-          <Button label="Close Call Room" variant="primary" onPress={() => router.back()} style={styles.endedBtn} />
+          <Button label="Back to sessions" variant="primary" onPress={() => router.back()} style={styles.endedBtn} />
         </Card>
       </View>
     );
@@ -399,15 +408,9 @@ export default function VideoCallScreen() {
     <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.three }]}>
-        <Pressable style={[styles.circleButton, { backgroundColor: theme.surfaceRaised }]} onPress={() => router.back()}>
-          <MaterialCommunityIcons name="chevron-left" size={Size.iconLg} color={theme.text} />
-        </Pressable>
         <Text style={[styles.headerTitle, { color: theme.text }]}>
           {callType === 'video' ? 'Video Care Room' : 'Voice Care Room'}
         </Text>
-        <Pressable style={[styles.circleButton, { backgroundColor: theme.surfaceRaised }]}>
-          <MaterialCommunityIcons name="dots-vertical" size={Size.iconMd} color={theme.text} />
-        </Pressable>
       </View>
 
       {/* Main viewport */}
@@ -426,9 +429,9 @@ export default function VideoCallScreen() {
             /* Ringing placeholder screen */
             <View style={[styles.portraitFrame, { backgroundColor: theme.surfaceRaised, justifyContent: 'center', alignItems: 'center' }]}>
               <View style={[styles.pulseCircle, { transform: [{ scale: pulseScale }], backgroundColor: `${theme.primary}1F` }]} />
-              <Avatar name={counselorName} size="lg" source={{ uri: cPhoto }} />
+              <Avatar name={callerAvatarName} size="lg" source={callerAvatarSource} />
               <Text style={[styles.voiceConnectedText, { color: theme.text, marginTop: Spacing.three }]}>
-                Calling {counselorName}...
+                Calling {displayName}...
               </Text>
               <Text style={[styles.voiceStatusText, { color: theme.textSecondary, marginTop: Spacing.one }]}>
                 Waiting for answer
@@ -437,22 +440,15 @@ export default function VideoCallScreen() {
           ) : callType === 'video' ? (
             /* Video Streaming active viewport */
             <View style={[styles.portraitFrame, { backgroundColor: theme.surfaceRaised }]}>
-              {avatarUrl || cPhoto ? (
-                <Avatar name={counselorName} size="lg" source={{ uri: cPhoto }} />
-              ) : (
-                <>
-                  <View style={[styles.portraitGlow, { backgroundColor: theme.accentSoft }]} />
-                  <Text style={[styles.portraitInitials, { color: theme.primary }]}>{initials}</Text>
-                </>
-              )}
-              <Text style={[styles.remoteLabel, { color: theme.textSecondary }]}>{counselorName} (Counselor)</Text>
+              <Avatar name={callerAvatarName} size="lg" source={callerAvatarSource} />
+              <Text style={[styles.remoteLabel, { color: theme.textSecondary }]}>{displayName} ({displayRole})</Text>
             </View>
           ) : (
             /* Voice Streaming active viewport */
             <View style={[styles.portraitFrame, { backgroundColor: theme.surfaceRaised, justifyContent: 'center', alignItems: 'center' }]}>
               <View style={[styles.pulseCircle, { transform: [{ scale: pulseScale }], backgroundColor: `${theme.primary}1F` }]} />
-              <Avatar name={counselorName} size="lg" source={{ uri: cPhoto }} />
-              <Text style={[styles.voiceConnectedText, { color: theme.text, marginTop: Spacing.three }]}>{counselorName}</Text>
+              <Avatar name={callerAvatarName} size="lg" source={callerAvatarSource} />
+              <Text style={[styles.voiceConnectedText, { color: theme.text, marginTop: Spacing.three }]}>{displayName}</Text>
               <Text style={[styles.voiceStatusText, { color: theme.textSecondary, marginTop: Spacing.one }]}>Voice stream connected</Text>
             </View>
           )}
@@ -472,19 +468,20 @@ export default function VideoCallScreen() {
             </View>
           ) : null}
 
-          {/* Call Meta Banner Overlay */}
+          {/* Call Meta Banner Overlay — only connected state shows timer here */}
           <View style={[styles.callStrip, { backgroundColor: theme.surfaceRaised }]}>
             <View style={styles.callMeta}>
-              <Avatar name={counselorName} size="sm" source={{ uri: cPhoto }} />
+              <Avatar name={callerAvatarName} size="sm" source={callerAvatarSource} />
               <View>
-                <Text style={[styles.callerName, { color: theme.text }]}>{counselorName}</Text>
-                <Text style={[styles.callerRole, { color: theme.textSecondary }]}>Student Advisor</Text>
+                <Text style={[styles.callerName, { color: theme.text }]}>{displayName}</Text>
+                <Text style={[styles.callerRole, { color: theme.textSecondary }]}>{displayRole}</Text>
               </View>
             </View>
-            <View style={[styles.timerPill, { backgroundColor: theme.surfaceSoft }]}>
-              <View style={styles.liveDot} />
-              <Text style={[styles.timerText, { color: theme.text }]}>{formatTimer(timeElapsed)}</Text>
-            </View>
+            {isConnected && (
+             <View style={[styles.timerPill, { backgroundColor: theme.surfaceSoft }]}>
+               <Text style={[styles.timerText, { color: theme.primary }]}>{formatTimer(timeElapsed)}</Text>
+             </View>
+            )}
           </View>
         </Card>
       </View>
@@ -498,83 +495,50 @@ export default function VideoCallScreen() {
       )}
 
       {/* Control panel buttons */}
-      {isConnected ? (
-        <View style={[styles.controlsWrap, { paddingBottom: insets.bottom + Spacing.three }]}>
-          <View style={styles.controlsRow}>
-            <ControlButton
-              icon={cameraOn ? 'camera' : 'camera-off'}
-              label="Camera"
-              active={cameraOn}
-              onPress={() => setCameraOn(!cameraOn)}
-              disabled={callType === 'voice'}
-            />
-            <ControlButton
-              icon={micOn ? 'microphone' : 'microphone-off'}
-              label={micOn ? 'Mute' : 'Unmute'}
-              active={micOn}
-              onPress={() => setMicOn(!micOn)}
-            />
+      <View style={[styles.controlsWrap, { paddingBottom: insets.bottom + Spacing.three }]}>
+        <View style={styles.controlsRow}>
+          <ControlButton
+            icon={cameraOn ? 'camera' : 'camera-off'}
+            label="Camera"
+            active={cameraOn}
+            onPress={() => setCameraOn(!cameraOn)}
+            disabled={callType === 'voice'}
+          />
+          <ControlButton
+            icon={micOn ? 'microphone' : 'microphone-off'}
+            label={micOn ? 'Mute' : 'Unmute'}
+            active={micOn}
+            onPress={() => setMicOn(!micOn)}
+          />
+          {isConnected ? (
             <ControlButton
               icon="phone-hangup"
               label="End"
               danger
               onPress={handleEndCall}
             />
-            <ControlButton
-              icon={audioOn ? 'volume-high' : 'volume-off'}
-              label="Speaker"
-              active={audioOn}
-              onPress={() => setAudioOn(!audioOn)}
-            />
-            <ControlButton
-              icon="share-outline"
-              label="Share"
-              onPress={() => Alert.alert('Share Link', 'Room invitation link copied to clipboard!')}
-            />
-          </View>
-          <Button label="Back to sessions" variant="secondary" onPress={() => router.back()} />
-        </View>
-      ) : (
-        /* Ringing controls — just Cancel */
-        <View style={[styles.controlsWrap, { paddingBottom: insets.bottom + Spacing.three }]}>
-          <View style={styles.controlsRow}>
-            <ControlButton
-              icon={cameraOn ? 'camera' : 'camera-off'}
-              label="Camera"
-              active={cameraOn}
-              onPress={() => setCameraOn(!cameraOn)}
-              disabled
-            />
-            <ControlButton
-              icon={micOn ? 'microphone' : 'microphone-off'}
-              label={micOn ? 'Mute' : 'Unmute'}
-              active={micOn}
-              onPress={() => setMicOn(!micOn)}
-              disabled
-            />
+          ) : (
             <ControlButton
               icon="phone-hangup"
               label="Cancel"
               danger
               onPress={handleCancelCall}
             />
-            <ControlButton
-              icon={audioOn ? 'volume-high' : 'volume-off'}
-              label="Speaker"
-              active={audioOn}
-              onPress={() => setAudioOn(!audioOn)}
-              disabled
-            />
-            <ControlButton
-              icon="share-outline"
-              label="Share"
-              onPress={() => Alert.alert('Share Link', 'Room invitation link copied to clipboard!')}
-              disabled
-            />
-          </View>
-          <Button label="Back to sessions" variant="secondary" onPress={() => router.back()} />
+          )}
+          <ControlButton
+            icon={audioOn ? 'volume-high' : 'volume-off'}
+            label="Speaker"
+            active={audioOn}
+            onPress={() => setAudioOn(!audioOn)}
+          />
+          <ControlButton
+            icon="share-outline"
+            label="Share"
+            onPress={() => Alert.alert('Share Link', 'Room invitation link copied to clipboard!')}
+          />
         </View>
-      )}
+        {/* "Back to sessions" only after ended — not during ringing or connected */}
+      </View>
     </View>
   );
 }
@@ -604,7 +568,7 @@ function ControlButton({
         { backgroundColor: theme.surfaceRaised, borderColor: theme.border },
         active && !danger && { backgroundColor: theme.primary, borderColor: theme.primary },
         danger && styles.dangerButton,
-        disabled && { opacity: 0.3 },
+        disabled && { opacity: 0.35, borderColor: theme.border },
       ]}>
       <MaterialCommunityIcons
         name={icon}
@@ -738,19 +702,11 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
+    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: FontSize.body - 2,
     fontWeight: FontWeight.bold,
-  },
-  circleButton: {
-    width: 46,
-    height: 46,
-    borderRadius: BorderRadius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   heroWrap: {
     flex: 1,
@@ -762,24 +718,6 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: Spacing.three,
     position: 'relative',
-  },
-  reconnectBanner: {
-    position: 'absolute',
-    top: 58,
-    left: Spacing.three,
-    right: Spacing.three,
-    backgroundColor: '#D97706',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: BorderRadius.sm,
-    zIndex: 30,
-  },
-  reconnectText: {
-    color: '#FFFFFF',
-    fontSize: FontSize.caption,
-    fontWeight: FontWeight.bold,
   },
   sessionTag: {
     flexDirection: 'row',
@@ -802,19 +740,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
     position: 'relative',
-  },
-  portraitGlow: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    opacity: 0.8,
-  },
-  portraitInitials: {
-    fontSize: 44,
-    fontWeight: '900',
-    letterSpacing: -2,
-    zIndex: 1,
   },
   remoteLabel: {
     position: 'absolute',
@@ -896,12 +821,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     borderRadius: BorderRadius.full,
-  },
-  liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FF5050',
   },
   timerText: {
     fontSize: FontSize.caption,

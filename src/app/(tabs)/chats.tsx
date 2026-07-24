@@ -24,9 +24,11 @@ import {
   fetchUserChats,
   fetchOrCreateChat,
   fetchCounselors,
+  generateFallbackUUID,
   SupabaseChat,
   SupabaseCounselor,
 } from '@/lib/supabase-db';
+import { usePresence } from '@/contexts/presence-context';
 
 export default function StudentChatsScreen() {
   const theme = useTheme();
@@ -37,6 +39,7 @@ export default function StudentChatsScreen() {
   const [chats, setChats] = useState<SupabaseChat[]>([]);
   const [counselors, setCounselors] = useState<SupabaseCounselor[]>([]);
   const [loading, setLoading] = useState(true);
+  const { onlineUsers } = usePresence();
 
   // Long-press options popup
   const [selectedChat, setSelectedChat] = useState<SupabaseChat | null>(null);
@@ -80,7 +83,7 @@ export default function StudentChatsScreen() {
       // Fallback
       router.push({
         pathname: '/chat/[id]',
-        params: { id: `mock-chat-${counselorId}`, name: counselorName, role: 'Counselor', recipientId: counselorId },
+        params: { id: generateFallbackUUID(), name: counselorName, role: 'Counselor', recipientId: counselorId },
       });
     } finally {
       setLoading(false);
@@ -187,7 +190,7 @@ export default function StudentChatsScreen() {
                           {/* Avatar with live status dot */}
                           <View style={styles.avatarWrapper}>
                             <Avatar name={nameVal} size="md" />
-                            <View style={[styles.statusDot, { backgroundColor: '#34C759', borderColor: theme.surfaceRaised }]} />
+                            <View style={[styles.statusDot, { backgroundColor: onlineUsers.includes(chat.counselor_id) ? '#34C759' : '#8E8E93', borderColor: theme.surfaceRaised }]} />
                           </View>
 
                           <View style={styles.chatDetails}>
@@ -252,7 +255,7 @@ export default function StudentChatsScreen() {
                         <Card variant="raised" padding="three" style={styles.counselorQuickCard}>
                           <View style={styles.avatarWrapper}>
                             <Avatar name={name} size="md" />
-                            <View style={[styles.statusDot, { backgroundColor: '#34C759', borderColor: theme.surfaceRaised }]} />
+                            <View style={[styles.statusDot, { backgroundColor: onlineUsers.includes(c.id) ? '#34C759' : '#8E8E93', borderColor: theme.surfaceRaised }]} />
                           </View>
                           <View style={{ flex: 1, gap: 2 }}>
                             <Text style={[styles.participantName, { color: theme.text }]}>{name}</Text>
