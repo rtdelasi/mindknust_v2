@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -14,6 +15,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -28,7 +30,7 @@ import { BorderRadius, FontSize, FontWeight, Size, Spacing } from '@/constants/t
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
-import { moderateContent } from '@/lib/sentiment';
+import { moderateContent, keywordModerate, isHFConfigured } from '@/lib/sentiment';
 import { hasSupabaseConfig } from '@/lib/supabase';
 import {
   createPost,
@@ -36,7 +38,8 @@ import {
   fetchPosts,
   incrementShareCount,
   SupabasePost,
-  toggleLikePost
+  toggleLikePost,
+  updatePostModeration
 } from '@/lib/supabase-db';
 import { getPublicUrl, uploadFile } from '@/lib/supabase-storage';
 import { getDisplayIdentity, getAuthorInitials, getHandleTag } from '@/lib/display-identity';
@@ -59,6 +62,125 @@ const GALLERY_MOCK_IMAGES = [
   'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=500', // Running Corgi
 ];
 
+const AVATAR_GRADIENTS = [
+  ['#8B7CFF', '#5B4FE5'], // Purple Indigo
+  ['#6C63FF', '#3B2FAD'], // Deep Indigo
+  ['#E879A0', '#8B7CFF'], // Pink Purple
+  ['#14B8A6', '#5B4FE5'], // Teal Blue
+  ['#FF6B6B', '#F59E0B'], // Coral Orange
+];
+
+const getAvatarGradient = (userId: string): [string, string] => {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % AVATAR_GRADIENTS.length;
+  return AVATAR_GRADIENTS[index] as [string, string];
+};
+
+function PostCardImage({ uri, onPreview }: { uri: string; onPreview: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const theme = useTheme();
+
+  if (error) {
+    return (
+      <View style={[styles.imageErrorContainer, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
+        <MaterialCommunityIcons name="image-broken-variant" size={24} color={theme.textSecondary} />
+        <Text style={[styles.imageErrorText, { color: theme.textSecondary }]}>Image could not be loaded</Text>
+      </View>
+    );
+  }
+
+  const isLocalFileUri = uri.startsWith('file:///');
+
+  return (
+    <Pressable onPress={onPreview} style={styles.postImageContainer}>
+      <Image
+        source={{ uri }}
+        style={styles.postImage}
+        resizeMode="cover"
+        onLoadStart={() => setLoading(true)}
+        onLoadEnd={() => setLoading(false)}
+        onError={() => setError(true)}
+      />
+      {loading && (
+        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.surfaceSoft, justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="small" color={theme.primary} />
+        </View>
+      )}
+      {isLocalFileUri && (
+        <View style={styles.localUriIndicator}>
+          <MaterialCommunityIcons name="alert-circle-outline" size={14} color="#FFFFFF" />
+          <Text style={[styles.localUriText, { color: '#FFFFFF' }]}>Local File (Storage Upload Failed)</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+function LikeButton({ hasLiked, count, onPress }: { hasLiked: boolean; count: number; onPress: () => void }) {
+  const theme = useTheme();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={styles.actionItem}
+    >
+      <MaterialCommunityIcons
+        name={hasLiked ? "heart" : "heart-outline"}
+        size={20}
+        color={hasLiked ? theme.rose : theme.textSecondary}
+      />
+      <Text style={[styles.actionCount, { color: hasLiked ? theme.rose : theme.textSecondary }]}>
+        {count}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ActionButton({ icon, count, onPress }: { icon: keyof typeof MaterialCommunityIcons.glyphMap; count: number; onPress: () => void }) {
+  const theme = useTheme();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={styles.actionItem}
+    >
+      <MaterialCommunityIcons name={icon} size={20} color={theme.textSecondary} />
+      {count > 0 && (
+        <Text style={[styles.actionCount, { color: theme.textSecondary }]}>
+          {count}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
+function SkeletonCard() {
+  const theme = useTheme();
+
+  return (
+    <View style={[styles.postCard, { borderBottomWidth: 1, borderBottomColor: theme.divider, opacity: 0.5 }]}>
+      <View style={styles.postLayout}>
+        <View style={styles.leftColumn}>
+          <View style={[styles.avatarCircle, { backgroundColor: theme.surfaceSoft }]} />
+        </View>
+        <View style={styles.rightColumn}>
+          <View style={styles.authorMetaRow}>
+            <View style={[styles.skeletonLine, { width: 100, height: 16, backgroundColor: theme.surfaceSoft }]} />
+            <View style={[styles.skeletonLine, { width: 60, height: 12, backgroundColor: theme.surfaceSoft }]} />
+          </View>
+          <View style={[styles.skeletonLine, { width: '95%', height: 14, marginTop: 8, backgroundColor: theme.surfaceSoft }]} />
+          <View style={[styles.skeletonLine, { width: '80%', height: 14, marginTop: 6, backgroundColor: theme.surfaceSoft }]} />
+          <View style={[styles.skeletonLine, { width: '50%', height: 14, marginTop: 6, backgroundColor: theme.surfaceSoft }]} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function SocialFeedScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -73,6 +195,7 @@ export default function SocialFeedScreen() {
   const [selectedMediaUri, setSelectedMediaUri] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [postAsAnonymous, setPostAsAnonymous] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'anonymous' | 'staff'>('all');
 
   // Compose Modal & Figma Views State Machine
   const [composeModalVisible, setComposeModalVisible] = useState(false);
@@ -157,10 +280,10 @@ export default function SocialFeedScreen() {
         }
       }
 
-      // Run ML content moderation (HF API → keyword fallback)
-      const mod = await moderateContent(newPostContent.trim());
+      // 1. Run local keyword moderation first (instant fallback)
+      const localMod = keywordModerate(newPostContent.trim());
 
-      if (mod.status === 'blocked') {
+      if (localMod.status === 'blocked') {
         Alert.alert(
           'Post Blocked',
           'Your post contains language that violates KNUST community guidelines and has been blocked.'
@@ -169,19 +292,35 @@ export default function SocialFeedScreen() {
         return;
       }
 
-      if (mod.status === 'flagged') {
+      if (localMod.status === 'flagged') {
         Alert.alert(
           'Support is Available',
           'Your post contains words associated with self-harm. Please remember that KNUST Counseling services are available 24/7 at 03220-60352.'
         );
       }
 
-      const created = await createPost(currentUserId, newPostContent.trim(), mediaUrl, mod, postAsAnonymous);
+      // 2. Create the post immediately using the fast local moderation result
+      const created = await createPost(currentUserId, newPostContent.trim(), mediaUrl, localMod, postAsAnonymous);
       if (created) {
         await loadFeed();
         setNewPostContent('');
         setSelectedMediaUri(null);
         setComposeModalVisible(false);
+        setSubmitting(false); // Clear submitting state early so user doesn't wait for background check
+
+        // 3. Trigger Hugging Face API check in the background
+        if (isHFConfigured()) {
+          moderateContent(created.content).then(async (hfMod) => {
+            if (hfMod.source === 'huggingface' && hfMod.status !== localMod.status) {
+              console.log(`[Background Moderation] Post ${created.id} status changed: ${localMod.status} -> ${hfMod.status}`);
+              await updatePostModeration(created.id, hfMod.status, hfMod.isFlagged, hfMod.reason);
+              // Refresh the feed if the post has been blocked or flagged
+              loadFeed();
+            }
+          }).catch((err) => {
+            console.warn('[Background Moderation] Error running HF model:', err);
+          });
+        }
       } else {
         // Fallback for mock sandbox testing
         const newMockPost: SupabasePost = {
@@ -196,14 +335,30 @@ export default function SocialFeedScreen() {
           is_anonymous: postAsAnonymous,
           profiles: { name: userName || 'User', role: role || 'student', avatar_url: null },
           has_liked: false,
-          moderation_status: mod.status,
-          is_flagged: mod.isFlagged,
-          flag_reason: mod.reason || undefined
+          moderation_status: localMod.status,
+          is_flagged: localMod.isFlagged,
+          flag_reason: localMod.reason || undefined
         };
         setPosts(prev => [newMockPost, ...prev]);
         setNewPostContent('');
         setSelectedMediaUri(null);
         setComposeModalVisible(false);
+        setSubmitting(false);
+
+        // Run background moderation in sandbox mock mode as well
+        if (isHFConfigured()) {
+          moderateContent(newMockPost.content).then((hfMod) => {
+            if (hfMod.source === 'huggingface' && hfMod.status === 'blocked') {
+              // Remove blocked post from sandbox feed
+              setPosts(prev => prev.filter(p => p.id !== newMockPost.id));
+              Alert.alert('Post Blocked (ML Moderation)', 'Your mock post was removed in the background by the Hugging Face moderation model.');
+            } else if (hfMod.source === 'huggingface' && hfMod.status === 'flagged') {
+              setPosts(prev => prev.map(p => p.id === newMockPost.id ? { ...p, moderation_status: 'flagged', is_flagged: true } : p));
+            }
+          }).catch((err) => {
+            console.warn('[Background Moderation Mock] Error:', err);
+          });
+        }
       }
     } catch (err: any) {
       Alert.alert('Post Failed', err.message || 'Could not save post.');
@@ -327,7 +482,13 @@ export default function SocialFeedScreen() {
     }
   };
 
-  const renderPostItem = ({ item }: { item: SupabasePost }) => {
+  const filteredPosts = posts.filter(post => {
+    if (activeFilter === 'anonymous') return post.is_anonymous;
+    if (activeFilter === 'staff') return post.profiles?.role === 'counselor';
+    return true;
+  });
+
+  const renderPostItem = ({ item, index }: { item: SupabasePost; index: number }) => {
     const isAuthor = item.user_id === currentUserId;
     const authorName = getDisplayIdentity(
       { name: item.profiles?.name, anonymous_id: item.profiles?.anonymous_id },
@@ -340,101 +501,116 @@ export default function SocialFeedScreen() {
     const handleTag = getHandleTag(authorName);
     const showAnonBadge = item.is_anonymous && !isAuthor && !isCounselor;
 
+    const isContentEmpty = !item.content?.trim();
+    const isImageEmpty = !item.media_url;
+    const isBrokenPost = isContentEmpty && isImageEmpty;
+
     return (
-      <Pressable
-        onPress={() => router.push({ pathname: '/post/[id]', params: { id: item.id } })}
-        style={[styles.postRow, { borderBottomColor: theme.border }]}>
-        <View style={styles.postLayout}>
-          {/* Left Column: Avatar */}
-          <View style={styles.leftColumn}>
-            <View style={[styles.avatarCircle, { backgroundColor: isCounselor ? theme.primary : '#8A8FD9' }]}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
-          </View>
-
-          {/* Right Column: Content & Actions */}
-          <View style={styles.rightColumn}>
-            {/* Header info */}
-            <View style={styles.authorMetaRow}>
-              <Text numberOfLines={1} style={[styles.authorName, { color: theme.text }]}>{authorName}</Text>
-              <Text numberOfLines={1} style={[styles.authorHandle, { color: theme.textSecondary }]}>{handleTag}</Text>
-              <Text style={[styles.dotDivider, { color: theme.textSecondary }]}>·</Text>
-              <Text style={[styles.timestamp, { color: theme.textSecondary }]}>{formatTime(item.created_at)}</Text>
-
-              {isCounselor ? (
-                <View style={[
-                  styles.roleBadge,
-                  { backgroundColor: `${theme.primary}1D` }
-                ]}>
-                  <Text style={[
-                    styles.roleText,
-                    { color: theme.primary }
-                  ]}>
-                    Staff
-                  </Text>
+      <View>
+        <Pressable
+          onPress={() => router.push({ pathname: '/post/[id]', params: { id: item.id } })}
+          style={[styles.postCard, { borderBottomWidth: 1, borderBottomColor: theme.divider }]}>
+          <View style={styles.postLayout}>
+            {/* Left Column: Avatar */}
+            <View style={styles.leftColumn}>
+              {item.is_anonymous && !isCounselor ? (
+                <View style={[styles.avatarCircle, { backgroundColor: theme.surfaceMuted }]}>
+                  <MaterialCommunityIcons name="incognito" size={20} color={theme.textSecondary} />
                 </View>
-              ) : null}
-
-              {showAnonBadge ? (
-                <View style={[styles.roleBadge, { backgroundColor: '#F3E8FF' }]}>
-                  <Text style={[styles.roleText, { color: '#7C3AED' }]}>
-                    Anonymous
-                  </Text>
-                </View>
-              ) : null}
-
-              {isAuthor ? (
-                <Pressable onPress={() => handleDeletePost(item.id)} style={styles.deleteButton}>
-                  <MaterialCommunityIcons name="dots-horizontal" size={18} color={theme.textSecondary} />
-                </Pressable>
-              ) : null}
+              ) : (
+                <LinearGradient
+                  colors={getAvatarGradient(item.user_id)}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.avatarCircle}
+                >
+                  <Text style={[styles.avatarText, { color: theme.textInverse }]}>{initials}</Text>
+                </LinearGradient>
+              )}
             </View>
 
-            {/* Post Content */}
-            <Text style={[styles.postContent, { color: theme.text }]}>{item.content}</Text>
+            {/* Right Column: Content & Actions */}
+            <View style={styles.rightColumn}>
+              {/* Header info */}
+              <View style={styles.authorMetaRow}>
+                <View style={styles.authorInfoContainer}>
+                  <Text numberOfLines={1} style={[styles.authorName, { color: theme.text }]}>
+                    {authorName}
+                  </Text>
+                  <Text numberOfLines={1} style={[styles.authorHandle, { color: theme.textSecondary }]}>
+                    {handleTag}
+                  </Text>
+                  <Text style={[styles.dotDivider, { color: theme.textSecondary }]}>·</Text>
+                  <Text style={[styles.timestamp, { color: theme.textSecondary }]}>
+                    {formatTime(item.created_at)}
+                  </Text>
+                </View>
 
-            {/* Attached Media Image */}
-            {item.media_url ? (
-              <Pressable onPress={() => setPreviewImageUrl(item.media_url || null)}>
-                <Image source={{ uri: item.media_url }} style={styles.postImage} resizeMode="cover" />
-              </Pressable>
-            ) : null}
+                <View style={styles.metaRowRight}>
+                  {isCounselor && (
+                    <View style={[styles.roleBadge, { backgroundColor: `${theme.primary}1D` }]}>
+                      <Text style={[styles.roleText, { color: theme.primary }]}>Staff</Text>
+                    </View>
+                  )}
 
-            {/* X-Style Action Bar */}
-            <View style={styles.actionBar}>
-              {/* Comment bubble routes to thread screen */}
-              <Pressable
-                onPress={() => router.push({ pathname: '/post/[id]', params: { id: item.id } })}
-                style={styles.actionItem}>
-                <MaterialCommunityIcons name="comment-outline" size={16} color={theme.textSecondary} />
-                <Text style={[styles.actionCount, { color: theme.textSecondary }]}>
-                  {item.comments_count}
-                </Text>
-              </Pressable>
+                  {showAnonBadge && (
+                    <View style={[styles.roleBadge, { backgroundColor: theme.roseSoft }]}>
+                      <Text style={[styles.roleText, { color: theme.rose }]}>Anon</Text>
+                    </View>
+                  )}
 
-              {/* Share */}
-              <Pressable onPress={() => handleSharePost(item.id)} style={styles.actionItem}>
-                <MaterialCommunityIcons name="share-variant-outline" size={16} color={theme.textSecondary} />
-                <Text style={[styles.actionCount, { color: theme.textSecondary }]}>
-                  {item.shares_count}
-                </Text>
-              </Pressable>
+                  {isAuthor && (
+                    <Pressable onPress={() => handleDeletePost(item.id)} style={styles.deleteButton}>
+                      <MaterialCommunityIcons name="dots-horizontal" size={18} color={theme.textSecondary} />
+                    </Pressable>
+                  )}
+                </View>
+              </View>
 
-              {/* Like */}
-              <Pressable onPress={() => handleToggleLike(item.id)} style={styles.actionItem}>
-                <MaterialCommunityIcons
-                  name={item.has_liked ? "heart" : "heart-outline"}
-                  size={16}
-                  color={item.has_liked ? "#F91880" : theme.textSecondary}
+              {/* Post Content */}
+              {isBrokenPost ? (
+                <View style={[styles.fallbackContent, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
+                  <MaterialCommunityIcons name="alert-circle-outline" size={18} color={theme.textSecondary} />
+                  <Text style={[styles.fallbackText, { color: theme.textSecondary }]}>
+                    Content unavailable
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  {!isContentEmpty && (
+                    <Text style={[styles.postContent, { color: theme.text }]}>{item.content}</Text>
+                  )}
+                  {!isImageEmpty && item.media_url && (
+                    <PostCardImage
+                      uri={item.media_url}
+                      onPreview={() => setPreviewImageUrl(item.media_url || null)}
+                    />
+                  )}
+                </>
+              )}
+
+              {/* Action Bar */}
+              <View style={styles.actionBar}>
+                <ActionButton
+                  icon="comment-outline"
+                  count={item.comments_count}
+                  onPress={() => router.push({ pathname: '/post/[id]', params: { id: item.id } })}
                 />
-                <Text style={[styles.actionCount, { color: item.has_liked ? "#F91880" : theme.textSecondary }]}>
-                  {item.likes_count}
-                </Text>
-              </Pressable>
+                <ActionButton
+                  icon="share-variant-outline"
+                  count={item.shares_count}
+                  onPress={() => handleSharePost(item.id)}
+                />
+                <LikeButton
+                  hasLiked={item.has_liked ?? false}
+                  count={item.likes_count}
+                  onPress={() => handleToggleLike(item.id)}
+                />
+              </View>
             </View>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      </View>
     );
   };
 
@@ -443,7 +619,10 @@ export default function SocialFeedScreen() {
       {/* Header */}
       <View style={[
         styles.header,
-        { paddingTop: insets.top + Spacing.two, backgroundColor: theme.surfaceRaised, borderColor: theme.border }
+        {
+          paddingTop: insets.top + Spacing.two,
+          borderBottomColor: theme.divider,
+        }
       ]}>
         <View style={styles.headerLeft}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
@@ -453,24 +632,95 @@ export default function SocialFeedScreen() {
         </View>
       </View>
 
-      {/* Main List */}
-      <FlatList
-        data={posts}
-        renderItem={renderPostItem}
-        keyExtractor={item => item.id}
-        refreshing={refreshing}
-        onRefresh={() => {
-          setRefreshing(true);
-          loadFeed();
-        }}
-        contentContainerStyle={[styles.listContainer, { paddingBottom: insets.bottom + Spacing.four }]}
-        ListEmptyComponent={
-          loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={theme.primary} />
-              <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Loading timeline...</Text>
-            </View>
-          ) : (
+      {/* Filter Tabs */}
+      <View style={[styles.filterContainer, { borderBottomColor: theme.divider }]}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterScrollContent}
+        >
+          <Pressable
+            onPress={() => setActiveFilter('all')}
+            style={[
+              styles.filterChip,
+              activeFilter === 'all' && styles.filterChipActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.filterChipText,
+                { color: activeFilter === 'all' ? theme.text : theme.textSecondary }
+              ]}
+            >
+              All Posts
+            </Text>
+            {activeFilter === 'all' && <View style={[styles.filterUnderline, { backgroundColor: theme.primary }]} />}
+          </Pressable>
+
+          <Pressable
+            onPress={() => setActiveFilter('anonymous')}
+            style={[
+              styles.filterChip,
+              activeFilter === 'anonymous' && styles.filterChipActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.filterChipText,
+                { color: activeFilter === 'anonymous' ? theme.text : theme.textSecondary }
+              ]}
+            >
+              Anonymous
+            </Text>
+            {activeFilter === 'anonymous' && <View style={[styles.filterUnderline, { backgroundColor: theme.primary }]} />}
+          </Pressable>
+
+          <Pressable
+            onPress={() => setActiveFilter('staff')}
+            style={[
+              styles.filterChip,
+              activeFilter === 'staff' && styles.filterChipActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.filterChipText,
+                { color: activeFilter === 'staff' ? theme.text : theme.textSecondary }
+              ]}
+            >
+              Staff Only
+            </Text>
+            {activeFilter === 'staff' && <View style={[styles.filterUnderline, { backgroundColor: theme.primary }]} />}
+          </Pressable>
+        </ScrollView>
+      </View>
+
+      {/* Main List & Skeleton state */}
+      {loading && posts.length === 0 ? (
+        <ScrollView contentContainerStyle={[styles.listContainer, { paddingBottom: insets.bottom + Spacing.four }]}>
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={filteredPosts}
+          renderItem={renderPostItem}
+          keyExtractor={item => item.id}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                loadFeed();
+              }}
+              tintColor={theme.primary}
+              colors={[theme.primary]}
+              progressBackgroundColor={theme.surfaceRaised}
+            />
+          }
+          contentContainerStyle={[styles.listContainer, { paddingBottom: insets.bottom + Spacing.four }]}
+          ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <MaterialCommunityIcons name="earth-off" size={48} color={theme.textSecondary} />
               <Text style={[styles.emptyTitle, { color: theme.text }]}>No posts yet</Text>
@@ -478,19 +728,29 @@ export default function SocialFeedScreen() {
                 Be the first to share an update with the campus community!
               </Text>
             </View>
-          )
-        }
-      />
+          }
+        />
+      )}
 
-      {/* Floating plus FAB button to compose post */}
-      <Pressable
-        style={[styles.composeFab, { backgroundColor: theme.primary }]}
-        onPress={() => {
-          setActiveSubView('compose');
-          setComposeModalVisible(true);
-        }}>
-        <MaterialCommunityIcons name="plus" size={28} color="#FFFFFF" />
-      </Pressable>
+      {/* Floating compose FAB button */}
+      <View style={styles.composeFab}>
+        <Pressable
+          onPress={() => {
+            setActiveSubView('compose');
+            setComposeModalVisible(true);
+          }}
+          style={styles.fabPressable}
+        >
+          <LinearGradient
+            colors={[theme.primary, '#4C3DD6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.fabGradient}
+          >
+            <MaterialCommunityIcons name="plus" size={28} color="#FFFFFF" />
+          </LinearGradient>
+        </Pressable>
+      </View>
 
       {/* Sliding Figma Post Composer Modal */}
       <Modal
@@ -505,7 +765,7 @@ export default function SocialFeedScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={[styles.modalScreen, { backgroundColor: theme.background }]}>
             {/* Modal Header */}
-            <View style={[styles.modalHeader, { borderBottomWidth: 1, borderBottomColor: theme.border, backgroundColor: theme.surfaceRaised }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: theme.divider, backgroundColor: theme.surfaceRaised }]}>
               <Pressable onPress={() => setComposeModalVisible(false)} style={styles.modalCancelButton}>
                 <Text style={[styles.modalCancelText, { color: theme.textSecondary }]}>Cancel</Text>
               </Pressable>
@@ -527,7 +787,7 @@ export default function SocialFeedScreen() {
             {/* Modal Composer ScrollView */}
             <ScrollView contentContainerStyle={styles.modalContentContainer}>
               <View style={styles.composerRow}>
-                <View style={[styles.composerAvatar, { backgroundColor: role === 'counselor' ? theme.primary : '#8A8FD9' }]}>
+                <View style={[styles.composerAvatar, { backgroundColor: role === 'counselor' ? theme.primary : theme.primarySoft }]}>
                   <Text style={styles.avatarText}>{(userName || 'US').substring(0, 2).toUpperCase()}</Text>
                 </View>
                 <View style={styles.composerInputWrapper}>
@@ -562,7 +822,7 @@ export default function SocialFeedScreen() {
                     value={postAsAnonymous}
                     onValueChange={setPostAsAnonymous}
                     trackColor={{ false: theme.surfaceSoft, true: `${theme.primary}40` }}
-                    thumbColor={postAsAnonymous ? theme.primary : '#f4f3f4'}
+                    thumbColor={postAsAnonymous ? theme.primary : theme.surfaceSoft}
                   />
                 </View>
               ) : null}
@@ -579,7 +839,7 @@ export default function SocialFeedScreen() {
             </ScrollView>
 
             {/* Modal Toolbar Attachment Dock */}
-            <View style={[styles.modalToolbar, { backgroundColor: theme.surfaceRaised, borderTopColor: theme.border }]}>
+            <View style={[styles.modalToolbar, { backgroundColor: theme.surfaceRaised, borderTopColor: theme.divider }]}>
               <View style={styles.toolbarIcons}>
                 {/* Custom Gallery Grid Trigger */}
                 <Pressable style={styles.toolbarIconBtn} onPress={() => setActiveSubView('gallery')}>
@@ -601,7 +861,7 @@ export default function SocialFeedScreen() {
         {activeSubView === 'gallery' && (
           <View style={[styles.modalScreen, { backgroundColor: theme.background, paddingTop: insets.top }]}>
             {/* Gallery Header */}
-            <View style={[styles.galleryHeader, { borderBottomColor: theme.border, backgroundColor: theme.surfaceRaised }]}>
+            <View style={[styles.galleryHeader, { borderBottomColor: theme.divider, backgroundColor: theme.surfaceRaised }]}>
               <Pressable onPress={() => setActiveSubView('compose')} style={styles.galleryBackButton}>
                 <MaterialCommunityIcons name="chevron-left" size={Size.iconXl} color={theme.text} />
                 <Text style={[styles.galleryBackText, { color: theme.text }]}>Back</Text>
@@ -761,7 +1021,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.three,
+    paddingHorizontal: Spacing.four,
     paddingBottom: Spacing.three,
     borderBottomWidth: 1,
   },
@@ -772,38 +1032,61 @@ const styles = StyleSheet.create({
   },
   backButton: {
     marginLeft: -Spacing.one,
-    padding: 4,
+    padding: 6,
   },
   headerTitle: {
-    fontSize: FontSize.body,
+    fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.bold,
   },
-  listContainer: {
-    paddingVertical: Spacing.one,
-  },
-  postRow: {
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.three,
+  filterContainer: {
     borderBottomWidth: 1,
+  },
+  filterScrollContent: {
+    paddingHorizontal: Spacing.four,
+    gap: Spacing.four,
+  },
+  filterChip: {
+    paddingVertical: Spacing.three,
+  },
+  filterChipActive: {
+  },
+  filterUnderline: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    borderRadius: 1.5,
+  },
+  filterChipText: {
+    fontSize: FontSize.body,
+    fontWeight: FontWeight.semibold,
+  },
+  listContainer: {
+    paddingTop: Spacing.one,
+  },
+  postCard: {
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.three,
   },
   postLayout: {
     flexDirection: 'row',
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
   leftColumn: {
-    alignItems: 'center',
+    paddingTop: 2,
   },
   avatarCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   avatarText: {
-    color: '#FFFFFF',
     fontWeight: FontWeight.bold,
-    fontSize: FontSize.body - 1,
+    fontSize: FontSize.bodySm,
   },
   rightColumn: {
     flex: 1,
@@ -812,83 +1095,152 @@ const styles = StyleSheet.create({
   authorMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
     position: 'relative',
   },
+  authorInfoContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+    overflow: 'hidden',
+    gap: 4,
+  },
   authorName: {
-    fontSize: FontSize.body - 1,
+    fontSize: FontSize.body,
     fontWeight: FontWeight.bold,
-    maxWidth: '45%',
+    flexShrink: 1,
   },
   authorHandle: {
-    fontSize: FontSize.caption + 1,
-    maxWidth: '30%',
+    fontSize: FontSize.captionLg,
+    flexShrink: 1,
   },
   dotDivider: {
-    fontSize: FontSize.caption + 1,
+    fontSize: FontSize.captionLg,
   },
   timestamp: {
-    fontSize: FontSize.caption + 1,
+    fontSize: FontSize.captionLg,
+  },
+  metaRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   roleBadge: {
-    paddingHorizontal: Spacing.one,
-    paddingVertical: 1,
-    borderRadius: BorderRadius.sm,
-    marginLeft: 'auto',
-    marginRight: 24, // Leave space for delete/dots trigger
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
   },
   roleText: {
-    fontSize: FontSize.caption - 2,
+    fontSize: 9,
     fontWeight: FontWeight.bold,
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   deleteButton: {
-    position: 'absolute',
-    right: -Spacing.one,
-    top: -Spacing.one,
-    padding: 6,
+    padding: 4,
   },
   postContent: {
-    fontSize: FontSize.body - 1,
-    lineHeight: 20,
+    fontSize: FontSize.body,
+    lineHeight: 22,
+  },
+  fallbackContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.one,
+  },
+  fallbackText: {
+    fontSize: FontSize.captionLg,
+    fontStyle: 'italic',
+  },
+  postImageContainer: {
+    position: 'relative',
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    marginTop: Spacing.two,
   },
   postImage: {
     width: '100%',
-    height: 200,
+    height: 220,
+  },
+  imageErrorContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 120,
     borderRadius: BorderRadius.md,
+    gap: Spacing.one,
     marginTop: Spacing.two,
+  },
+  imageErrorText: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.medium,
+  },
+  localUriIndicator: {
+    position: 'absolute',
+    bottom: Spacing.two,
+    left: Spacing.two,
+    right: Spacing.two,
+    backgroundColor: 'rgba(239, 68, 68, 0.95)',
+    borderRadius: BorderRadius.xs,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  localUriText: {
+    fontSize: FontSize.caption - 1,
+    fontWeight: FontWeight.bold,
   },
   actionBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: Spacing.two,
-    paddingRight: Spacing.three,
+    marginTop: Spacing.two,
+    marginHorizontal: -Spacing.two,
   },
   actionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.one,
-    minWidth: 50,
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: Spacing.two,
+    borderRadius: BorderRadius.full,
   },
   actionCount: {
     fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
   },
   // Floating Action Button
   composeFab: {
     position: 'absolute',
-    right: Spacing.three,
+    right: Spacing.four,
     bottom: Spacing.four,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  fabPressable: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  fabGradient: {
     width: 56,
     height: 56,
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 5,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
+  },
+  skeletonLine: {
+    borderRadius: BorderRadius.xs,
   },
   // Modal layout
   modalScreen: {
@@ -900,13 +1252,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.four,
     paddingVertical: Spacing.three,
+    borderBottomWidth: 1,
   },
   modalCancelButton: {
     paddingVertical: 6,
   },
   modalCancelText: {
     fontSize: FontSize.body,
-    color: '#000000',
   },
   modalPostButton: {
     height: 32,
@@ -916,7 +1268,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalPostButtonText: {
-    color: '#FFFFFF',
     fontWeight: FontWeight.bold,
     fontSize: FontSize.caption + 1,
   },
@@ -974,8 +1325,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     paddingVertical: Spacing.three,
     borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    backgroundColor: '#FFFFFF',
   },
   toolbarIcons: {
     flexDirection: 'row',
@@ -987,7 +1336,6 @@ const styles = StyleSheet.create({
   },
   charCounter: {
     fontSize: FontSize.caption,
-    color: '#64748B',
   },
   // Custom Gallery Styling
   galleryHeader: {
@@ -997,7 +1345,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
   },
   galleryBackButton: {
     flexDirection: 'row',
@@ -1006,12 +1353,10 @@ const styles = StyleSheet.create({
   galleryBackText: {
     fontSize: FontSize.body,
     fontWeight: FontWeight.semibold,
-    color: '#000000',
   },
   galleryTitle: {
     fontSize: FontSize.body,
     fontWeight: FontWeight.bold,
-    color: '#000000',
   },
   galleryUploadBtn: {
     padding: 6,

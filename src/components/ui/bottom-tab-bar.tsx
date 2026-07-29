@@ -2,15 +2,23 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps as NavigatorBottomTabBarProps } from '@react-navigation/bottom-tabs';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
 import {
+  BorderRadius,
   FontSize,
   FontWeight,
   Shadows,
   Size,
   Spacing,
+  Timing,
 } from '@/constants/theme';
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
+import { useMockAuth } from '@/lib/mock-auth-store';
 
 export type BottomTabItem = {
   key: string;
@@ -33,16 +41,68 @@ type BottomTabBarProps =
   | ManualBottomTabBarProps
   | NavigatorBottomTabBarProps;
 
+function TabItem({ item, theme }: { item: RenderedBottomTabItem & { badgeNode?: ReactNode }; theme: any }) {
+  const active = Boolean(item.active);
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <Pressable
+        key={item.key}
+        onPress={item.onPress}
+        onPressIn={() => {
+          scale.value = withSpring(0.85, Timing.springSnappy);
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1, Timing.spring);
+        }}
+        style={styles.item}>
+        <View style={styles.itemInner}>
+          <View style={styles.iconContainer}>
+            {item.iconNode ?? (item.icon ? (
+              <MaterialCommunityIcons
+                name={item.icon}
+                size={24}
+                color={active ? theme.primary : theme.textSecondary}
+              />
+            ) : null)}
+            {item.badgeNode}
+          </View>
+          {active && <View style={[styles.activeIndicator, { backgroundColor: theme.primary }]} />}
+          <Text
+            style={[
+              styles.label,
+              {
+                color: active ? theme.primary : theme.textSecondary,
+                fontWeight: active ? FontWeight.bold : FontWeight.medium,
+              },
+            ]}>
+            {item.label}
+          </Text>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export function BottomTabBar(props: BottomTabBarProps) {
   const theme = useTheme();
   const isDark = useThemeMode() === 'dark';
   const shadow = isDark ? Shadows.dark : Shadows.light;
+  const { role } = useMockAuth();
 
   const items =
     'state' in props
       ? props.state.routes
         .filter((route) => {
           const { options } = props.descriptors[route.key];
+          if (route.name === 'approvals' && role !== 'admin') {
+            return false;
+          }
           return (options as any).href !== null && route.name !== 'search';
         })
         .map((route) => {
@@ -73,7 +133,7 @@ export function BottomTabBar(props: BottomTabBarProps) {
               badge !== undefined &&
               badge !== null &&
               (typeof badge === 'string' || (typeof badge === 'number' && badge > 0)) ? (
-                <View style={styles.badgeContainer}>
+                <View style={[styles.badgeContainer, { backgroundColor: theme.error }]}>
                   <Text style={styles.badgeText}>
                     {typeof badge === 'number' && badge > 9 ? '9+' : String(badge)}
                   </Text>
@@ -101,46 +161,13 @@ export function BottomTabBar(props: BottomTabBarProps) {
         styles.shell,
         {
           backgroundColor: theme.surfaceRaised,
-          borderColor: theme.border,
           height: Size.tabBarHeight,
           ...shadow.raised,
         },
       ]}>
-      {items.map((item) => {
-        const active = Boolean(item.active);
-        return (
-          <Pressable
-            key={item.key}
-            onPress={item.onPress}
-            style={({ pressed }) => [
-              styles.item,
-              pressed && styles.pressed,
-            ]}>
-            <View style={styles.itemInner}>
-              <View style={styles.iconContainer}>
-                {item.iconNode ?? (item.icon ? (
-                  <MaterialCommunityIcons
-                    name={item.icon}
-                    size={24}
-                    color={active ? theme.primary : theme.textSecondary}
-                  />
-                ) : null)}
-                {item.badgeNode}
-              </View>
-              <Text
-                style={[
-                  styles.label,
-                  {
-                    color: active ? theme.primary : theme.textSecondary,
-                    fontWeight: active ? FontWeight.bold : FontWeight.medium,
-                  },
-                ]}>
-                {item.label}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
+      {items.map((item) => (
+        <TabItem key={item.key} item={item} theme={theme} />
+      ))}
     </View>
   );
 }
@@ -151,8 +178,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-around',
     paddingHorizontal: Spacing.two,
-    borderWidth: 0,
-    borderTopWidth: 1,
   },
   item: {
     flex: 1,
@@ -162,7 +187,7 @@ const styles = StyleSheet.create({
   itemInner: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 2,
   },
   iconContainer: {
     alignItems: 'center',
@@ -170,26 +195,25 @@ const styles = StyleSheet.create({
     height: 28,
     position: 'relative',
   },
+  activeIndicator: {
+    width: 20,
+    height: 3,
+    borderRadius: BorderRadius.full,
+  },
   label: {
     fontSize: FontSize.small,
     letterSpacing: 0.1,
-  },
-  pressed: {
-    opacity: 0.72,
   },
   badgeContainer: {
     position: 'absolute',
     top: -4,
     right: -10,
-    backgroundColor: '#FF3B30',
     minWidth: 18,
     height: 18,
     borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
     zIndex: 10,
   },
   badgeText: {

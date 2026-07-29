@@ -1,7 +1,12 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
-import { BorderRadius, FontSize, FontWeight, Spacing } from '@/constants/theme';
+import { BorderRadius, FontSize, FontWeight, Spacing, Timing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type WeekDatePickerProps = {
@@ -33,6 +38,68 @@ function isSameDay(a: Date, b: Date): boolean {
 }
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function DayCell({ date, selected, disabled, today, theme, onPress }: {
+  date: Date;
+  selected: boolean;
+  disabled: boolean;
+  today: boolean;
+  theme: any;
+  onPress: () => void;
+}) {
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <Pressable
+        onPress={() => !disabled && onPress()}
+        onPressIn={() => {
+          scale.value = withSpring(0.9, Timing.springSnappy);
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1, Timing.spring);
+        }}
+        style={[
+          styles.dayCell,
+          selected && {
+            backgroundColor: theme.primary,
+          },
+          !selected && {
+            backgroundColor: theme.surfaceSoft,
+          },
+          disabled && { opacity: 0.35 },
+        ]}>
+        <Text
+          style={[
+            styles.dayName,
+            {
+              color: selected ? theme.textInverse : theme.textSecondary,
+            },
+          ]}>
+          {DAY_NAMES[date.getDay()]}
+        </Text>
+        <Text
+          style={[
+            styles.dayNumber,
+            {
+              color: selected ? theme.textInverse : theme.text,
+            },
+            today &&
+              !selected && {
+                color: theme.primary,
+                fontWeight: FontWeight.bold,
+              },
+          ]}>
+          {date.getDate()}
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
 
 export function WeekDatePicker({
   selectedDate,
@@ -68,7 +135,6 @@ export function WeekDatePicker({
 
   return (
     <View style={styles.container}>
-      {/* Month header with arrows */}
       <View style={styles.monthHeader}>
         <Pressable onPress={goToPrevWeek} style={styles.arrowBtn}>
           <MaterialCommunityIcons
@@ -89,55 +155,19 @@ export function WeekDatePicker({
         </Pressable>
       </View>
 
-      {/* Week row */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View style={styles.weekRow}>
-          {weekDays.map((date) => {
-            const selected = isSameDay(date, selectedDate);
-            const disabled = isDisabled(date);
-            const today = isSameDay(date, new Date());
-            return (
-              <Pressable
-                key={date.toISOString()}
-                onPress={() => !disabled && onDateSelect(date)}
-                style={[
-                  styles.dayCell,
-                  selected && {
-                    backgroundColor: theme.primary,
-                    borderColor: theme.primary,
-                  },
-                  !selected && {
-                    borderColor: theme.border,
-                    backgroundColor: theme.surfaceSoft,
-                  },
-                  disabled && { opacity: 0.4 },
-                ]}>
-                <Text
-                  style={[
-                    styles.dayName,
-                    {
-                      color: selected ? '#FFFFFF' : theme.textSecondary,
-                    },
-                  ]}>
-                  {DAY_NAMES[date.getDay()]}
-                </Text>
-                <Text
-                  style={[
-                    styles.dayNumber,
-                    {
-                      color: selected ? '#FFFFFF' : theme.text,
-                    },
-                    today &&
-                      !selected && {
-                        color: theme.primary,
-                        fontWeight: FontWeight.bold,
-                      },
-                  ]}>
-                  {date.getDate()}
-                </Text>
-              </Pressable>
-            );
-          })}
+          {weekDays.map((date) => (
+            <DayCell
+              key={date.toISOString()}
+              date={date}
+              selected={isSameDay(date, selectedDate)}
+              disabled={isDisabled(date)}
+              today={isSameDay(date, new Date())}
+              theme={theme}
+              onPress={() => onDateSelect(date)}
+            />
+          ))}
         </View>
       </ScrollView>
     </View>
@@ -168,12 +198,11 @@ const styles = StyleSheet.create({
     width: 52,
     alignItems: 'center',
     paddingVertical: Spacing.two + 2,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
+    borderRadius: BorderRadius.md,
     gap: 4,
   },
   dayName: {
-    fontSize: FontSize.small - 1,
+    fontSize: FontSize.micro,
     fontWeight: FontWeight.medium,
     textTransform: 'uppercase',
     letterSpacing: 0.4,

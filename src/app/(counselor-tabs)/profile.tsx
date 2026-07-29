@@ -15,7 +15,7 @@ import {
   Shadows,
   Spacing,
 } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { useThemeContext } from '@/contexts/theme-context';
 import { useMockAuth } from '@/lib/mock-auth-store';
 
@@ -249,6 +249,7 @@ function StatWidget({
   onPress: () => void;
 }) {
   const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
   return (
     <Pressable
       onPress={onPress}
@@ -259,6 +260,7 @@ function StatWidget({
           borderColor: theme.border,
           opacity: pressed ? 0.85 : 1,
         },
+        isDark ? Shadows.dark.card : Shadows.light.card,
       ]}>
       <View style={[styles.statIconBox, { backgroundColor: theme.primarySoft }]}>
         <MaterialCommunityIcons name={icon} size={20} color={theme.primary} />
@@ -477,7 +479,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     borderWidth: 1,
     position: 'relative',
-    ...Shadows.light.card,
   },
   statIconBox: {
     width: 38,

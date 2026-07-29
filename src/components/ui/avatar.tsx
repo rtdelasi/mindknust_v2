@@ -1,9 +1,9 @@
 import { ImageSourcePropType, StyleSheet, Text, View, Image } from 'react-native';
 
-import { Colors, FontSize, FontWeight, Size } from '@/constants/theme';
+import { FontSize, FontWeight, Size, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-type AvatarSize = 'sm' | 'md' | 'lg';
+type AvatarSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
 type AvatarProps = {
   name?: string;
@@ -12,9 +12,11 @@ type AvatarProps = {
 };
 
 const avatarSizes = {
+  xs: Size.avatarXs,
   sm: Size.avatarSm,
   md: Size.avatarMd,
   lg: Size.avatarLg,
+  xl: Size.avatarXl,
 } as const;
 
 export function Avatar({ name, source, size = 'md' }: AvatarProps) {
@@ -23,7 +25,7 @@ export function Avatar({ name, source, size = 'md' }: AvatarProps) {
   const initials = getInitials(name);
 
   if (source) {
-    return <Image source={source} style={[styles.image, { width: dimension, height: dimension, borderRadius: dimension / 2 }]} />;
+    return <Image source={source} style={[styles.image, { width: dimension, height: dimension, borderRadius: dimension / 2, backgroundColor: theme.surfaceSoft }]} />;
   }
 
   return (
@@ -35,7 +37,6 @@ export function Avatar({ name, source, size = 'md' }: AvatarProps) {
           height: dimension,
           borderRadius: dimension / 2,
           backgroundColor: theme.primarySoft,
-          borderColor: theme.border,
         },
       ]}>
       <Text
@@ -43,7 +44,7 @@ export function Avatar({ name, source, size = 'md' }: AvatarProps) {
           styles.initials,
           {
             color: theme.primary,
-            fontSize: size === 'lg' ? FontSize.h3 : FontSize.body,
+            fontSize: size === 'xl' ? FontSize.h2 : size === 'lg' ? FontSize.h3 : FontSize.body,
             fontWeight: FontWeight.bold,
           },
         ]}>
@@ -69,12 +70,10 @@ function getInitials(name?: string) {
 
 const styles = StyleSheet.create({
   image: {
-    backgroundColor: Colors.light.surfaceSoft,
   },
   fallback: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
   },
   initials: {
     letterSpacing: 0.4,

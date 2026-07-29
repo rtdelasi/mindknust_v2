@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { BorderRadius, FontSize, FontWeight, Shadows, Size, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, hasFirebaseConfig } from '@/lib/firebase';
@@ -26,6 +26,7 @@ import { upsertProfile } from '@/lib/supabase-db';
 
 export default function LoginScreen() {
   const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { login } = useMockAuth();
@@ -119,9 +120,9 @@ export default function LoginScreen() {
 
           {/* Error Message */}
           {error ? (
-            <View style={[styles.errorBox, { backgroundColor: theme.surfaceSoft, borderColor: '#EF4444' }]}>
-              <MaterialCommunityIcons name="alert-circle" size={16} color="#DC2626" />
-              <Text style={styles.errorText}>{error}</Text>
+            <View style={[styles.errorBox, { backgroundColor: theme.errorSoft, borderColor: theme.error }]}>
+              <MaterialCommunityIcons name="alert-circle" size={16} color={theme.error} />
+              <Text style={[styles.errorText, { color: theme.error }]}>{error}</Text>
             </View>
           ) : null}
 
@@ -131,7 +132,7 @@ export default function LoginScreen() {
               onPress={() => setRole('student')}
               style={[
                 styles.roleTabButton,
-                role === 'student' && [styles.roleTabButtonActive, { backgroundColor: theme.primary }],
+                role === 'student' && [styles.roleTabButtonActive, { backgroundColor: theme.primary }, isDark ? Shadows.dark.card : Shadows.light.card],
               ]}>
               <MaterialCommunityIcons
                 name="school"
@@ -151,7 +152,7 @@ export default function LoginScreen() {
               onPress={() => setRole('counselor')}
               style={[
                 styles.roleTabButton,
-                role === 'counselor' && [styles.roleTabButtonActive, { backgroundColor: theme.primary }],
+                role === 'counselor' && [styles.roleTabButtonActive, { backgroundColor: theme.primary }, isDark ? Shadows.dark.card : Shadows.light.card],
               ]}>
               <MaterialCommunityIcons
                 name="doctor"
@@ -176,7 +177,7 @@ export default function LoginScreen() {
 
             <View style={styles.inputContainer}>
               <Text style={[styles.inputLabel, { color: theme.text }]}>Email Address</Text>
-              <View style={[styles.inputWrapper, { borderColor: theme.border, backgroundColor: theme.surfaceSoft }]}>
+              <View style={[styles.inputWrapper, { backgroundColor: theme.surfaceSoft }]}>
                 <MaterialCommunityIcons name="email-outline" size={20} color={theme.textSecondary} />
                 <TextInput
                   placeholder="name@university.edu"
@@ -192,7 +193,7 @@ export default function LoginScreen() {
 
             <View style={styles.inputContainer}>
               <Text style={[styles.inputLabel, { color: theme.text }]}>Password</Text>
-              <View style={[styles.inputWrapper, { borderColor: theme.border, backgroundColor: theme.surfaceSoft }]}>
+              <View style={[styles.inputWrapper, { backgroundColor: theme.surfaceSoft }]}>
                 <MaterialCommunityIcons name="lock-outline" size={20} color={theme.textSecondary} />
                 <TextInput
                   placeholder="••••••••"
@@ -273,10 +274,8 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     padding: Spacing.three,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
   },
   errorText: {
-    color: '#B91C1C',
     fontSize: FontSize.caption,
     fontWeight: FontWeight.semibold,
   },
@@ -296,7 +295,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   roleTabButtonActive: {
-    ...Shadows.light.card,
   },
   roleTabText: {
     fontSize: FontSize.caption + 1,
@@ -323,7 +321,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     height: Size.inputHeight,
-    borderWidth: 1,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.three,
   },

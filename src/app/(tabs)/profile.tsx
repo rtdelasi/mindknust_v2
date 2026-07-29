@@ -27,7 +27,7 @@ import {
 import { getCounselorPhoto } from './sessions';
 
 export default function ProfileScreen() {
-  const { userName, avatarUrl, anonymousId, logout } = useMockAuth();
+  const { role, userName, avatarUrl, anonymousId, logout } = useMockAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -129,7 +129,7 @@ export default function ProfileScreen() {
                 size="lg"
                 source={avatarUrl ? { uri: avatarUrl } : undefined}
               />
-              <View style={[styles.onlineDot, { backgroundColor: '#34C759' }]} />
+              <View style={[styles.onlineDot, { backgroundColor: theme.success }]} />
             </View>
             <View style={styles.profileInfo}>
               <Text style={[styles.profileName, { color: theme.text }]}>
@@ -156,13 +156,13 @@ export default function ProfileScreen() {
             <QuickAction
               icon="notebook-outline"
               label="Mood History"
-              color="#FF6B4A"
+              color={theme.coral}
               onPress={() => router.push('/mood-history')}
             />
             <QuickAction
               icon="bell-outline"
               label="Alerts"
-              color="#D97706"
+              color={theme.warning}
               onPress={() => router.push('/notifications')}
             />
             <QuickAction
@@ -176,22 +176,22 @@ export default function ProfileScreen() {
           {/* ── Stats Row ── */}
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#EAE8FF' }]}>
+              <View style={[styles.statIconCircle, { backgroundColor: theme.primarySoft }]}>
                 <MaterialCommunityIcons name="calendar-check" size={18} color={theme.primary} />
               </View>
               <Text style={[styles.statValue, { color: theme.text }]}>{sessionsCount}</Text>
               <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Sessions</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#FEF3C7' }]}>
-                <MaterialCommunityIcons name="fire" size={18} color="#FF6B4A" />
+              <View style={[styles.statIconCircle, { backgroundColor: theme.warningSoft }]}>
+                <MaterialCommunityIcons name="fire" size={18} color={theme.coral} />
               </View>
               <Text style={[styles.statValue, { color: theme.text }]}>{moodStreak}</Text>
               <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Mood entries</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#E6F4EA' }]}>
-                <MaterialCommunityIcons name="account-group" size={18} color="#3F8C7A" />
+              <View style={[styles.statIconCircle, { backgroundColor: theme.successSoft }]}>
+                <MaterialCommunityIcons name="account-group" size={18} color={theme.teal} />
               </View>
               <Text style={[styles.statValue, { color: theme.text }]} numberOfLines={1}>
                 {connectedCounselor ? '1' : '—'}
@@ -218,7 +218,7 @@ export default function ProfileScreen() {
                 onPress={() => router.push('/chats')}
                 style={[styles.counselorBannerBtn, { backgroundColor: theme.primary }]}
               >
-                <MaterialCommunityIcons name="message-outline" size={16} color="#FFFFFF" />
+                <MaterialCommunityIcons name="message-outline" size={16} color={theme.onPrimary} />
               </Pressable>
             </View>
           )}
@@ -226,7 +226,7 @@ export default function ProfileScreen() {
           {/* ── Student Identity & Safety Contact Card ── */}
           <Text style={[styles.sectionHeader, { color: theme.textSecondary }]}>STUDENT IDENTITY & SAFETY CONTACT</Text>
           <View style={[styles.settingsGroup, { backgroundColor: theme.surface, borderColor: theme.border, padding: Spacing.three, gap: Spacing.two }]}>
-            <View style={styles.anonRow}>
+            <View style={[styles.anonRow, { borderBottomColor: theme.border }]}>
               <View style={styles.anonInfo}>
                 <Text style={[styles.anonLabel, { color: theme.textSecondary }]}>Anonymous Identity ID</Text>
                 <Text style={[styles.anonCode, { color: theme.primary }]}>{anonymousId || 'KNUST-ANON-7K9A2'}</Text>
@@ -269,7 +269,7 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="account-outline"
               label="Personal Information"
-              iconBg="#EAE8FF"
+              iconBg={theme.primarySoft}
               iconColor={theme.primary}
               showChevron
               onPress={() => router.push('/edit-profile')}
@@ -277,15 +277,15 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="bell-outline"
               label="Notifications"
-              iconBg="#FEF3C7"
-              iconColor="#D97706"
+              iconBg={theme.warningSoft}
+              iconColor={theme.warning}
               isLast
             >
               <Switch
                 value={notificationsEnabled}
                 onValueChange={setNotificationsEnabled}
                 trackColor={{ true: theme.primary, false: theme.surfaceMuted }}
-                thumbColor="#FFFFFF"
+                thumbColor={theme.onPrimary}
               />
             </SettingsRow>
           </View>
@@ -296,20 +296,20 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="theme-light-dark"
               label="Dark Mode"
-              iconBg="#1E293B"
-              iconColor="#CBD5E1"
+              iconBg={theme.surfaceRaised}
+              iconColor={theme.textSecondary}
             >
               <Switch
                 value={themeMode === 'dark'}
                 onValueChange={(val) => setThemeMode(val ? 'dark' : 'light')}
                 trackColor={{ true: theme.primary, false: theme.surfaceMuted }}
-                thumbColor="#FFFFFF"
+                thumbColor={theme.onPrimary}
               />
             </SettingsRow>
             <SettingsRow
               icon="earth"
               label="Language"
-              iconBg="#E6F4EA"
+              iconBg={theme.successSoft}
               iconColor={theme.success}
               rightText="English (US)"
               showChevron
@@ -317,7 +317,7 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="message-text-outline"
               label="Communication Style"
-              iconBg="#EAE8FF"
+              iconBg={theme.primarySoft}
               iconColor={theme.primary}
               rightText="Gentle"
               showChevron
@@ -331,7 +331,7 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="help-circle-outline"
               label="Help & Contact Us"
-              iconBg="#E6F4EA"
+              iconBg={theme.successSoft}
               iconColor={theme.success}
               showChevron
               onPress={() => Alert.alert('Contact Support', 'KNUST Counselor support team email: support@counselcare.edu')}
@@ -339,7 +339,7 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="shield-lock-outline"
               label="Privacy Policy"
-              iconBg="#EAE8FF"
+              iconBg={theme.primarySoft}
               iconColor={theme.primary}
               showChevron
               onPress={() => Alert.alert('Privacy Policy', 'Opening KNUST counseling network security page...')}
@@ -347,20 +347,23 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="database-outline"
               label="Data & Storage"
-              iconBg="#FEF3C7"
-              iconColor="#D97706"
+              iconBg={theme.warningSoft}
+              iconColor={theme.warning}
               showChevron
               onPress={() => Alert.alert('Data Export', 'An offline archive containing all your counselor charts and daily logs will be compiled and sent to your university inbox within 24 hours.')}
+              isLast={role !== 'admin'}
             />
-            <SettingsRow
-              icon="shield-account"
-              label="Admin Approvals Queue (Mobile)"
-              iconBg="#EAE8FF"
-              iconColor={theme.primary}
-              showChevron
-              onPress={() => router.push('/admin/approvals')}
-              isLast
-            />
+            {role === 'admin' && (
+              <SettingsRow
+                icon="shield-account"
+                label="Admin Approvals Queue (Mobile)"
+              iconBg={theme.primarySoft}
+                iconColor={theme.primary}
+                showChevron
+                onPress={() => router.push('/admin/approvals')}
+                isLast
+              />
+            )}
           </View>
 
           {/* ── App Info ── */}
@@ -381,8 +384,8 @@ export default function ProfileScreen() {
               router.replace('/(auth)/login');
             }}
           >
-            <MaterialCommunityIcons name="logout" size={18} color="#FF3B30" />
-            <Text style={styles.logoutText}>Log Out</Text>
+            <MaterialCommunityIcons name="logout" size={18} color={theme.error} />
+            <Text style={[styles.logoutText, { color: theme.error }]}>Log Out</Text>
           </Pressable>
 
         </View>
@@ -458,7 +461,7 @@ export default function ProfileScreen() {
                 onPress={handleSaveStudentDetails}
                 disabled={savingDetails}
                 style={[styles.modalSaveBtn, { backgroundColor: theme.primary }]}>
-                <Text style={styles.modalSaveBtnText}>{savingDetails ? 'Saving...' : 'Save Changes'}</Text>
+                <Text style={[styles.modalSaveBtnText, { color: theme.onPrimary }]}>{savingDetails ? 'Saving...' : 'Save Changes'}</Text>
               </Pressable>
             </View>
           </View>
@@ -480,12 +483,13 @@ function QuickAction({
   color: string;
   onPress: () => void;
 }) {
+  const theme = useTheme();
   return (
     <Pressable style={styles.quickAction} onPress={onPress}>
       <View style={[styles.quickActionIcon, { backgroundColor: `${color}14` }]}>
         <MaterialCommunityIcons name={icon} size={22} color={color} />
       </View>
-      <Text style={styles.quickActionLabel}>{label}</Text>
+      <Text style={[styles.quickActionLabel, { color: theme.textSecondary }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -620,7 +624,6 @@ const styles = StyleSheet.create({
   quickActionLabel: {
     fontSize: FontSize.small,
     fontWeight: FontWeight.medium,
-    color: '#6B7280',
   },
 
   /* ── Stats ── */
@@ -752,7 +755,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   logoutText: {
-    color: '#FF3B30',
     fontSize: FontSize.body - 1,
     fontWeight: FontWeight.bold,
   },
@@ -764,7 +766,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingBottom: Spacing.one,
     borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
   },
   anonInfo: {
     gap: 2,
@@ -862,7 +863,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   modalSaveBtnText: {
-    color: '#FFFFFF',
     fontSize: FontSize.caption + 1,
     fontWeight: FontWeight.bold,
   },

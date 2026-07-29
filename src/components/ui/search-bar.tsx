@@ -37,10 +37,9 @@ export const SearchBar = forwardRef<TextInput, SearchBarProps>(function SearchBa
         styles.container,
         {
           backgroundColor: theme.surfaceSoft,
-          borderColor: theme.border,
-          borderRadius: BorderRadius.full,
+          borderRadius: BorderRadius.xl,
           minHeight: Size.inputHeight,
-          ...shadow.card,
+          ...shadow.small,
         },
         containerStyle,
       ]}>
@@ -72,8 +71,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.four,
-    borderWidth: 1,
+    paddingHorizontal: Spacing.three,
   },
   input: {
     flex: 1,

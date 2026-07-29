@@ -168,7 +168,7 @@ export default function VideoCallScreen() {
   useEffect(() => {
     if (!supabase) return;
     const channel = supabase
-      .channel('calls-app')
+      .channel('calls-hangup-local')
       .on('broadcast', { event: 'call_hangup' }, (event) => {
         const payload = event.payload as { callId: string };
         if (payload.callId === callIdRef.current) {
@@ -330,8 +330,8 @@ export default function VideoCallScreen() {
     return (
       <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
         <Card variant="raised" padding="four" style={styles.endedCard}>
-          <View style={[styles.endedIconBox, { backgroundColor: '#FEE2E2' }]}>
-            <MaterialCommunityIcons name="phone-missed" size={44} color="#DC2626" />
+          <View style={[styles.endedIconBox, { backgroundColor: theme.errorSoft }]}>
+            <MaterialCommunityIcons name="phone-missed" size={44} color={theme.error} />
           </View>
           <Text style={[styles.endedTitle, { color: theme.text }]}>Call Declined</Text>
           <Text style={[styles.endedDesc, { color: theme.textSecondary }]}>
@@ -351,8 +351,8 @@ export default function VideoCallScreen() {
     return (
       <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
         <Card variant="raised" padding="four" style={styles.endedCard}>
-          <View style={[styles.endedIconBox, { backgroundColor: '#FEF3C7' }]}>
-            <MaterialCommunityIcons name="phone-missed" size={44} color="#D97706" />
+          <View style={[styles.endedIconBox, { backgroundColor: theme.warningSoft }]}>
+            <MaterialCommunityIcons name="phone-missed" size={44} color={theme.warning} />
           </View>
           <Text style={[styles.endedTitle, { color: theme.text }]}>No Answer</Text>
           <Text style={[styles.endedDesc, { color: theme.textSecondary }]}>
@@ -455,14 +455,14 @@ export default function VideoCallScreen() {
 
           {/* Picture in Picture viewfinder preview (only when connected and video) */}
           {isConnected && callType === 'video' && cameraOn && cameraPermission && cameraPermission.granted ? (
-            <View style={styles.floatingSelfFrame}>
+            <View style={[styles.floatingSelfFrame, { borderColor: theme.borderStrong }]}>
               <CameraView facing="front" style={StyleSheet.absoluteFillObject} />
               <View style={styles.selfLabelBadge}>
                 <Text style={styles.selfLabelBadgeText}>You (Self)</Text>
               </View>
             </View>
           ) : isConnected && callType === 'video' ? (
-            <View style={[styles.floatingSelfFrame, { backgroundColor: theme.surfaceMuted, justifyContent: 'center', alignItems: 'center' }]}>
+            <View style={[styles.floatingSelfFrame, { borderColor: theme.borderStrong, backgroundColor: theme.surfaceMuted, justifyContent: 'center', alignItems: 'center' }]}>
               <MaterialCommunityIcons name="camera-off" size={16} color={theme.textSecondary} />
               <Text style={{ fontSize: 8, color: theme.textSecondary, marginTop: 2 }}>Self Off</Text>
             </View>
@@ -567,7 +567,7 @@ function ControlButton({
         styles.controlButton,
         { backgroundColor: theme.surfaceRaised, borderColor: theme.border },
         active && !danger && { backgroundColor: theme.primary, borderColor: theme.primary },
-        danger && styles.dangerButton,
+        danger && { backgroundColor: theme.error, borderColor: theme.error },
         disabled && { opacity: 0.35, borderColor: theme.border },
       ]}>
       <MaterialCommunityIcons
@@ -575,7 +575,7 @@ function ControlButton({
         size={Size.iconMd}
         color={danger || (active && !disabled) ? '#FFFFFF' : theme.primary}
       />
-      <Text style={[styles.controlLabel, { color: theme.textSecondary }, danger && styles.dangerLabel]}>{label}</Text>
+      <Text style={[styles.controlLabel, { color: theme.textSecondary }, danger && { color: theme.error }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -769,7 +769,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: '#FFFFFF',
     elevation: 3,
     shadowColor: '#000000',
     shadowOpacity: 0.25,
@@ -853,17 +852,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  dangerButton: {
-    backgroundColor: '#F04444',
-    borderColor: '#F04444',
-  },
+
   controlLabel: {
     position: 'absolute',
     bottom: -18,
     fontSize: FontSize.small,
     fontWeight: FontWeight.bold,
   },
-  dangerLabel: {
-    color: '#F04444',
-  },
+
 });

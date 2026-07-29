@@ -20,7 +20,7 @@ export function Card({ children, variant = 'surface', padding = 'three', style }
   const shadow = isDark ? Shadows.dark : Shadows.light;
   const backgroundColor =
     variant === 'muted'
-      ? theme.surfaceSoft
+      ? theme.surfaceSunken
       : variant === 'raised'
         ? theme.surfaceRaised
         : theme.surface;
@@ -33,7 +33,6 @@ export function Card({ children, variant = 'surface', padding = 'three', style }
           backgroundColor,
           padding: Spacing[padding],
           borderRadius: BorderRadius.lg,
-          borderColor: theme.border,
           ...shadow[variant === 'raised' ? 'raised' : 'card'],
         },
         style,
@@ -44,7 +43,5 @@ export function Card({ children, variant = 'surface', padding = 'three', style }
 }
 
 const styles = StyleSheet.create({
-  base: {
-    borderWidth: 1,
-  },
+  base: {},
 });

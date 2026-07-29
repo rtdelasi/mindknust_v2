@@ -31,7 +31,7 @@ import {
   Size,
   Spacing,
 } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { supabase } from '@/lib/supabase';
@@ -86,6 +86,7 @@ function getGreeting(): string {
 export default function HomeScreen() {
   const { userName, avatarUrl } = useMockAuth();
   const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -219,9 +220,9 @@ export default function HomeScreen() {
   };
 
   const getCircleColor = () => {
-    if (breathingStep === 'inhale') return '#5B4FE5';
-    if (breathingStep === 'hold') return '#3F8C7A';
-    if (breathingStep === 'exhale') return '#FF9500';
+    if (breathingStep === 'inhale') return theme.primary;
+    if (breathingStep === 'hold') return theme.teal;
+    if (breathingStep === 'exhale') return theme.amber;
     return theme.surfaceMuted;
   };
 
@@ -403,7 +404,7 @@ export default function HomeScreen() {
                 <View
                   style={[
                     styles.statusDot,
-                    { backgroundColor: theme.success },
+                    { backgroundColor: theme.success, borderColor: theme.background },
                   ]}
                 />
               </View>
@@ -420,12 +421,11 @@ export default function HomeScreen() {
                 </Text>
               </View>
             </View>
-            <Pressable
+              <Pressable
               style={[
                 styles.bellButton,
                 {
                   backgroundColor: theme.surfaceRaised,
-                  borderColor: theme.border,
                 },
               ]}
               onPress={() => router.push('/notifications')}>
@@ -433,7 +433,7 @@ export default function HomeScreen() {
                 count={unreadCount}
                 size={19}
                 max={9}
-                color="#FF3B30"
+                color={theme.error}
                 style={{
                   width: 19,
                   height: 19,
@@ -492,7 +492,6 @@ export default function HomeScreen() {
               style={[
                 styles.noteInputWrapper,
                 {
-                  borderColor: theme.border,
                   backgroundColor: theme.surfaceSoft,
                 },
               ]}>
@@ -522,10 +521,11 @@ export default function HomeScreen() {
                     }}
                     style={[
                       styles.emojiButton,
-                      { borderColor: theme.border },
                       isSelected && {
                         backgroundColor: theme.primarySoft,
-                        borderColor: theme.primary,
+                      },
+                      !isSelected && {
+                        backgroundColor: theme.surfaceSoft,
                       },
                     ]}>
                     <Text style={styles.emojiText}>{m.emoji}</Text>
@@ -554,17 +554,14 @@ export default function HomeScreen() {
                   mentalAnalysis.primaryState === 'crisis' ||
                   mentalAnalysis.primaryState === 'depression'
                     ? {
-                        backgroundColor: '#FF3B3012',
-                        borderColor: '#FF3B3033',
+                        backgroundColor: theme.errorSoft,
                       }
                     : mentalAnalysis.primaryState === 'anxiety'
                       ? {
-                          backgroundColor: '#FF950012',
-                          borderColor: '#FF950033',
+                          backgroundColor: theme.warningSoft,
                         }
                       : {
-                          backgroundColor: '#5B4FE512',
-                          borderColor: '#5B4FE533',
+                          backgroundColor: theme.primaryMuted,
                         },
                 ]}>
                 <MaterialCommunityIcons
@@ -580,9 +577,9 @@ export default function HomeScreen() {
                   color={
                     mentalAnalysis.primaryState === 'crisis' ||
                     mentalAnalysis.primaryState === 'depression'
-                      ? '#FF3B30'
+                      ? theme.error
                       : mentalAnalysis.primaryState === 'anxiety'
-                        ? '#FF9500'
+                        ? theme.warning
                         : theme.primary
                   }
                 />
@@ -594,9 +591,9 @@ export default function HomeScreen() {
                         color:
                           mentalAnalysis.primaryState === 'crisis' ||
                           mentalAnalysis.primaryState === 'depression'
-                            ? '#FF3B30'
+                            ? theme.error
                             : mentalAnalysis.primaryState === 'anxiety'
-                              ? '#FF9500'
+                              ? theme.warning
                               : theme.text,
                       },
                     ]}>
@@ -653,6 +650,7 @@ export default function HomeScreen() {
                     backgroundColor: theme.primary,
                     borderColor: theme.primary,
                   },
+                  isDark ? Shadows.dark.card : Shadows.light.card,
                   pressed && styles.pressed,
                 ]}>
                 <View style={styles.upcomingTopRow}>
@@ -769,10 +767,6 @@ export default function HomeScreen() {
                           activeFilter === filter
                             ? theme.primary
                             : theme.surfaceSoft,
-                        borderColor:
-                          activeFilter === filter
-                            ? theme.primary
-                            : theme.border,
                       },
                     ]}>
                     <Text
@@ -781,7 +775,7 @@ export default function HomeScreen() {
                         {
                           color:
                             activeFilter === filter
-                              ? '#FFFFFF'
+                              ? theme.textInverse
                               : theme.textSecondary,
                         },
                       ]}>
@@ -833,7 +827,7 @@ export default function HomeScreen() {
       <Pressable
         style={[
           styles.fab,
-          { backgroundColor: theme.primary, ...Shadows.light.floating },
+          { backgroundColor: theme.primary },
         ]}
         onPress={() => router.push('/social-feed')}>
         <MaterialCommunityIcons name="earth" size={26} color="#FFFFFF" />
@@ -847,16 +841,15 @@ export default function HomeScreen() {
         transparent
         visible={isCrisisModalVisible}
         onRequestClose={() => setIsCrisisModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}>
           <View
             style={[
               styles.modalContent,
               {
                 backgroundColor: theme.surfaceRaised,
-                borderTopColor: theme.border,
               },
             ]}>
-            <View style={styles.modalDragIndicator} />
+            <View style={[styles.modalDragIndicator, { backgroundColor: theme.divider }]} />
 
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleContainer}>
@@ -873,9 +866,9 @@ export default function HomeScreen() {
                   color={
                     mentalAnalysis.primaryState === 'crisis' ||
                     mentalAnalysis.primaryState === 'depression'
-                      ? '#FF3B30'
+                      ? theme.error
                       : mentalAnalysis.primaryState === 'anxiety'
-                        ? '#FF9500'
+                        ? theme.warning
                         : theme.primary
                   }
                 />
@@ -935,8 +928,6 @@ export default function HomeScreen() {
                     styles.tabButton,
                     activeTab === tab.key && {
                       backgroundColor: theme.surfaceRaised,
-                      borderWidth: 1,
-                      borderColor: theme.border,
                     },
                   ]}>
                   <MaterialCommunityIcons
@@ -1127,20 +1118,19 @@ export default function HomeScreen() {
                           styles.phoneButton,
                           {
                             backgroundColor: theme.surfaceSoft,
-                            borderColor: theme.border,
                           },
                         ]}>
                         <View
                           style={[
                             styles.phoneIconBg,
                             {
-                              backgroundColor: 'rgba(255, 59, 48, 0.1)',
+                              backgroundColor: theme.errorSoft,
                             },
                           ]}>
                           <MaterialCommunityIcons
                             name="phone"
                             size={20}
-                            color="#FF3B30"
+                            color={theme.error}
                           />
                         </View>
                         <View style={styles.phoneTextContainer}>
@@ -1275,7 +1265,6 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
   },
 
   /* ── Headline ── */
@@ -1311,8 +1300,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   noteInputWrapper: {
-    borderWidth: 1,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
   },
@@ -1330,8 +1318,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: Spacing.two - 2,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
+    borderRadius: BorderRadius.md,
     gap: 2,
   },
   emojiText: { fontSize: 20 },
@@ -1346,8 +1333,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     padding: Spacing.two + 4,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
+    borderRadius: BorderRadius.md,
     marginTop: Spacing.one,
   },
   alertTextTitle: {
@@ -1362,10 +1348,9 @@ const styles = StyleSheet.create({
 
   /* ── Upcoming Session Card ── */
   upcomingCard: {
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.lg,
     padding: Spacing.three,
     gap: Spacing.two,
-    ...Shadows.light.card,
   },
   upcomingTopRow: {
     flexDirection: 'row',
@@ -1438,7 +1423,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two - 2,
     borderRadius: BorderRadius.full,
-    borderWidth: 1,
   },
   filterPillText: {
     fontSize: FontSize.caption,
@@ -1474,24 +1458,21 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
     zIndex: 9999,
   },
   modalContent: {
     width: '100%',
     maxWidth: MaxContentWidth,
-    borderTopLeftRadius: BorderRadius.lg,
-    borderTopRightRadius: BorderRadius.lg,
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
     padding: Spacing.four,
     maxHeight: '90%',
-    borderTopWidth: 1,
     gap: Spacing.three,
   },
   modalDragIndicator: {
     width: 40,
     height: 4,
-    backgroundColor: 'rgba(100, 116, 139, 0.2)',
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: Spacing.two,
@@ -1572,7 +1553,6 @@ const styles = StyleSheet.create({
   breathingCircle: {
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#5B4FE5',
     shadowOpacity: 0.15,
     shadowRadius: 20,
     elevation: 4,
@@ -1605,8 +1585,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: Spacing.three,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
+    borderRadius: BorderRadius.md,
   },
   phoneTextContainer: {
     flex: 1,

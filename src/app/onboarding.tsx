@@ -63,19 +63,19 @@ export default function OnboardingScreen() {
       title: 'Expert Support, Instantly',
       subtitle: 'Browse professional counselors, book hybrid consultations, and access voice or video call sessions directly inside the app.',
       icon: 'video-outline',
-      color: '#0284C7',
+      color: theme.info,
     },
     {
       title: 'Track Your Wellbeing',
       subtitle: 'Log your feelings daily in your private journal. Notice emotional trends and build custom plans to maintain your inner balance.',
       icon: 'notebook-edit-outline',
-      color: '#059669',
+      color: theme.success,
     },
     {
       title: 'Customize Your Care',
       subtitle: 'Select any key focus areas you would like support with so we can personalize your experience.',
       icon: 'tune-variant',
-      color: '#D97706',
+      color: theme.warning,
     },
     {
       title: "You're All Set!",
@@ -122,8 +122,8 @@ export default function OnboardingScreen() {
                   onPress={() => handleTogglePreference(pref.id)}
                   style={[
                     styles.chip,
-                    { borderColor: theme.border, backgroundColor: theme.surfaceRaised },
-                    isSelected && { borderColor: theme.primary, backgroundColor: theme.primarySoft },
+                    { backgroundColor: theme.surfaceRaised },
+                    isSelected && { backgroundColor: theme.primarySoft },
                   ]}>
                   <MaterialCommunityIcons
                     name={pref.icon as any}
@@ -198,12 +198,10 @@ const styles = StyleSheet.create({
   iconContainer: {
     width: 130,
     height: 130,
-    borderRadius: BorderRadius.lg + 16,
+    borderRadius: BorderRadius.xxl,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: 'rgba(15, 23, 42, 0.05)',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 20,
     elevation: 3,
     marginBottom: Spacing.two,
@@ -235,7 +233,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three + 2,
     paddingVertical: Spacing.two + 2,
     borderRadius: BorderRadius.full,
-    borderWidth: 1,
   },
   chipLabel: {
     fontSize: FontSize.caption + 1,

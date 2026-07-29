@@ -1,14 +1,31 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CounselorCardData, CounselorCard } from '@/components/counseling-ui';
-import { Card } from '@/components/ui/card';
+import { CounselorCard, CounselorCardData } from '@/components/counseling-ui';
 import { SearchBar } from '@/components/ui/search-bar';
 import { SectionHeader } from '@/components/ui/section-header';
-import { BorderRadius, Colors, MaxContentWidth, Shadows, Size, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import {
+  BorderRadius,
+  FontSize,
+  FontWeight,
+  MaxContentWidth,
+  Shadows,
+  Size,
+  Spacing,
+} from '@/constants/theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
+import { fetchCounselors, SupabaseCounselor } from '@/lib/supabase-db';
+import { getCounselorPhoto } from '@/lib/counselor-utils';
 
 const categories = [
   { id: 'anxiety', label: 'Anxiety', icon: 'brain' },
@@ -17,50 +34,66 @@ const categories = [
   { id: 'academic', label: 'Academic support', icon: 'school-outline' },
 ] as const;
 
-const counselors: CounselorCardData[] = [
-  {
-    id: 'selina-badu',
-    name: 'Selina Badu',
-    specialty: 'Anxiety & self-esteem',
-    rating: '5.0',
-    nextSlot: 'Available today',
-    availability: 'Online - 15 min response',
-    initials: 'SB',
-    background: '#F6F0E4',
-    foreground: Colors.light.primary,
-    highlights: ['Anxiety', 'Supportive'],
-  },
-  {
-    id: 'yaw-mensah',
-    name: 'Yaw Mensah',
-    specialty: 'Student life coaching',
-    rating: '4.8',
-    nextSlot: 'Open Fri 10:00 AM',
-    availability: 'Hybrid - Main campus',
-    initials: 'YM',
-    background: '#EEF7F5',
-    foreground: '#6B6FF2',
-    highlights: ['Focus', 'Confidence'],
-  },
-  {
-    id: 'nana-serwaa',
-    name: 'Nana Serwaa',
-    specialty: 'Relationships & recovery',
-    rating: '4.9',
-    nextSlot: 'Open Sat 1:00 PM',
-    availability: 'Online - Evening hours',
-    initials: 'NS',
-    background: '#F3EDF8',
-    foreground: Colors.light.accent,
-    highlights: ['Relationships', 'Trauma-informed'],
-  },
-];
-
+function mapCounselorToCard(c: SupabaseCounselor): CounselorCardData {
+  const name = c.profile?.name || 'Counselor';
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('');
+  const photoUrl = getCounselorPhoto(name, c.profile?.avatar_url);
+  return {
+    id: c.id,
+    name,
+    specialty: c.specialties[0] || 'Peer Guide',
+    rating: c.rating ? c.rating.toFixed(1) : '5.0',
+    nextSlot: 'Available now',
+    availability: `Available now`,
+    initials,
+    background: '',
+    foreground: '',
+    highlights: c.specialties.slice(0, 3),
+  };
+}
 
 export default function SearchCounselorScreen() {
   const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const shadow = isDark ? Shadows.dark : Shadows.light;
+
+  const [counselors, setCounselors] = useState<SupabaseCounselor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await fetchCounselors();
+        setCounselors(list);
+      } catch (err) {
+        console.warn('Failed to fetch counselors:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const filtered = counselors.filter((c) => {
+    const name = c.profile?.name || '';
+    const specs = c.specialties.join(' ');
+    const matchesSearch =
+      !search ||
+      name.toLowerCase().includes(search.toLowerCase()) ||
+      specs.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory =
+      !activeCategory ||
+      c.specialties.some((s) => s.toLowerCase().includes(activeCategory.toLowerCase()));
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
@@ -72,86 +105,93 @@ export default function SearchCounselorScreen() {
         showsVerticalScrollIndicator={false}>
         <View style={styles.container}>
           <View style={styles.headerRow}>
-            <View style={styles.eyebrowWrap}>
-              <Text style={styles.eyebrow}>Find support</Text>
+            <View style={[styles.eyebrowWrap, { backgroundColor: theme.surfaceRaised }, shadow.small]}>
+              <Text style={[styles.eyebrow, { color: theme.primary }]}>Find support</Text>
             </View>
-            <Pressable style={styles.bellButton} onPress={() => router.push('/notifications')}>
+            <Pressable style={[styles.bellButton, { backgroundColor: theme.surfaceRaised }]} onPress={() => router.push('/notifications')}>
               <MaterialCommunityIcons name="bell-outline" size={Size.iconMd} color={theme.text} />
             </Pressable>
           </View>
 
           <View style={styles.titleBlock}>
-            <Text style={styles.title}>Search counselor</Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.title, { color: theme.text }]}>Search counselor</Text>
+            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
               Explore licensed counselors by concern, style, or availability.
             </Text>
           </View>
 
-          <SearchBar placeholder="What would you like help with?" />
+          <SearchBar
+            value={search}
+            onChangeText={setSearch}
+            placeholder="What would you like help with?"
+          />
 
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.categoryRow}>
-            {categories.map((category, index) => (
-              <CategoryCard
-                key={category.id}
-                label={category.label}
-                icon={category.icon}
-                active={index === 0}
-              />
-            ))}
+            {categories.map((category) => {
+              const isActive = activeCategory === category.id;
+              return (
+                <Pressable
+                  key={category.id}
+                  onPress={() => setActiveCategory(isActive ? null : category.id)}
+                  style={[
+                    styles.categoryChip,
+                    {
+                      backgroundColor: isActive ? theme.primarySoft : theme.surfaceRaised,
+                    },
+                  ]}>
+                  <MaterialCommunityIcons
+                    name={category.icon}
+                    size={Size.iconSm}
+                    color={isActive ? theme.primary : theme.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.categoryLabel,
+                      { color: isActive ? theme.primary : theme.textSecondary },
+                    ]}>
+                    {category.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </ScrollView>
 
-          <SectionHeader title="Available counselors" actionLabel="Filter" />
+          <SectionHeader title="Available counselors" />
 
-          <View style={styles.cardStack}>
-            {counselors.map((counselor) => (
-              <CounselorCard
-                key={counselor.id}
-                counselor={counselor}
-                ctaLabel="Book session"
-                onPress={() =>
-                  router.push({
-                    pathname: '/booking/[counselor]',
-                    params: { counselor: counselor.id },
-                  })
-                }
-              />
-            ))}
-          </View>
+          {loading ? (
+            <ActivityIndicator size="large" color={theme.primary} style={{ marginVertical: Spacing.four }} />
+          ) : (
+            <View style={styles.cardStack}>
+              {filtered.length > 0 ? (
+                filtered.map((c) => (
+                  <CounselorCard
+                    key={c.id}
+                    counselor={mapCounselorToCard(c)}
+                    ctaLabel="Book session"
+                    onPress={() =>
+                      router.push({
+                        pathname: '/booking/[counselor]',
+                        params: { counselor: c.id },
+                      })
+                    }
+                  />
+                ))
+              ) : (
+                <View style={styles.emptyState}>
+                  <MaterialCommunityIcons name="account-search-outline" size={40} color={theme.textSecondary} />
+                  <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+                    {search ? `No counselors match "${search}"` : 'No counselors available right now.'}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
       </ScrollView>
     </View>
-  );
-}
-
-function CategoryCard({
-  label,
-  icon,
-  active,
-}: {
-  label: string;
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  active?: boolean;
-}) {
-  return (
-    <Card
-      variant="raised"
-      padding="two"
-      style={[
-        styles.categoryCard,
-        active && styles.categoryCardActive,
-      ]}>
-      <View style={styles.categoryIcon}>
-        <MaterialCommunityIcons
-          name={icon}
-          size={Size.iconLg}
-          color={active ? Colors.light.primary : Colors.light.primary}
-        />
-      </View>
-      <Text style={[styles.categoryLabel, active && styles.categoryLabelActive]}>{label}</Text>
-    </Card>
   );
 }
 
@@ -176,17 +216,12 @@ const styles = StyleSheet.create({
   },
   eyebrowWrap: {
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.light.surfaceRaised,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    ...Shadows.light.card,
   },
   eyebrow: {
-    color: Colors.light.primary,
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: FontSize.micro,
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
@@ -196,61 +231,46 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.light.surfaceRaised,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    ...Shadows.light.card,
   },
   titleBlock: {
     gap: Spacing.one,
   },
   title: {
-    color: Colors.light.text,
     fontSize: 32,
     lineHeight: 36,
-    fontWeight: '800',
+    fontWeight: FontWeight.extrabold,
     letterSpacing: -0.8,
   },
   subtitle: {
-    color: Colors.light.textSecondary,
-    fontSize: 15,
+    fontSize: FontSize.bodySm,
     lineHeight: 22,
   },
   categoryRow: {
     gap: Spacing.two,
     paddingRight: Spacing.four,
   },
-  categoryCard: {
-    width: 104,
+  categoryChip: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  categoryCardActive: {
-    borderColor: Colors.light.primarySoft,
-  },
-  categoryIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.light.primarySoft,
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: BorderRadius.full,
   },
   categoryLabel: {
-    textAlign: 'center',
-    color: Colors.light.text,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '700',
-  },
-  categoryLabelActive: {
-    color: Colors.light.primary,
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.semibold,
   },
   cardStack: {
     gap: Spacing.three,
+  },
+  emptyState: {
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.five,
+  },
+  emptyText: {
+    fontSize: FontSize.bodySm,
+    textAlign: 'center',
   },
 });

@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BorderRadius, FontSize, FontWeight, Shadows, Size, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
 
 interface AIMessage {
   id: string;
@@ -25,6 +25,7 @@ interface AIMessage {
 
 export default function AIChatbotScreen() {
   const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
@@ -99,7 +100,7 @@ export default function AIChatbotScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* Sticky Header */}
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.two, backgroundColor: theme.surfaceRaised, borderColor: theme.border }]}>
+      <View style={[styles.header, { paddingTop: insets.top + Spacing.two, backgroundColor: theme.surfaceRaised, borderColor: theme.border }, isDark ? Shadows.dark.card : Shadows.light.card]}>
         <View style={styles.headerLeft}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <MaterialCommunityIcons name="chevron-left" size={Size.iconXl} color={theme.text} />
@@ -131,7 +132,7 @@ export default function AIChatbotScreen() {
         style={styles.messageList}>
         
         <View style={styles.introBlock}>
-          <View style={[styles.largeBotIcon, { backgroundColor: theme.primarySoft }]}>
+          <View style={[styles.largeBotIcon, { backgroundColor: theme.primarySoft }, isDark ? Shadows.dark.card : Shadows.light.card]}>
             <MaterialCommunityIcons name="robot-outline" size={48} color={theme.primary} />
           </View>
           <Text style={[styles.introTitle, { color: theme.text }]}>Meet MindBuddy</Text>
@@ -199,7 +200,7 @@ export default function AIChatbotScreen() {
             <Pressable
               key={sug.label}
               onPress={() => handleSend(sug.query)}
-              style={[styles.suggestionPill, { backgroundColor: theme.surfaceRaised, borderColor: theme.border }]}>
+              style={[styles.suggestionPill, { backgroundColor: theme.surfaceRaised, borderColor: theme.border }, isDark ? Shadows.dark.card : Shadows.light.card]}>
               <Text style={[styles.suggestionText, { color: theme.primary }]}>{sug.label}</Text>
             </Pressable>
           ))}
@@ -208,7 +209,7 @@ export default function AIChatbotScreen() {
 
       {/* Bottom Text Inputs */}
       <View style={[styles.footerInput, { paddingBottom: Math.max(insets.bottom, Spacing.three) }]}>
-        <View style={[styles.inputContainer, { backgroundColor: theme.surfaceRaised, borderColor: theme.border }]}>
+        <View style={[styles.inputContainer, { backgroundColor: theme.surfaceRaised, borderColor: theme.border }, isDark ? Shadows.dark.card : Shadows.light.card]}>
           <TextInput
             placeholder="Talk to MindBuddy..."
             placeholderTextColor={theme.textSecondary}
@@ -246,7 +247,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.three,
     borderBottomWidth: 1,
-    ...Shadows.light.card,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -312,7 +312,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Shadows.light.card,
   },
   introTitle: {
     fontSize: FontSize.h2,
@@ -382,7 +381,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: BorderRadius.full,
     borderWidth: 1,
-    ...Shadows.light.card,
   },
   suggestionText: {
     fontSize: FontSize.caption,
@@ -400,7 +398,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: Spacing.three,
     gap: Spacing.two,
-    ...Shadows.light.card,
   },
   textInput: {
     flex: 1,

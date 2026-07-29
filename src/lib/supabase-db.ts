@@ -623,7 +623,7 @@ export async function createAppointment(
     time_slot: timeSlot,
     topic,
     status: 'pending',
-    created_at: new Date().toISOString(),
+    is_anonymous_display: isAnonymousDisplay,
   };
 
   if (!hasSupabaseConfig || !supabase) {
@@ -1310,6 +1310,31 @@ export async function createPost(
     throw error;
   }
   return data;
+}
+
+export async function updatePostModeration(
+  postId: string,
+  status: 'approved' | 'flagged' | 'blocked',
+  isFlagged: boolean,
+  reason?: string | null
+): Promise<boolean> {
+  if (!hasSupabaseConfig || !supabase) return false;
+
+  const { error } = await supabase
+    .from('posts')
+    .update({
+      moderation_status: status,
+      is_flagged: isFlagged,
+      flag_reason: reason || null,
+    })
+    .eq('id', postId);
+
+  if (error) {
+    console.error('Error updating post moderation status:', error);
+    return false;
+  }
+
+  return true;
 }
 
 export async function deletePost(postId: string): Promise<boolean> {

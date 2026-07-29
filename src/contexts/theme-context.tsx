@@ -5,7 +5,7 @@ import { safeStorage } from '@/lib/safe-storage';
 
 const THEME_KEY = 'counselcare_theme_mode';
 
-type ThemeMode = ThemeColor;
+type ThemeMode = keyof typeof Colors;
 
 interface ThemeContextValue {
   mode: ThemeMode;

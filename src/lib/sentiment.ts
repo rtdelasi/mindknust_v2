@@ -14,6 +14,7 @@ import {
   hfDetectCrisis,
   isHFConfigured,
 } from './hf-moderation';
+export { isHFConfigured };
 
 // ---------------------------------------------------------------------------
 // Local keyword lexicons (fallback)
@@ -136,7 +137,7 @@ function keywordSentiment(note: string): SentimentResult {
 // ---------------------------------------------------------------------------
 // Local keyword moderation (fallback)
 // ---------------------------------------------------------------------------
-function keywordModerate(content: string): ModerationResult {
+export function keywordModerate(content: string): ModerationResult {
   if (!content.trim()) return { status: 'approved', isFlagged: false, source: 'keyword' };
 
   const lower = content.toLowerCase();

@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { BorderRadius, FontSize, FontWeight, Spacing } from '@/constants/theme';
+import { BorderRadius, FontSize, FontWeight, Spacing, LetterSpacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type SectionHeaderProps = {
@@ -22,7 +22,8 @@ export function SectionHeader({ title, actionLabel, onActionPress }: SectionHead
             {
               color: theme.text,
               fontSize: FontSize.h3,
-              fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.extrabold,
+              letterSpacing: LetterSpacing.tight,
             },
           ]}>
           {title}
@@ -36,7 +37,7 @@ export function SectionHeader({ title, actionLabel, onActionPress }: SectionHead
             style={[
               styles.actionLabel,
               {
-                color: theme.textSecondary,
+                color: theme.primary,
                 fontSize: FontSize.caption,
                 fontWeight: FontWeight.semibold,
               },
@@ -56,9 +57,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.two,
   },
-  title: {
-    letterSpacing: -0.2,
-  },
+  title: {},
   action: {
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.one,

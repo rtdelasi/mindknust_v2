@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/avatar';
 import { BorderRadius, FontSize, FontWeight, Shadows, Size, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { supabase } from '@/lib/supabase';
@@ -44,6 +44,7 @@ interface ChatMessage {
 
 export default function ChatRoomScreen() {
   const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ id: string; name: string; role: string; recipientId: string }>();
@@ -272,7 +273,7 @@ export default function ChatRoomScreen() {
       style={[styles.screen, { backgroundColor: theme.background }]}>
       
       {/* Sticky Header */}
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.two, backgroundColor: theme.surfaceRaised, borderColor: theme.border }]}>
+      <View style={[styles.header, { paddingTop: insets.top + Spacing.two, backgroundColor: theme.surfaceRaised, borderColor: theme.border }, isDark ? Shadows.dark.card : Shadows.light.card]}>
         <View style={styles.headerLeft}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <MaterialCommunityIcons name="chevron-left" size={Size.iconXl} color={theme.text} />
@@ -375,6 +376,7 @@ export default function ChatRoomScreen() {
                         isOutgoing
                           ? [styles.outgoingBubble, { backgroundColor: theme.primary }]
                           : [styles.incomingBubble, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }],
+                        isDark ? Shadows.dark.card : Shadows.light.card,
                       ]}>
                       <Text style={[styles.messageText, { color: isOutgoing ? '#FFFFFF' : theme.text }]}>
                         {msg.text}
@@ -399,7 +401,7 @@ export default function ChatRoomScreen() {
               <View style={styles.incomingAvatarWrapper}>
                 <Avatar name={recipientName} size="sm" />
               </View>
-              <View style={[styles.bubble, styles.incomingBubble, { backgroundColor: theme.surfaceSoft, borderColor: theme.border, paddingVertical: 8 }]}>
+              <View style={[styles.bubble, styles.incomingBubble, { backgroundColor: theme.surfaceSoft, borderColor: theme.border, paddingVertical: 8 }, isDark ? Shadows.dark.card : Shadows.light.card]}>
                 <Text style={{ fontStyle: 'italic', fontSize: FontSize.caption, color: theme.textSecondary }}>
                   {recipientName} is typing...
                 </Text>
@@ -493,7 +495,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.three,
     borderBottomWidth: 1,
-    ...Shadows.light.card,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -608,7 +609,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two + 1,
     borderWidth: 1,
     borderColor: 'transparent',
-    ...Shadows.light.card,
   },
   incomingBubble: {
     borderTopLeftRadius: 4,

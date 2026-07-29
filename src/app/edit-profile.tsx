@@ -21,7 +21,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { BorderRadius, FontSize, FontWeight, Shadows, Size, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { auth, hasFirebaseConfig } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { upsertProfile, updateCounselorMetadata, fetchCounselors } from '@/lib/supabase-db';
@@ -30,6 +30,7 @@ import { getPublicUrl, uploadFile } from '@/lib/supabase-storage';
 
 export default function EditProfileScreen() {
   const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { role, userName, avatarUrl, updateProfile } = useMockAuth();
@@ -209,7 +210,7 @@ export default function EditProfileScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.two, backgroundColor: theme.surfaceRaised, borderColor: theme.border }]}>
+      <View style={[styles.header, { paddingTop: insets.top + Spacing.two, backgroundColor: theme.surfaceRaised, borderColor: theme.border }, isDark ? Shadows.dark.card : Shadows.light.card]}>
         <View style={styles.headerLeft}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <MaterialCommunityIcons name="chevron-left" size={Size.iconXl} color={theme.text} />
@@ -332,7 +333,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.three,
     borderBottomWidth: 1,
-    ...Shadows.light.card,
   },
   headerLeft: {
     flexDirection: 'row',

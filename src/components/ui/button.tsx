@@ -6,6 +6,11 @@ import {
   Text,
   ViewStyle,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
 import {
   BorderRadius,
@@ -14,6 +19,7 @@ import {
   Shadows,
   Size,
   Spacing,
+  Timing,
 } from '@/constants/theme';
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
 
@@ -41,41 +47,57 @@ export function Button({
   const isDark = useThemeMode() === 'dark';
   const shadow = isDark ? Shadows.dark : Shadows.light;
 
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handlePressIn = () => {
+    scale.value = withSpring(0.96, Timing.springSnappy);
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1, Timing.spring);
+  };
+
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        styles.base,
-        {
-          backgroundColor: isPrimary ? theme.primary : theme.surfaceRaised,
-          borderColor: isPrimary ? theme.primary : theme.border,
-          minHeight: Size.buttonHeight,
-          borderRadius: BorderRadius.full,
-          ...(!isPrimary ? shadow.card : shadow.raised),
-          opacity: disabled ? 0.56 : pressed ? 0.84 : 1,
-        },
-        style,
-      ]}>
-      {icon ? (
-        <MaterialCommunityIcons
-          name={icon}
-          size={Size.iconMd}
-          color={isPrimary ? theme.surfaceRaised : theme.primary}
-        />
-      ) : null}
-      <Text
-        style={[
-          styles.label,
+    <Animated.View style={[animatedStyle, style]}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        disabled={disabled}
+        style={({ pressed }) => [
+          styles.base,
           {
-            color: isPrimary ? theme.surfaceRaised : theme.primary,
-            fontSize: FontSize.body,
-            fontWeight: FontWeight.bold,
+            backgroundColor: isPrimary ? theme.primary : theme.surfaceSoft,
+            minHeight: Size.buttonHeight,
+            borderRadius: BorderRadius.xl,
+            ...(!isPrimary ? shadow.small : shadow.medium),
+            opacity: disabled ? 0.56 : 1,
           },
         ]}>
-        {label}
-      </Text>
-    </Pressable>
+        {icon ? (
+          <MaterialCommunityIcons
+            name={icon}
+            size={Size.iconMd}
+            color={isPrimary ? theme.textInverse : theme.primary}
+          />
+        ) : null}
+        <Text
+          style={[
+            styles.label,
+            {
+              color: isPrimary ? theme.textInverse : theme.primary,
+              fontSize: FontSize.body,
+              fontWeight: FontWeight.semibold,
+            },
+          ]}>
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -86,7 +108,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.two,
     paddingHorizontal: Spacing.four,
-    borderWidth: 1,
   },
   label: {
     letterSpacing: 0.1,

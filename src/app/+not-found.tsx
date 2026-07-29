@@ -1,15 +1,18 @@
 import { Link } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Colors } from '@/constants/theme';
+import { BorderRadius, Spacing, FontSize, FontWeight } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 
 export default function NotFound() {
+  const theme = useTheme();
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>This page is not available.</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <Text style={[styles.title, { color: theme.text }]}>This page is not available.</Text>
       <Link href="/(tabs)" asChild>
-        <Pressable style={styles.button}>
-          <Text style={styles.buttonText}>Back to home</Text>
+        <Pressable style={[styles.button, { backgroundColor: theme.primary }]}>
+          <Text style={[styles.buttonText, { color: theme.textInverse }]}>Back to home</Text>
         </Pressable>
       </Link>
     </View>
@@ -21,24 +24,20 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 16,
-    backgroundColor: Colors.light.background,
-    padding: 24,
+    gap: Spacing.four,
+    padding: Spacing.five,
   },
   title: {
-    color: Colors.light.text,
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: FontSize.bodyLg,
+    fontWeight: FontWeight.bold,
     textAlign: 'center',
   },
   button: {
-    borderRadius: 999,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: Colors.light.primary,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.five,
+    paddingVertical: Spacing.three,
   },
   buttonText: {
-    color: Colors.light.surfaceRaised,
-    fontWeight: '700',
+    fontWeight: FontWeight.bold,
   },
 });

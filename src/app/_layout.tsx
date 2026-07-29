@@ -238,7 +238,7 @@ function RootLayoutContent() {
   useEffect(() => {
     if (!supabase) return;
     const channel = supabase
-      .channel('calls-app')
+      .channel('calls-hangup-global')
       .on('broadcast', { event: 'call_hangup' }, (event) => {
         console.log('[Receiver] Received call_hangup:', event.payload);
         WebBrowser.dismissBrowser()?.catch(() => {});
@@ -322,7 +322,7 @@ function RootLayoutContent() {
 
       {/* ══════ Incoming Call Overlay ══════ */}
       {incomingCall && (
-        <View style={styles.incomingOverlay}>
+        <View style={[styles.incomingOverlay, { backgroundColor: theme.background }]}>
           <View style={styles.incomingCard}>
             {/* Pulse ring behind avatar */}
             <View style={[styles.incomingPulse, { transform: [{ scale: ringPulse }] }]} />
@@ -365,11 +365,11 @@ function RootLayoutContent() {
 
             {/* Accept / Decline buttons */}
             <View style={styles.incomingActions}>
-              <Pressable style={styles.declineBtn} onPress={handleDeclineCall}>
+              <Pressable style={[styles.declineBtn, { backgroundColor: theme.error }]} onPress={handleDeclineCall}>
                 <MaterialCommunityIcons name="phone-hangup" size={28} color="#FFFFFF" />
                 <Text style={styles.incomingBtnLabel}>Decline</Text>
               </Pressable>
-              <Pressable style={styles.acceptBtn} onPress={handleAcceptCall}>
+              <Pressable style={[styles.acceptBtn, { backgroundColor: theme.success }]} onPress={handleAcceptCall}>
                 <MaterialCommunityIcons
                   name={incomingCall.call_type === 'video' ? 'video' : 'phone'}
                   size={28}
@@ -437,7 +437,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#0F172A',
     zIndex: 99999,
     justifyContent: 'center',
     alignItems: 'center',
@@ -511,7 +510,6 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#EF4444',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -519,7 +517,6 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#22C55E',
     alignItems: 'center',
     justifyContent: 'center',
   },

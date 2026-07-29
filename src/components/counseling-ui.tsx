@@ -3,9 +3,8 @@ import { Link } from 'expo-router';
 import { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { Colors, Spacing } from '@/constants/theme';
-
-type Palette = (typeof Colors)[keyof typeof Colors];
+import { BorderRadius, FontSize, FontWeight, Shadows, Spacing } from '@/constants/theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
 
 export type CounselorCardData = {
   id: string;
@@ -29,35 +28,6 @@ export type SessionCardData = {
   accent: string;
 };
 
-type ScreenHeaderProps = {
-  eyebrow?: string;
-  title: string;
-  subtitle?: string;
-  actionLabel?: string;
-  onActionPress?: () => void;
-};
-
-type SectionHeaderProps = {
-  title: string;
-  actionLabel?: string;
-  onActionPress?: () => void;
-};
-
-type ScreenBackgroundProps = {
-  palette: Palette;
-  children: ReactNode;
-};
-
-type TagProps = {
-  label: string;
-  active?: boolean;
-  compact?: boolean;
-};
-
-type SearchFieldProps = {
-  placeholder: string;
-};
-
 type CounselorCardProps = {
   counselor: CounselorCardData;
   ctaLabel?: string;
@@ -70,124 +40,51 @@ type SessionCardProps = {
   onPress?: () => void;
 };
 
-type StatBadgeProps = {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  label: string;
-  value: string;
-};
-
-export function ScreenBackground({ palette, children }: ScreenBackgroundProps) {
-  return (
-    <View style={[styles.screen, { backgroundColor: palette.background }]}>
-      {children}
-    </View>
-  );
-}
-
-export function ScreenHeader({
-  eyebrow,
-  title,
-  subtitle,
-  actionLabel,
-  onActionPress,
-}: ScreenHeaderProps) {
-  return (
-    <View style={styles.headerBlock}>
-      {eyebrow ? <View style={styles.eyebrowPill}><TextInPill>{eyebrow}</TextInPill></View> : null}
-      <View style={styles.headerRow}>
-        <View style={styles.headerText}>
-          <ThemedHeading>{title}</ThemedHeading>
-          {subtitle ? <ThemedSubheading>{subtitle}</ThemedSubheading> : null}
-        </View>
-        {actionLabel ? (
-          <Pressable onPress={onActionPress} style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
-            <SmallLabel>{actionLabel}</SmallLabel>
-          </Pressable>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-export function SectionHeader({ title, actionLabel, onActionPress }: SectionHeaderProps) {
-  return (
-    <View style={styles.sectionHeader}>
-      <SectionTitle>{title}</SectionTitle>
-      {actionLabel ? (
-        <Pressable onPress={onActionPress} style={({ pressed }) => [styles.sectionAction, pressed && styles.pressed]}>
-          <SmallLabel>{actionLabel}</SmallLabel>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-export function SearchField({ placeholder }: SearchFieldProps) {
-  return (
-    <View style={styles.searchField}>
-      <MaterialCommunityIcons name="magnify" size={22} color={Colors.light.textSecondary} />
-      <TextInput
-        placeholder={placeholder}
-        placeholderTextColor={Colors.light.textSecondary}
-        style={styles.searchInput}
-      />
-    </View>
-  );
-}
-
-export function Tag({ label, active, compact }: TagProps) {
-  return (
-    <View
-      style={[
-        styles.tag,
-        active ? styles.tagActive : styles.tagIdle,
-        compact && styles.tagCompact,
-      ]}>
-      <SmallLabel style={active ? styles.tagActiveText : undefined}>{label}</SmallLabel>
-    </View>
-  );
-}
-
 export function CounselorCard({ counselor, ctaLabel = 'Book', onPress }: CounselorCardProps) {
+  const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
+  const shadow = isDark ? Shadows.dark : Shadows.light;
+
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         styles.counselorCard,
         pressed && styles.pressed,
-        { backgroundColor: counselor.background || Colors.light.surfaceRaised },
+        { backgroundColor: counselor.background || theme.surfaceRaised },
+        shadow.card,
       ]}>
       <View style={styles.counselorTopRow}>
-        <View style={[styles.avatar, { backgroundColor: counselor.foreground || Colors.light.primary }]}>
-          <CardInitial>{counselor.initials}</CardInitial>
+        <View style={[styles.avatar, { backgroundColor: counselor.foreground || theme.primary }]}>
+          <Text style={[styles.cardInitial, { color: theme.textInverse }]}>{counselor.initials}</Text>
         </View>
         <View style={styles.counselorMeta}>
-          <CardTitle>{counselor.name}</CardTitle>
-          <CardSubtitle>{counselor.specialty}</CardSubtitle>
-          <CardSubtitle>{counselor.availability}</CardSubtitle>
+          <Text style={[styles.cardTitle, { color: theme.text }]}>{counselor.name}</Text>
+          <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>{counselor.specialty}</Text>
+          <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>{counselor.availability}</Text>
         </View>
-        <View style={styles.ratingBadge}>
-          <MaterialCommunityIcons name="star" size={14} color={Colors.light.warning} />
-          <SmallLabel>{counselor.rating}</SmallLabel>
+        <View style={[styles.ratingBadge, { backgroundColor: theme.surfaceSoft }]}>
+          <MaterialCommunityIcons name="star" size={14} color={theme.warning} />
+          <Text style={[styles.smallLabel, { color: theme.text }]}>{counselor.rating}</Text>
         </View>
       </View>
       <View style={styles.highlightRow}>
         {counselor.highlights.map((item) => (
-          <View key={item} style={styles.highlightPill}>
-            <SmallLabel>{item}</SmallLabel>
+          <View key={item} style={[styles.highlightPill, { backgroundColor: theme.surfaceSoft }]}>
+            <Text style={[styles.smallLabel, { color: theme.textSecondary }]}>{item}</Text>
           </View>
         ))}
       </View>
       <View style={styles.counselorBottomRow}>
-        <View style={styles.slotPill}>
-          <MaterialCommunityIcons name="calendar-clock" size={15} color={Colors.light.primary} />
-          <SmallLabel>{counselor.nextSlot}</SmallLabel>
+        <View style={[styles.slotPill, { backgroundColor: theme.surfaceSoft }]}>
+          <MaterialCommunityIcons name="calendar-clock" size={15} color={theme.primary} />
+          <Text style={[styles.smallLabel, { color: theme.textSecondary }]}>{counselor.nextSlot}</Text>
         </View>
         <Link
           href={{ pathname: '/booking/[counselor]', params: { counselor: counselor.id } }}
           asChild>
-          <Pressable style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-            <SmallLabel style={styles.primaryButtonText}>{ctaLabel}</SmallLabel>
+          <Pressable style={({ pressed }) => [{ backgroundColor: theme.primary, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.four, paddingVertical: Spacing.two }, pressed && styles.pressed]}>
+            <Text style={[styles.primaryButtonText, { color: theme.textInverse }]}>{ctaLabel}</Text>
           </Pressable>
         </Link>
       </View>
@@ -196,6 +93,10 @@ export function CounselorCard({ counselor, ctaLabel = 'Book', onPress }: Counsel
 }
 
 export function SessionCard({ session, actionLabel = 'Join', onPress }: SessionCardProps) {
+  const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
+  const shadow = isDark ? Shadows.dark : Shadows.light;
+
   return (
     <Pressable
       onPress={onPress}
@@ -203,212 +104,37 @@ export function SessionCard({ session, actionLabel = 'Join', onPress }: SessionC
         styles.sessionCard,
         pressed && styles.pressed,
         { backgroundColor: session.accent },
+        shadow.raised,
       ]}>
       <View style={styles.sessionHeader}>
-        <View>
-          <CardTitle style={styles.sessionTitle}>{session.title}</CardTitle>
-          <CardSubtitle style={styles.sessionSubtitle}>{session.counselor}</CardSubtitle>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.sessionTitle, { color: theme.textInverse }]}>{session.title}</Text>
+          <Text style={[styles.sessionSubtitle, { color: 'rgba(255,255,255,0.88)' }]}>{session.counselor}</Text>
         </View>
         <View style={styles.sessionBadge}>
-          <MaterialCommunityIcons name="video" size={16} color={Colors.light.surfaceRaised} />
-          <SmallLabel style={styles.sessionBadgeText}>{session.date}</SmallLabel>
+          <MaterialCommunityIcons name="video" size={16} color={theme.textInverse} />
+          <Text style={[styles.sessionBadgeText, { color: theme.textInverse }]}>{session.date}</Text>
         </View>
       </View>
       <View style={styles.sessionFooter}>
-        <CardSubtitle style={styles.sessionNote}>{session.note}</CardSubtitle>
+        <Text style={[styles.sessionNote, { color: 'rgba(255,255,255,0.95)' }]}>{session.note}</Text>
         <View style={styles.sessionTimeRow}>
-          <MaterialCommunityIcons name="clock-outline" size={15} color={Colors.light.surfaceRaised} />
-          <SmallLabel style={styles.sessionTime}>{session.time}</SmallLabel>
+          <MaterialCommunityIcons name="clock-outline" size={15} color={theme.textInverse} />
+          <Text style={[styles.sessionTime, { color: theme.textInverse }]}>{session.time}</Text>
         </View>
-        <View style={styles.secondaryButton}>
-          <SmallLabel style={styles.secondaryButtonText}>{actionLabel}</SmallLabel>
+        <View style={[styles.secondaryButton, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
+          <Text style={[styles.secondaryButtonText, { color: theme.textInverse }]}>{actionLabel}</Text>
         </View>
       </View>
     </Pressable>
   );
 }
 
-export function StatBadge({ icon, label, value }: StatBadgeProps) {
-  return (
-    <View style={styles.statBadge}>
-      <MaterialCommunityIcons name={icon} size={18} color={Colors.light.primary} />
-      <View>
-        <SmallLabel>{label}</SmallLabel>
-        <CardTitle style={styles.statValue}>{value}</CardTitle>
-      </View>
-    </View>
-  );
-}
-
-export function SectionCard({ children }: { children: ReactNode }) {
-  return <View style={styles.sectionCard}>{children}</View>;
-}
-
-export function TinyPill({ children }: { children: ReactNode }) {
-  return <View style={styles.tinyPill}>{children}</View>;
-}
-
-function ThemedHeading({ children }: { children: ReactNode }) {
-  return <View><Text style={styles.heading}>{children}</Text></View>;
-}
-
-function ThemedSubheading({ children }: { children: ReactNode }) {
-  return <Text style={styles.subheading}>{children}</Text>;
-}
-
-function SectionTitle({ children }: { children: ReactNode }) {
-  return <Text style={styles.sectionTitle}>{children}</Text>;
-}
-
-function SmallLabel({ children, style }: { children: ReactNode; style?: object }) {
-  return <Text style={[styles.smallLabel, style]}>{children}</Text>;
-}
-
-function TextInPill({ children }: { children: ReactNode }) {
-  return <Text style={styles.pillLabel}>{children}</Text>;
-}
-
-function CardTitle({ children, style }: { children: ReactNode; style?: object }) {
-  return <Text style={[styles.cardTitle, style]}>{children}</Text>;
-}
-
-function CardSubtitle({ children, style }: { children: ReactNode; style?: object }) {
-  return <Text style={[styles.cardSubtitle, style]}>{children}</Text>;
-}
-
-function CardInitial({ children }: { children: ReactNode }) {
-  return <Text style={styles.cardInitial}>{children}</Text>;
-}
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  glowTop: {
-    display: 'none',
-  },
-  headerBlock: {
-    gap: Spacing.two,
-    marginBottom: Spacing.four,
-  },
-  eyebrowPill: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.one,
-    backgroundColor: Colors.light.surfaceRaised,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  pillLabel: {
-    color: Colors.light.primary,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  headerText: {
-    flex: 1,
-  },
-  heading: {
-    color: Colors.light.text,
-    fontSize: 34,
-    lineHeight: 38,
-    fontWeight: '800',
-    letterSpacing: -0.9,
-  },
-  subheading: {
-    marginTop: Spacing.one,
-    color: Colors.light.textSecondary,
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  headerAction: {
-    borderRadius: 999,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    backgroundColor: Colors.light.surfaceRaised,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.two,
-  },
-  sectionTitle: {
-    color: Colors.light.text,
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-  },
-  sectionAction: {
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.one,
-  },
-  smallLabel: {
-    color: Colors.light.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '600',
-  },
-  searchField: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    minHeight: 54,
-    borderRadius: 18,
-    paddingHorizontal: Spacing.four,
-    backgroundColor: Colors.light.surfaceRaised,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  searchInput: {
-    flex: 1,
-    color: Colors.light.text,
-    fontSize: 15,
-    paddingVertical: 0,
-  },
-  tag: {
-    borderRadius: 999,
-    paddingHorizontal: Spacing.three,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  tagIdle: {
-    backgroundColor: Colors.light.surfaceRaised,
-    borderColor: Colors.light.border,
-  },
-  tagActive: {
-    backgroundColor: Colors.light.primarySoft,
-    borderColor: Colors.light.primarySoft,
-  },
-  tagActiveText: {
-    color: Colors.light.primary,
-  },
-  tagCompact: {
-    paddingVertical: Spacing.one,
-  },
   counselorCard: {
-    borderRadius: 26,
+    borderRadius: BorderRadius.lg,
     padding: Spacing.four,
     gap: Spacing.three,
-    shadowColor: Colors.light.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
   },
   counselorTopRow: {
     flexDirection: 'row',
@@ -423,7 +149,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cardInitial: {
-    color: Colors.light.surfaceRaised,
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 0.2,
@@ -433,26 +158,28 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   cardTitle: {
-    color: Colors.light.text,
-    fontSize: 18,
+    fontSize: FontSize.bodyLg,
     lineHeight: 22,
     fontWeight: '700',
     letterSpacing: -0.2,
   },
   cardSubtitle: {
-    color: Colors.light.textSecondary,
-    fontSize: 13,
+    fontSize: FontSize.caption,
     lineHeight: 18,
+  },
+  smallLabel: {
+    fontSize: FontSize.caption,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   ratingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
     alignSelf: 'flex-start',
-    borderRadius: 999,
+    borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.one,
-    backgroundColor: Colors.light.surfaceRaised,
   },
   highlightRow: {
     flexDirection: 'row',
@@ -460,10 +187,9 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   highlightPill: {
-    borderRadius: 999,
+    borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.two,
     paddingVertical: 6,
-    backgroundColor: Colors.light.surfaceRaised,
   },
   counselorBottomRow: {
     flexDirection: 'row',
@@ -475,29 +201,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-    borderRadius: 999,
+    borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    backgroundColor: Colors.light.surfaceRaised,
-  },
-  primaryButton: {
-    borderRadius: 999,
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
-    backgroundColor: Colors.light.primary,
   },
   primaryButtonText: {
-    color: Colors.light.surfaceRaised,
+    fontSize: FontSize.caption,
+    fontWeight: '700',
   },
   sessionCard: {
-    borderRadius: 28,
+    borderRadius: BorderRadius.lg,
     padding: Spacing.four,
     gap: Spacing.four,
-    shadowColor: Colors.light.shadow,
-    shadowOpacity: 1,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 4,
   },
   sessionHeader: {
     flexDirection: 'row',
@@ -506,28 +221,32 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   sessionTitle: {
-    color: Colors.light.surfaceRaised,
+    fontSize: FontSize.bodyLg,
+    fontWeight: '700',
+    marginBottom: 2,
   },
   sessionSubtitle: {
-    color: 'rgba(255,255,255,0.88)',
+    fontSize: FontSize.caption,
   },
   sessionBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-    borderRadius: 999,
+    borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.one,
     backgroundColor: 'rgba(255,255,255,0.16)',
   },
   sessionBadgeText: {
-    color: Colors.light.surfaceRaised,
+    fontSize: FontSize.small,
+    fontWeight: '600',
   },
   sessionFooter: {
     gap: Spacing.two,
   },
   sessionNote: {
-    color: 'rgba(255,255,255,0.95)',
+    fontSize: FontSize.caption,
+    lineHeight: 18,
   },
   sessionTimeRow: {
     flexDirection: 'row',
@@ -535,50 +254,18 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   sessionTime: {
-    color: Colors.light.surfaceRaised,
+    fontSize: FontSize.caption,
+    fontWeight: '600',
   },
   secondaryButton: {
     alignSelf: 'flex-start',
-    borderRadius: 999,
+    borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   secondaryButtonText: {
-    color: Colors.light.surfaceRaised,
-  },
-  statBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    flex: 1,
-    minWidth: 140,
-    borderRadius: 22,
-    padding: Spacing.three,
-    backgroundColor: Colors.light.surfaceRaised,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  statValue: {
-    fontSize: 16,
-  },
-  sectionCard: {
-    borderRadius: 26,
-    padding: Spacing.four,
-    backgroundColor: Colors.light.surfaceRaised,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    shadowColor: Colors.light.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 2,
-  },
-  tinyPill: {
-    borderRadius: 999,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
-    backgroundColor: Colors.light.surfaceMuted,
+    fontSize: FontSize.caption,
+    fontWeight: '700',
   },
   pressed: {
     opacity: 0.78,

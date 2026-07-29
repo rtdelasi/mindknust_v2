@@ -21,7 +21,6 @@ import {
   FontSize,
   FontWeight,
   MaxContentWidth,
-  Shadows,
   Spacing,
 } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -151,7 +150,7 @@ export default function MySessionsScreen() {
           </View>
 
           {/* Search bar */}
-          <View style={[styles.searchBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.searchBar, { backgroundColor: theme.surface }]}>
             <MaterialCommunityIcons name="magnify" size={22} color={theme.textSecondary} style={styles.searchIcon} />
             <TextInput
               placeholder="Search counselor by name or specialty"
@@ -193,7 +192,7 @@ export default function MySessionsScreen() {
                       style={styles.carouselCardWrapper}
                     >
                       <LinearGradient
-                        colors={gradient}
+                        colors={gradient as unknown as readonly [string, string, ...string[]]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 1 }}
                         style={styles.carouselCard}
@@ -233,12 +232,12 @@ export default function MySessionsScreen() {
 
           {/* Upcoming Session card */}
           {nextSession ? (
-            <Card variant="raised" padding="four" style={styles.upcomingCard}>
+            <Card variant="raised" padding="four" style={[styles.upcomingCard, { backgroundColor: theme.primary }]}>
               <View style={styles.upcomingTopRow}>
                 <View style={styles.upcomingTextBlock}>
-                  <Text style={styles.upcomingLabel}>Upcoming Session</Text>
+                  <Text style={[styles.upcomingLabel, { color: theme.textInverse }]}>Upcoming Session</Text>
                   {nextSession.is_anonymous_display && role === 'student' ? (
-                    <Text style={styles.upcomingCounselor}>
+                    <Text style={[styles.upcomingCounselor, { color: theme.textInverse, opacity: 0.84 }]}>
                       {getDisplayIdentity(
                         { name: nextSession.student_profile?.name, anonymous_id: nextSession.student_profile?.anonymous_id },
                         nextSession.is_anonymous_display,
@@ -246,13 +245,13 @@ export default function MySessionsScreen() {
                       )} — Anonymous student
                     </Text>
                   ) : (
-                    <Text style={styles.upcomingCounselor}>
+                    <Text style={[styles.upcomingCounselor, { color: theme.textInverse, opacity: 0.84 }]}>
                       {nextSession.counselor_profile?.name || 'Counselor'} — Student counselor
                     </Text>
                   )}
                 </View>
-                <View style={styles.datePill}>
-                  <Text style={styles.datePillText}>
+                <View style={[styles.datePill, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                  <Text style={[styles.datePillText, { color: theme.textInverse }]}>
                     📅 {new Date(nextSession.appointment_date).toLocaleDateString([], {
                       month: 'short',
                       day: 'numeric',
@@ -261,14 +260,13 @@ export default function MySessionsScreen() {
                 </View>
               </View>
 
-              {/* Inner Focus Concern Sub-card */}
-              <View style={styles.focusConcernCard}>
-                <View style={styles.videoIconCircle}>
-                  <MaterialCommunityIcons name="video" size={20} color="#FFFFFF" />
+              <View style={[styles.focusConcernCard, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
+                <View style={[styles.videoIconCircle, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                  <MaterialCommunityIcons name="video" size={20} color={theme.textInverse} />
                 </View>
                 <View style={styles.focusTextContainer}>
-                  <Text style={styles.focusLabel}>FOCUS CONCERN</Text>
-                  <Text style={styles.focusTopic} numberOfLines={2}>
+                  <Text style={[styles.focusLabel, { color: theme.textInverse, opacity: 0.7 }]}>FOCUS CONCERN</Text>
+                  <Text style={[styles.focusTopic, { color: theme.textInverse }]} numberOfLines={2}>
                     {nextSession.topic || 'Academic Stress Management'}
                   </Text>
                 </View>
@@ -276,8 +274,8 @@ export default function MySessionsScreen() {
 
               <View style={styles.upcomingFooter}>
                 <View style={styles.timeRow}>
-                  <MaterialCommunityIcons name="clock-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.upcomingTime}>
+                  <MaterialCommunityIcons name="clock-outline" size={16} color={theme.textInverse} />
+                  <Text style={[styles.upcomingTime, { color: theme.textInverse }]}>
                     {nextSession.time_slot} ({nextSession.status.toUpperCase()})
                   </Text>
                 </View>
@@ -294,43 +292,45 @@ export default function MySessionsScreen() {
                   }
                   style={({ pressed }) => [
                     styles.joinButton,
+                    { backgroundColor: theme.textInverse },
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Text style={styles.joinButtonText}>Join call</Text>
+                  <Text style={[styles.joinButtonText, { color: theme.primary }]}>Join call</Text>
                 </Pressable>
               </View>
             </Card>
           ) : (
-            <Card variant="surface" padding="four" style={[styles.upcomingCard, styles.upcomingEmptyCard]}>
+            <Card variant="surface" padding="four" style={[styles.upcomingCard, { backgroundColor: theme.primary }]}>
               <View style={styles.upcomingTopRow}>
                 <View style={styles.upcomingTextBlock}>
-                  <Text style={styles.upcomingLabel}>Upcoming Session</Text>
-                  <Text style={styles.upcomingCounselor}>No upcoming sessions</Text>
+                  <Text style={[styles.upcomingLabel, { color: theme.textInverse }]}>Upcoming Session</Text>
+                  <Text style={[styles.upcomingCounselor, { color: theme.textInverse, opacity: 0.84 }]}>No upcoming sessions</Text>
                 </View>
               </View>
               <View style={[styles.focusConcernCard, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                <View style={styles.videoIconCircle}>
-                  <MaterialCommunityIcons name="calendar-question" size={20} color="#FFFFFF" />
+                <View style={[styles.videoIconCircle, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                  <MaterialCommunityIcons name="calendar-question" size={20} color={theme.textInverse} />
                 </View>
                 <View style={styles.focusTextContainer}>
-                  <Text style={styles.focusLabel}>GET STARTED</Text>
-                  <Text style={styles.focusTopic}>Choose a counselor to schedule a call</Text>
+                  <Text style={[styles.focusLabel, { color: theme.textInverse, opacity: 0.7 }]}>GET STARTED</Text>
+                  <Text style={[styles.focusTopic, { color: theme.textInverse }]}>Choose a counselor to schedule a call</Text>
                 </View>
               </View>
               <View style={styles.upcomingFooter}>
                 <View style={styles.timeRow}>
-                  <MaterialCommunityIcons name="clock-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.upcomingTime}>No appointments accepted</Text>
+                  <MaterialCommunityIcons name="clock-outline" size={16} color={theme.textInverse} />
+                  <Text style={[styles.upcomingTime, { color: theme.textInverse }]}>No appointments accepted</Text>
                 </View>
                 <Pressable
                   onPress={() => router.push('/search' as any)}
                   style={({ pressed }) => [
                     styles.joinButton,
+                    { backgroundColor: theme.textInverse },
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Text style={styles.joinButtonText}>Schedule</Text>
+                  <Text style={[styles.joinButtonText, { color: theme.primary }]}>Schedule</Text>
                 </Pressable>
               </View>
             </Card>
@@ -344,25 +344,25 @@ export default function MySessionsScreen() {
 
             {/* Stats row */}
             <View style={styles.statsRow}>
-              <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <View style={[styles.statIconCircle, { backgroundColor: '#E6F4EA' }]}>
-                  <MaterialCommunityIcons name="check-circle-outline" size={18} color="#3F8C7A" />
+              <View style={[styles.statCard, { backgroundColor: theme.surface }]}>
+                <View style={[styles.statIconCircle, { backgroundColor: theme.successSoft }]}>
+                  <MaterialCommunityIcons name="check-circle-outline" size={18} color={theme.success} />
                 </View>
                 <Text style={[styles.statValue, { color: theme.text }]}>{completedSessions.length}</Text>
                 <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Sessions{'\n'}completed</Text>
               </View>
 
-              <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <View style={[styles.statIconCircle, { backgroundColor: '#EAE8FF' }]}>
-                  <MaterialCommunityIcons name="notebook-outline" size={18} color="#5B4FE5" />
+              <View style={[styles.statCard, { backgroundColor: theme.surface }]}>
+                <View style={[styles.statIconCircle, { backgroundColor: theme.primarySoft }]}>
+                  <MaterialCommunityIcons name="notebook-outline" size={18} color={theme.primary} />
                 </View>
                 <Text style={[styles.statValue, { color: theme.text }]}>{moodLogs.length}</Text>
                 <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Mood{'\n'}entries</Text>
               </View>
 
-              <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <View style={[styles.statIconCircle, { backgroundColor: '#FEF3C7' }]}>
-                  <MaterialCommunityIcons name="account-heart-outline" size={18} color="#D97706" />
+              <View style={[styles.statCard, { backgroundColor: theme.surface }]}>
+                <View style={[styles.statIconCircle, { backgroundColor: theme.warningSoft }]}>
+                  <MaterialCommunityIcons name="account-heart-outline" size={18} color={theme.warning} />
                 </View>
                 <Text style={[styles.statValue, { color: theme.text }]} numberOfLines={1}>
                   {activeCounselor?.profile?.name?.split(' ')[0] || '—'}
@@ -373,7 +373,7 @@ export default function MySessionsScreen() {
 
             {/* Recent Sessions Timeline */}
             {recentCompleted.length > 0 && (
-              <View style={[styles.progressSubSection, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={[styles.progressSubSection, { backgroundColor: theme.surface }]}>
                 <Text style={[styles.progressSubTitle, { color: theme.text }]}>Recent sessions</Text>
                 <View style={styles.timeline}>
                   {recentCompleted.map((session, index) => {
@@ -402,7 +402,7 @@ export default function MySessionsScreen() {
 
             {/* Mood Trend */}
             {recentMoods.length > 0 && (
-              <View style={[styles.progressSubSection, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={[styles.progressSubSection, { backgroundColor: theme.surface }]}>
                 <Text style={[styles.progressSubTitle, { color: theme.text }]}>Mood this week</Text>
                 <View style={styles.moodTrendRow}>
                   {recentMoods.map((log) => {
@@ -421,7 +421,7 @@ export default function MySessionsScreen() {
 
             {/* Empty state when no data */}
             {completedSessions.length === 0 && moodLogs.length === 0 && (
-              <View style={[styles.progressEmpty, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={[styles.progressEmpty, { backgroundColor: theme.surface }]}>
                 <MaterialCommunityIcons name="chart-line-variant" size={32} color={theme.textSecondary} />
                 <Text style={[styles.progressEmptyText, { color: theme.textSecondary }]}>
                   Complete sessions and log moods to see your progress here.
@@ -478,10 +478,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 52,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.three,
-    borderWidth: 1,
-    ...Shadows.light.card,
   },
   searchIcon: {
     marginRight: Spacing.two,
@@ -517,7 +515,6 @@ const styles = StyleSheet.create({
     height: 140,
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
-    ...Shadows.light.card,
   },
   carouselCard: {
     flex: 1,
@@ -594,16 +591,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
   },
   upcomingCard: {
-    backgroundColor: '#5B5FEF',
-    borderColor: '#5B5FEF',
     borderRadius: BorderRadius.lg,
     padding: Spacing.four,
     gap: Spacing.three,
-    ...Shadows.light.raised,
-  },
-  upcomingEmptyCard: {
-    backgroundColor: '#7679F4',
-    borderColor: '#7679F4',
   },
   upcomingTopRow: {
     flexDirection: 'row',
@@ -684,14 +674,11 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
   },
   joinButton: {
-    backgroundColor: '#FFFFFF',
     borderRadius: BorderRadius.full,
     paddingHorizontal: 18,
     paddingVertical: 8,
-    ...Shadows.light.card,
   },
   joinButtonText: {
-    color: '#5B5FEF',
     fontSize: FontSize.body - 1,
     fontWeight: FontWeight.bold,
   },
@@ -705,9 +692,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: Spacing.three,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
     gap: Spacing.one,
-    ...Shadows.light.card,
   },
   statIconCircle: {
     width: 32,
@@ -728,9 +713,7 @@ const styles = StyleSheet.create({
   progressSubSection: {
     padding: Spacing.three,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
     gap: Spacing.two,
-    ...Shadows.light.card,
   },
   progressSubTitle: {
     fontSize: FontSize.body - 1,
@@ -789,8 +772,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: Spacing.four,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderStyle: 'dashed',
     gap: Spacing.two,
   },
   progressEmptyText: {

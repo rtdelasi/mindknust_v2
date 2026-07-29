@@ -21,8 +21,7 @@ export function Tag({ label, active, icon, onPress, style }: TagProps) {
       style={({ pressed }) => [
         styles.base,
         {
-          backgroundColor: active ? theme.primarySoft : theme.surfaceRaised,
-          borderColor: active ? theme.primarySoft : theme.border,
+          backgroundColor: active ? theme.primary : theme.surfaceSoft,
           borderRadius: BorderRadius.full,
           opacity: pressed ? 0.82 : 1,
         },
@@ -33,7 +32,7 @@ export function Tag({ label, active, icon, onPress, style }: TagProps) {
         style={[
           styles.label,
           {
-            color: active ? theme.primary : theme.text,
+            color: active ? theme.textInverse : theme.text,
             fontSize: FontSize.caption,
             fontWeight: FontWeight.semibold,
           },
@@ -54,7 +53,6 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    borderWidth: 1,
   },
   icon: {
     alignItems: 'center',

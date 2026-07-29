@@ -21,7 +21,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { BorderRadius, FontSize, FontWeight, Shadows, Size, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { supabase } from '@/lib/supabase';
@@ -33,6 +33,7 @@ import {
 
 export default function AdminApprovalsTabScreen() {
   const theme = useTheme();
+  const isDark = useThemeMode() === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { role } = useMockAuth();
@@ -250,7 +251,7 @@ export default function AdminApprovalsTabScreen() {
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* Toast Notification Banner */}
       {toastMessage && (
-        <View style={[styles.toastBanner, { backgroundColor: '#10B981', top: insets.top + 10 }]}>
+        <View style={[styles.toastBanner, { backgroundColor: theme.success, top: insets.top + 10 }, isDark ? Shadows.dark.medium : Shadows.light.medium]}>
           <MaterialCommunityIcons name="check-circle" size={20} color="#FFFFFF" />
           <Text style={styles.toastText}>{toastMessage}</Text>
         </View>
@@ -273,12 +274,12 @@ export default function AdminApprovalsTabScreen() {
       <View style={[styles.segmentContainer, { backgroundColor: theme.surfaceMuted }]}>
         <Pressable
           onPress={() => setActiveTab('pending')}
-          style={[styles.segmentBtn, activeTab === 'pending' && { backgroundColor: theme.surfaceRaised, ...Shadows.light.small }]}>
+          style={[styles.segmentBtn, activeTab === 'pending' && { backgroundColor: theme.surfaceRaised, ...(isDark ? Shadows.dark.small : Shadows.light.small) }]}>
           <Text style={[styles.segmentLabel, { color: activeTab === 'pending' ? theme.primary : theme.textSecondary }]}>
             Pending
           </Text>
           {counts.pending > 0 && (
-            <View style={[styles.countBadge, { backgroundColor: '#FF3B30' }]}>
+            <View style={[styles.countBadge, { backgroundColor: theme.error }]}>
               <Text style={styles.countBadgeText}>{counts.pending > 9 ? '9+' : counts.pending}</Text>
             </View>
           )}
@@ -286,12 +287,12 @@ export default function AdminApprovalsTabScreen() {
 
         <Pressable
           onPress={() => setActiveTab('approved')}
-          style={[styles.segmentBtn, activeTab === 'approved' && { backgroundColor: theme.surfaceRaised, ...Shadows.light.small }]}>
+          style={[styles.segmentBtn, activeTab === 'approved' && { backgroundColor: theme.surfaceRaised, ...(isDark ? Shadows.dark.small : Shadows.light.small) }]}>
           <Text style={[styles.segmentLabel, { color: activeTab === 'approved' ? theme.primary : theme.textSecondary }]}>
             Approved
           </Text>
           {counts.approved > 0 && (
-            <View style={[styles.countBadge, { backgroundColor: '#34C759' }]}>
+            <View style={[styles.countBadge, { backgroundColor: theme.success }]}>
               <Text style={styles.countBadgeText}>{counts.approved}</Text>
             </View>
           )}
@@ -299,7 +300,7 @@ export default function AdminApprovalsTabScreen() {
 
         <Pressable
           onPress={() => setActiveTab('rejected')}
-          style={[styles.segmentBtn, activeTab === 'rejected' && { backgroundColor: theme.surfaceRaised, ...Shadows.light.small }]}>
+          style={[styles.segmentBtn, activeTab === 'rejected' && { backgroundColor: theme.surfaceRaised, ...(isDark ? Shadows.dark.small : Shadows.light.small) }]}>
           <Text style={[styles.segmentLabel, { color: activeTab === 'rejected' ? theme.primary : theme.textSecondary }]}>
             Rejected
           </Text>
@@ -377,16 +378,16 @@ export default function AdminApprovalsTabScreen() {
                           {
                             backgroundColor:
                               item.approval_status === 'approved'
-                                ? '#E6F4EA'
+                                ? theme.successSoft
                                 : item.approval_status === 'rejected'
-                                ? '#FEE2E2'
-                                : '#FEF3C7',
+                                ? theme.errorSoft
+                                : theme.warningSoft,
                             borderColor:
                               item.approval_status === 'approved'
-                                ? '#34C759'
+                                ? theme.success
                                 : item.approval_status === 'rejected'
-                                ? '#EF4444'
-                                : '#D97706',
+                                ? theme.error
+                                : theme.warning,
                           },
                         ]}>
                         <Text
@@ -395,10 +396,10 @@ export default function AdminApprovalsTabScreen() {
                             {
                               color:
                                 item.approval_status === 'approved'
-                                  ? '#15803D'
+                                  ? theme.success
                                   : item.approval_status === 'rejected'
-                                  ? '#B91C1C'
-                                  : '#B45309',
+                                  ? theme.error
+                                  : theme.warning,
                             },
                           ]}>
                           {item.approval_status ? item.approval_status.toUpperCase() : 'PENDING'}
@@ -488,10 +489,10 @@ export default function AdminApprovalsTabScreen() {
                       marginTop: Spacing.two,
                       backgroundColor:
                         selectedCounselor.approval_status === 'approved'
-                          ? '#E6F4EA'
+                          ? theme.successSoft
                           : selectedCounselor.approval_status === 'rejected'
-                          ? '#FEE2E2'
-                          : '#FEF3C7',
+                          ? theme.errorSoft
+                          : theme.warningSoft,
                     },
                   ]}>
                   <Text
@@ -500,10 +501,10 @@ export default function AdminApprovalsTabScreen() {
                       {
                         color:
                           selectedCounselor.approval_status === 'approved'
-                            ? '#15803D'
+                            ? theme.success
                             : selectedCounselor.approval_status === 'rejected'
-                            ? '#B91C1C'
-                            : '#B45309',
+                            ? theme.error
+                            : theme.warning,
                       },
                     ]}>
                     STATUS: {selectedCounselor.approval_status ? selectedCounselor.approval_status.toUpperCase() : 'PENDING'}
@@ -606,9 +607,9 @@ export default function AdminApprovalsTabScreen() {
                   </Text>
                 )}
                 {selectedCounselor.rejection_reason && (
-                  <View style={[styles.rejectionReasonCard, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}>
-                    <Text style={[styles.fieldLabel, { color: '#B91C1C' }]}>Rejection Rationale:</Text>
-                    <Text style={[styles.summaryText, { color: '#991B1B' }]}>{selectedCounselor.rejection_reason}</Text>
+                  <View style={[styles.rejectionReasonCard, { backgroundColor: theme.errorSoft, borderColor: theme.error }]}>
+                    <Text style={[styles.fieldLabel, { color: theme.error }]}>Rejection Rationale:</Text>
+                    <Text style={[styles.summaryText, { color: theme.error }]}>{selectedCounselor.rejection_reason}</Text>
                   </View>
                 )}
               </View>
@@ -619,7 +620,7 @@ export default function AdminApprovalsTabScreen() {
                   <Pressable
                     onPress={() => handleApproveConfirm(selectedCounselor)}
                     disabled={actionLoading}
-                    style={[styles.approveFullBtn, { backgroundColor: '#10B981' }]}>
+                    style={[styles.approveFullBtn, { backgroundColor: theme.success }]}>
                     <MaterialCommunityIcons name="check-circle" size={20} color="#FFFFFF" />
                     <Text style={styles.actionBtnText}>Approve Counselor</Text>
                   </Pressable>
@@ -629,7 +630,7 @@ export default function AdminApprovalsTabScreen() {
                   <Pressable
                     onPress={() => handleOpenRejectModal(selectedCounselor)}
                     disabled={actionLoading}
-                    style={[styles.rejectFullBtn, { backgroundColor: '#EF4444' }]}>
+                    style={[styles.rejectFullBtn, { backgroundColor: theme.error }]}>
                     <MaterialCommunityIcons name="close-circle" size={20} color="#FFFFFF" />
                     <Text style={styles.actionBtnText}>Reject Application</Text>
                   </Pressable>
@@ -675,7 +676,7 @@ export default function AdminApprovalsTabScreen() {
               <Pressable
                 onPress={handleRejectConfirm}
                 disabled={actionLoading}
-                style={[styles.confirmRejectBtn, { backgroundColor: '#EF4444' }]}>
+                style={[styles.confirmRejectBtn, { backgroundColor: theme.error }]}>
                 <Text style={styles.confirmRejectText}>{actionLoading ? 'Processing...' : 'Confirm Rejection'}</Text>
               </Pressable>
             </View>
@@ -743,7 +744,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
     borderRadius: BorderRadius.md,
     zIndex: 9999,
-    ...Shadows.light.medium,
   },
   toastText: {
     color: '#FFFFFF',
