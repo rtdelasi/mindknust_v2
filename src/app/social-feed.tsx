@@ -195,7 +195,6 @@ export default function SocialFeedScreen() {
   const [selectedMediaUri, setSelectedMediaUri] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [postAsAnonymous, setPostAsAnonymous] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'anonymous' | 'staff'>('all');
 
   // Compose Modal & Figma Views State Machine
   const [composeModalVisible, setComposeModalVisible] = useState(false);
@@ -209,7 +208,7 @@ export default function SocialFeedScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const [facing, setFacing] = useState<'back' | 'front'>('back');
-  const [devicePhotos, setDevicePhotos] = useState<string[]>([]);
+  const [devicePhotos] = useState<string[]>([]);
 
   const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
 
@@ -254,7 +253,6 @@ export default function SocialFeedScreen() {
     if (activeSubView === 'gallery') {
       loadDevicePhotos();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSubView]);
 
   const handleCreatePost = async () => {
@@ -482,12 +480,6 @@ export default function SocialFeedScreen() {
     }
   };
 
-  const filteredPosts = posts.filter(post => {
-    if (activeFilter === 'anonymous') return post.is_anonymous;
-    if (activeFilter === 'staff') return post.profiles?.role === 'counselor';
-    return true;
-  });
-
   const renderPostItem = ({ item, index }: { item: SupabasePost; index: number }) => {
     const isAuthor = item.user_id === currentUserId;
     const authorName = getDisplayIdentity(
@@ -628,72 +620,40 @@ export default function SocialFeedScreen() {
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <MaterialCommunityIcons name="chevron-left" size={Size.iconXl} color={theme.text} />
           </Pressable>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Community Hub</Text>
+          <View>
+            <Text style={[styles.headerTitle, { color: theme.text }]}>Community</Text>
+            <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
+              {posts.length === 0
+                ? 'No posts yet'
+                : `${posts.length} post${posts.length === 1 ? '' : 's'}`}
+            </Text>
+          </View>
         </View>
       </View>
 
-      {/* Filter Tabs */}
-      <View style={[styles.filterContainer, { borderBottomColor: theme.divider }]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScrollContent}
-        >
-          <Pressable
-            onPress={() => setActiveFilter('all')}
-            style={[
-              styles.filterChip,
-              activeFilter === 'all' && styles.filterChipActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                { color: activeFilter === 'all' ? theme.text : theme.textSecondary }
-              ]}
-            >
-              All Posts
-            </Text>
-            {activeFilter === 'all' && <View style={[styles.filterUnderline, { backgroundColor: theme.primary }]} />}
-          </Pressable>
-
-          <Pressable
-            onPress={() => setActiveFilter('anonymous')}
-            style={[
-              styles.filterChip,
-              activeFilter === 'anonymous' && styles.filterChipActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                { color: activeFilter === 'anonymous' ? theme.text : theme.textSecondary }
-              ]}
-            >
-              Anonymous
-            </Text>
-            {activeFilter === 'anonymous' && <View style={[styles.filterUnderline, { backgroundColor: theme.primary }]} />}
-          </Pressable>
-
-          <Pressable
-            onPress={() => setActiveFilter('staff')}
-            style={[
-              styles.filterChip,
-              activeFilter === 'staff' && styles.filterChipActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                { color: activeFilter === 'staff' ? theme.text : theme.textSecondary }
-              ]}
-            >
-              Staff Only
-            </Text>
-            {activeFilter === 'staff' && <View style={[styles.filterUnderline, { backgroundColor: theme.primary }]} />}
-          </Pressable>
-        </ScrollView>
-      </View>
+      {/* Inline composer — a feed should invite posting, not hide it behind a FAB */}
+      <Pressable
+        onPress={() => {
+          setActiveSubView('compose');
+          setComposeModalVisible(true);
+        }}
+        style={[styles.composerPrompt, { borderBottomColor: theme.divider }]}>
+        <LinearGradient
+          colors={getAvatarGradient(currentUserId)}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.composerPromptAvatar}>
+          <Text style={[styles.avatarText, { color: theme.textInverse }]}>
+            {(userName || 'US').substring(0, 2).toUpperCase()}
+          </Text>
+        </LinearGradient>
+        <Text style={[styles.composerPromptText, { color: theme.textSecondary }]}>
+          Share something with the community…
+        </Text>
+        <View style={[styles.composerPromptIcon, { backgroundColor: theme.primarySoft }]}>
+          <MaterialCommunityIcons name="image-outline" size={18} color={theme.primary} />
+        </View>
+      </Pressable>
 
       {/* Main List & Skeleton state */}
       {loading && posts.length === 0 ? (
@@ -704,7 +664,7 @@ export default function SocialFeedScreen() {
         </ScrollView>
       ) : (
         <FlatList
-          data={filteredPosts}
+          data={posts}
           renderItem={renderPostItem}
           keyExtractor={item => item.id}
           refreshControl={
@@ -722,11 +682,23 @@ export default function SocialFeedScreen() {
           contentContainerStyle={[styles.listContainer, { paddingBottom: insets.bottom + Spacing.four }]}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="earth-off" size={48} color={theme.textSecondary} />
-              <Text style={[styles.emptyTitle, { color: theme.text }]}>No posts yet</Text>
+              <View style={[styles.emptyIconCircle, { backgroundColor: theme.primarySoft }]}>
+                <MaterialCommunityIcons name="message-text-outline" size={30} color={theme.primary} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>Start the conversation</Text>
               <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
-                Be the first to share an update with the campus community!
+                Share how you&apos;re doing, ask a question, or offer someone
+                encouragement. You can post anonymously.
               </Text>
+              <Pressable
+                onPress={() => {
+                  setActiveSubView('compose');
+                  setComposeModalVisible(true);
+                }}
+                style={[styles.emptyCta, { backgroundColor: theme.primary }]}>
+                <MaterialCommunityIcons name="pencil-outline" size={16} color={theme.onPrimary} />
+                <Text style={[styles.emptyCtaText, { color: theme.onPrimary }]}>Write a post</Text>
+              </Pressable>
             </View>
           }
         />
@@ -742,12 +714,12 @@ export default function SocialFeedScreen() {
           style={styles.fabPressable}
         >
           <LinearGradient
-            colors={[theme.primary, '#4C3DD6']}
+            colors={[theme.primary, theme.accent]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.fabGradient}
           >
-            <MaterialCommunityIcons name="plus" size={28} color="#FFFFFF" />
+            <MaterialCommunityIcons name="plus" size={28} color={theme.onPrimary} />
           </LinearGradient>
         </Pressable>
       </View>
@@ -780,7 +752,7 @@ export default function SocialFeedScreen() {
                       : theme.primary,
                   },
                 ]}>
-                <Text style={[styles.modalPostButtonText, { color: (!newPostContent.trim() && !selectedMediaUri) ? theme.textSecondary : '#FFFFFF' }]}>Post</Text>
+                <Text style={[styles.modalPostButtonText, { color: (!newPostContent.trim() && !selectedMediaUri) ? theme.textSecondary : theme.onPrimary }]}>Post</Text>
               </Pressable>
             </View>
 
@@ -1038,36 +1010,42 @@ const styles = StyleSheet.create({
     fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.bold,
   },
-  filterContainer: {
+  headerSubtitle: {
+    fontSize: FontSize.caption,
+    marginTop: 1,
+  },
+  composerPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.three,
     borderBottomWidth: 1,
   },
-  filterScrollContent: {
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+  composerPromptAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  filterChip: {
-    paddingVertical: Spacing.three,
-  },
-  filterChipActive: {
-  },
-  filterUnderline: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-    borderRadius: 1.5,
-  },
-  filterChipText: {
+  composerPromptText: {
+    flex: 1,
     fontSize: FontSize.body,
-    fontWeight: FontWeight.semibold,
+  },
+  composerPromptIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   listContainer: {
     paddingTop: Spacing.one,
   },
   postCard: {
     paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.three,
+    paddingVertical: Spacing.twoHalf,
   },
   postLayout: {
     flexDirection: 'row',
@@ -1143,6 +1121,7 @@ const styles = StyleSheet.create({
   postContent: {
     fontSize: FontSize.body,
     lineHeight: 22,
+    marginTop: Spacing.half,
   },
   fallbackContent: {
     flexDirection: 'row',
@@ -1198,9 +1177,11 @@ const styles = StyleSheet.create({
   actionBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     marginTop: Spacing.two,
     marginHorizontal: -Spacing.two,
+    // Grouped left rather than spread edge-to-edge: at phone widths a
+    // space-between bar strands the like button far from the post it belongs to.
+    gap: Spacing.four,
   },
   actionItem: {
     flexDirection: 'row',
@@ -1484,20 +1465,41 @@ const styles = StyleSheet.create({
     fontSize: FontSize.caption + 1,
   },
   emptyContainer: {
-    paddingVertical: Spacing.five,
+    paddingVertical: Spacing.six,
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.four,
+    paddingHorizontal: Spacing.five,
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.one,
   },
   emptyTitle: {
-    fontSize: FontSize.body,
+    fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.bold,
   },
   emptySubtitle: {
     fontSize: FontSize.caption + 1,
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: 20,
+  },
+  emptyCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.two,
+    borderRadius: BorderRadius.full,
+    marginTop: Spacing.two,
+  },
+  emptyCtaText: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.bold,
   },
   fullscreenImageOverlay: {
     position: 'absolute',

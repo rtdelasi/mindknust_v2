@@ -170,10 +170,13 @@ export default function StudentChatsScreen() {
                 filteredChats.map((chat, idx) => {
                   const nameVal = chat.counselor_profile?.name || 'Counselor';
                   const timestampVal = getSmartTimestamp(chat.last_message_at);
-                  
-                  // Simulate unread state on the first chat item for testing/UX display
-                  const isUnread = idx === 0 && !chat.last_message_at;
-                  const unreadCount = isUnread ? 2 : 0;
+
+                  // `chats` has no read-receipt column, so there is no honest way
+                  // to compute this yet. Previously the first message-less chat was
+                  // hard-coded to "2 unread", which told users they had messages
+                  // waiting in the one conversation that provably had none.
+                  const isUnread = false;
+                  const unreadCount = 0;
 
                   return (
                     <Pressable

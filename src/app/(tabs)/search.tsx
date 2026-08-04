@@ -42,7 +42,6 @@ function mapCounselorToCard(c: SupabaseCounselor): CounselorCardData {
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? '')
     .join('');
-  const photoUrl = getCounselorPhoto(name, c.profile?.avatar_url);
   return {
     id: c.id,
     name,
@@ -54,6 +53,7 @@ function mapCounselorToCard(c: SupabaseCounselor): CounselorCardData {
     background: '',
     foreground: '',
     highlights: c.specialties.slice(0, 3),
+    photoUrl: getCounselorPhoto(name, c.profile?.avatar_url),
   };
 }
 

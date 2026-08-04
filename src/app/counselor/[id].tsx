@@ -200,7 +200,7 @@ export default function CounselorDetailScreen() {
         }}>
         {/* ── Hero image ── */}
         <View style={styles.heroSection}>
-          <Image source={{ uri: imgUrl }} style={styles.heroImage} />
+          <Image source={{ uri: imgUrl }} style={[styles.heroImage, { backgroundColor: theme.surfaceMuted }]} />
           <View style={styles.heroOverlay} />
 
           {/* Top bar */}
@@ -433,7 +433,7 @@ export default function CounselorDetailScreen() {
               value={anonDisplay}
               onValueChange={setAnonDisplay}
               trackColor={{ false: theme.surfaceSoft, true: `${theme.primary}40` }}
-              thumbColor={anonDisplay ? theme.primary : '#f4f3f4'}
+              thumbColor={anonDisplay ? theme.primary : theme.surfaceRaised}
             />
           </View>
         ) : null}
@@ -500,7 +500,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
-    backgroundColor: '#E5E7EB',
   },
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,

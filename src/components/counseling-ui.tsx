@@ -1,9 +1,9 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Link } from 'expo-router';
-import { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useState } from 'react';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { BorderRadius, FontSize, FontWeight, Shadows, Spacing } from '@/constants/theme';
+import { BorderRadius, FontSize, Shadows, Spacing } from '@/constants/theme';
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
 
 export type CounselorCardData = {
@@ -17,6 +17,8 @@ export type CounselorCardData = {
   background: string;
   foreground: string;
   highlights: string[];
+  /** Avatar image. Falls back to initials when absent or the load fails. */
+  photoUrl?: string;
 };
 
 export type SessionCardData = {
@@ -44,6 +46,8 @@ export function CounselorCard({ counselor, ctaLabel = 'Book', onPress }: Counsel
   const theme = useTheme();
   const isDark = useThemeMode() === 'dark';
   const shadow = isDark ? Shadows.dark : Shadows.light;
+  const [photoFailed, setPhotoFailed] = useState(false);
+  const showPhoto = !!counselor.photoUrl && !photoFailed;
 
   return (
     <Pressable
@@ -56,7 +60,15 @@ export function CounselorCard({ counselor, ctaLabel = 'Book', onPress }: Counsel
       ]}>
       <View style={styles.counselorTopRow}>
         <View style={[styles.avatar, { backgroundColor: counselor.foreground || theme.primary }]}>
-          <Text style={[styles.cardInitial, { color: theme.textInverse }]}>{counselor.initials}</Text>
+          {showPhoto ? (
+            <Image
+              source={{ uri: counselor.photoUrl }}
+              style={styles.avatarImage}
+              onError={() => setPhotoFailed(true)}
+            />
+          ) : (
+            <Text style={[styles.cardInitial, { color: theme.textInverse }]}>{counselor.initials}</Text>
+          )}
         </View>
         <View style={styles.counselorMeta}>
           <Text style={[styles.cardTitle, { color: theme.text }]}>{counselor.name}</Text>
@@ -147,6 +159,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   cardInitial: {
     fontSize: 16,

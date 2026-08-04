@@ -103,9 +103,11 @@ export default function AdminApprovalsTabScreen() {
   // Realtime subscription to counselor_profiles updates
   useEffect(() => {
     if (!supabase) return;
+    const client = supabase;
 
-    const channel = supabase
-      .channel('admin_counselor_approvals')
+    const channelName = `admin_counselor_approvals-${Date.now()}`;
+    const channel = client
+      .channel(channelName)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'counselor_profiles' },
@@ -116,7 +118,7 @@ export default function AdminApprovalsTabScreen() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      client.removeChannel(channel);
     };
   }, [loadData]);
 

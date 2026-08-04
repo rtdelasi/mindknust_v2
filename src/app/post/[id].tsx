@@ -11,7 +11,6 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -41,7 +40,7 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id: postId } = useLocalSearchParams<{ id: string }>();
-  const { userName, role, anonymousId } = useMockAuth();
+  const { userName, role } = useMockAuth();
 
   const [post, setPost] = useState<SupabasePost | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
@@ -223,7 +222,7 @@ export default function PostDetailScreen() {
         ListHeaderComponent={
           <View style={[styles.originalPostContainer, { borderBottomColor: theme.border }]}>
             <View style={styles.postLayout}>
-              <View style={[styles.avatarCircle, { backgroundColor: isCounselor ? theme.primary : '#8A8FD9' }]}>
+              <View style={[styles.avatarCircle, { backgroundColor: isCounselor ? theme.primary : theme.accent }]}>
                 <Text style={styles.avatarText}>{initials}</Text>
               </View>
               <View style={styles.authorMetaBlock}>
@@ -236,8 +235,8 @@ export default function PostDetailScreen() {
                 </View>
               )}
               {showAnonBadge && (
-                <View style={[styles.roleBadge, { backgroundColor: '#F3E8FF' }]}>
-                  <Text style={[styles.roleText, { color: '#7C3AED' }]}>Anonymous</Text>
+                <View style={[styles.roleBadge, { backgroundColor: theme.roseSoft }]}>
+                  <Text style={[styles.roleText, { color: theme.rose }]}>Anonymous</Text>
                 </View>
               )}
               {isPostAuthor && (
@@ -275,9 +274,9 @@ export default function PostDetailScreen() {
                 <MaterialCommunityIcons
                   name={post.has_liked ? "heart" : "heart-outline"}
                   size={18}
-                  color={post.has_liked ? "#F91880" : theme.textSecondary}
+                  color={post.has_liked ? theme.rose : theme.textSecondary}
                 />
-                <Text style={[styles.actionCount, { color: post.has_liked ? "#F91880" : theme.textSecondary }]}>
+                <Text style={[styles.actionCount, { color: post.has_liked ? theme.rose : theme.textSecondary }]}>
                   {post.likes_count}
                 </Text>
               </Pressable>
@@ -296,7 +295,7 @@ export default function PostDetailScreen() {
 
           return (
             <View style={[styles.replyItem, { borderBottomColor: theme.border }]}>
-              <View style={[styles.replyAvatar, { backgroundColor: isComCounselor ? theme.primary : '#8A8FD9' }]}>
+              <View style={[styles.replyAvatar, { backgroundColor: isComCounselor ? theme.primary : theme.accent }]}>
                 <Text style={styles.replyAvatarText}>{comInitials}</Text>
               </View>
               <View style={styles.replyContentBlock}>
@@ -305,7 +304,7 @@ export default function PostDetailScreen() {
                   <Text style={[styles.replyHandle, { color: theme.textSecondary }]}>{comHandle}</Text>
                   <Text style={[styles.replyTime, { color: theme.textSecondary }]}>· {formatTime(item.created_at)}</Text>
                   {item.is_anonymous && (
-                    <View style={[styles.anonDot, { backgroundColor: '#7C3AED' }]}>
+                    <View style={[styles.anonDot, { backgroundColor: theme.rose }]}>
                       <Text style={styles.anonDotText}>A</Text>
                     </View>
                   )}

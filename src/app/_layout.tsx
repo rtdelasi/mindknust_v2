@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -32,11 +33,16 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <RootLayoutWithTheme />
-      </ThemeProvider>
-    </SafeAreaProvider>
+    // Must sit above the navigator: gesture handlers inside modal routes
+    // (e.g. the notifications screen) render in a separate view hierarchy and
+    // silently never fire without a root provider.
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <RootLayoutWithTheme />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -169,6 +175,7 @@ function RootLayoutContent() {
   useEffect(() => {
     if (!incomingCall) return;
     let sound: Audio.Sound | null = null;
+    let cancelled = false;
 
     const playRing = async () => {
       try {
@@ -177,6 +184,12 @@ function RootLayoutContent() {
           require('@/assets/sounds/incoming-ring.mp3'),
           { isLooping: true, volume: 0.8 }
         );
+        // The effect may have been torn down while createAsync was in flight;
+        // unload immediately instead of leaving a looping orphan sound.
+        if (cancelled) {
+          await s.unloadAsync();
+          return;
+        }
         sound = s;
         await sound.playAsync();
       } catch (e) {
@@ -187,6 +200,7 @@ function RootLayoutContent() {
     playRing();
 
     return () => {
+      cancelled = true;
       sound?.stopAsync();
       sound?.unloadAsync();
     };
@@ -237,8 +251,9 @@ function RootLayoutContent() {
   // Broadcast hang-up listener
   useEffect(() => {
     if (!supabase) return;
+    const channelName = `calls-hangup-global-${Date.now()}`;
     const channel = supabase
-      .channel('calls-hangup-global')
+      .channel(channelName)
       .on('broadcast', { event: 'call_hangup' }, (event) => {
         console.log('[Receiver] Received call_hangup:', event.payload);
         WebBrowser.dismissBrowser()?.catch(() => {});
@@ -251,8 +266,9 @@ function RootLayoutContent() {
   useEffect(() => {
     if (!supabase) return;
 
+    const channelName = `app-notifications-${Date.now()}`;
     const channel = supabase
-      .channel('app-notifications')
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -285,7 +301,7 @@ function RootLayoutContent() {
   const isAnonDisplay = incomingCall?.is_anonymous_display === true;
   const callerName = isAnonDisplay
     ? callerProfile?.anonymous_id || 'Unknown caller'
-    : callerProfile?.name || 'Unknown caller';
+    : callerProfile?.name || (profileFailed ? 'Caller unavailable' : 'Unknown caller');
   const hasPhoto = !isAnonDisplay && !!callerProfile?.avatar_url;
 
   return (
@@ -387,6 +403,9 @@ function RootLayoutContent() {
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   container: {
     flex: 1,
   },

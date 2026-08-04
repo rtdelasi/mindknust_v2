@@ -1,8 +1,9 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -10,6 +11,13 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card } from '@/components/ui/card';
@@ -18,7 +26,13 @@ import { useTheme } from '@/hooks/use-theme';
 import { supabase } from '@/lib/supabase';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  addDismissedIds,
+  addReadIds,
+  applyLocalState,
+  isBroadcast,
+  removeReadId,
+} from '@/lib/notification-state';
 
 interface Announcement {
   id: string;
@@ -28,6 +42,11 @@ interface Announcement {
   user_id?: string | null;
   is_read?: boolean;
 }
+
+/** Horizontal travel past which the row is treated as swiped away. */
+const SWIPE_THRESHOLD = 120;
+/** Height of a collapsed row's exit animation target. */
+const ROW_COLLAPSE_MS = 180;
 
 export default function NotificationsScreen() {
   const theme = useTheme();
@@ -40,10 +59,17 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<Announcement | null>(null);
 
-  const loadNotifications = async () => {
+  const currentUserId =
+    auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
+
+  const unreadCount = useMemo(
+    () => announcements.filter((a) => !a.is_read).length,
+    [announcements]
+  );
+
+  const loadNotifications = useCallback(async () => {
     try {
       if (!supabase) return;
-      const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
 
       const { data, error } = await supabase
         .from('notifications')
@@ -52,15 +78,7 @@ export default function NotificationsScreen() {
         .order('created_at', { ascending: false });
 
       if (!error && data) {
-        const localReadJson = await AsyncStorage.getItem('counselcare_read_notification_ids');
-        const localReadIds: string[] = localReadJson ? JSON.parse(localReadJson) : [];
-
-        const merged = data.map((item: any) => ({
-          ...item,
-          is_read: item.is_read || localReadIds.includes(item.id),
-        }));
-
-        setAnnouncements(merged);
+        setAnnouncements(await applyLocalState(data as Announcement[], currentUserId));
       }
     } catch (err) {
       console.warn('Error loading announcements:', err);
@@ -68,40 +86,153 @@ export default function NotificationsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [currentUserId]);
 
-  const handleSelectNotification = async (item: Announcement) => {
-    setSelected(item);
+  /**
+   * Marks a notification read. Personal rows are persisted server-side so the
+   * state follows the user across devices; broadcasts are local-only because
+   * their `is_read` column is shared by every recipient.
+   */
+  const markRead = useCallback(
+    async (item: Announcement) => {
+      if (item.is_read) return;
 
-    if (!item.is_read) {
       setAnnouncements((prev) =>
         prev.map((ann) => (ann.id === item.id ? { ...ann, is_read: true } : ann))
       );
 
       try {
-        const localReadJson = await AsyncStorage.getItem('counselcare_read_notification_ids');
-        const localReadIds: string[] = localReadJson ? JSON.parse(localReadJson) : [];
-        if (!localReadIds.includes(item.id)) {
-          localReadIds.push(item.id);
-          await AsyncStorage.setItem('counselcare_read_notification_ids', JSON.stringify(localReadIds));
-        }
+        await addReadIds(currentUserId, [item.id]);
 
-        if (supabase) {
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('id', item.id);
+        if (supabase && !isBroadcast(item)) {
+          await supabase.from('notifications').update({ is_read: true }).eq('id', item.id);
         }
       } catch (err) {
         console.warn('Error marking notification as read:', err);
       }
+    },
+    [currentUserId]
+  );
+
+  const markUnread = useCallback(
+    async (item: Announcement) => {
+      setAnnouncements((prev) =>
+        prev.map((ann) => (ann.id === item.id ? { ...ann, is_read: false } : ann))
+      );
+
+      try {
+        await removeReadId(currentUserId, item.id);
+
+        if (supabase && !isBroadcast(item)) {
+          await supabase.from('notifications').update({ is_read: false }).eq('id', item.id);
+        }
+      } catch (err) {
+        console.warn('Error marking notification as unread:', err);
+      }
+    },
+    [currentUserId]
+  );
+
+  const markAllRead = useCallback(async () => {
+    const unread = announcements.filter((a) => !a.is_read);
+    if (unread.length === 0) return;
+
+    setAnnouncements((prev) => prev.map((ann) => ({ ...ann, is_read: true })));
+
+    try {
+      await addReadIds(
+        currentUserId,
+        unread.map((a) => a.id)
+      );
+
+      const personalIds = unread.filter((a) => !isBroadcast(a)).map((a) => a.id);
+      if (supabase && personalIds.length > 0) {
+        await supabase.from('notifications').update({ is_read: true }).in('id', personalIds);
+      }
+    } catch (err) {
+      console.warn('Error marking all as read:', err);
     }
+  }, [announcements, currentUserId]);
+
+  /**
+   * Removes a notification from this user's list. A personal row is deleted
+   * outright; a broadcast is only hidden locally, since deleting it would remove
+   * the announcement for every other user too.
+   */
+  const dismiss = useCallback(
+    async (item: Announcement) => {
+      const previous = announcements;
+      setAnnouncements((prev) => prev.filter((ann) => ann.id !== item.id));
+
+      try {
+        await addDismissedIds(currentUserId, [item.id]);
+
+        if (supabase && !isBroadcast(item)) {
+          const { error } = await supabase.from('notifications').delete().eq('id', item.id);
+          if (error) throw error;
+        }
+      } catch (err) {
+        console.warn('Error deleting notification:', err);
+        // Put the row back rather than leaving the list disagreeing with the server.
+        setAnnouncements(previous);
+      }
+    },
+    [announcements, currentUserId]
+  );
+
+  const confirmClearAll = useCallback(() => {
+    if (announcements.length === 0) return;
+
+    const personalCount = announcements.filter((a) => !isBroadcast(a)).length;
+    const broadcastCount = announcements.length - personalCount;
+
+    Alert.alert(
+      'Clear all notifications?',
+      broadcastCount > 0
+        ? `${personalCount} personal notification${personalCount === 1 ? '' : 's'} will be deleted. ` +
+          `${broadcastCount} announcement${broadcastCount === 1 ? '' : 's'} will be hidden from your list.`
+        : 'This will permanently delete your notifications.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear all',
+          style: 'destructive',
+          onPress: async () => {
+            const previous = announcements;
+            setAnnouncements([]);
+            try {
+              await addDismissedIds(
+                currentUserId,
+                previous.map((a) => a.id)
+              );
+
+              const personalIds = previous.filter((a) => !isBroadcast(a)).map((a) => a.id);
+              if (supabase && personalIds.length > 0) {
+                const { error } = await supabase
+                  .from('notifications')
+                  .delete()
+                  .in('id', personalIds);
+                if (error) throw error;
+              }
+            } catch (err) {
+              console.warn('Error clearing notifications:', err);
+              setAnnouncements(previous);
+            }
+          },
+        },
+      ]
+    );
+  }, [announcements, currentUserId]);
+
+  const handleSelectNotification = (item: Announcement) => {
+    setSelected(item);
+    markRead(item);
   };
 
   useFocusEffect(
     useCallback(() => {
       loadNotifications();
-    }, [])
+    }, [loadNotifications])
   );
 
   const formatTime = (isoString: string) => {
@@ -139,8 +270,39 @@ export default function NotificationsScreen() {
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <MaterialCommunityIcons name="chevron-left" size={Size.iconXl} color={theme.text} />
           </Pressable>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Announcements</Text>
+          <View>
+            <Text style={[styles.headerTitle, { color: theme.text }]}>Announcements</Text>
+            {announcements.length > 0 && (
+              <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
+                {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
+              </Text>
+            )}
+          </View>
         </View>
+
+        {announcements.length > 0 && (
+          <View style={styles.headerActions}>
+            {unreadCount > 0 && (
+              <Pressable
+                onPress={markAllRead}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Mark all as read"
+                style={[styles.headerActionBtn, { backgroundColor: theme.primarySoft }]}>
+                <MaterialCommunityIcons name="email-open-outline" size={16} color={theme.primary} />
+                <Text style={[styles.headerActionText, { color: theme.primary }]}>Read all</Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={confirmClearAll}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Clear all notifications"
+              style={[styles.headerActionBtn, { backgroundColor: theme.errorSoft }]}>
+              <MaterialCommunityIcons name="trash-can-outline" size={16} color={theme.error} />
+            </Pressable>
+          </View>
+        )}
       </View>
 
       {/* Main List */}
@@ -169,51 +331,13 @@ export default function NotificationsScreen() {
           )
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => handleSelectNotification(item)}>
-            <Card
-              variant="raised"
-              padding="three"
-              style={[
-                styles.notifCard,
-                !item.is_read && {
-                  backgroundColor: theme.primarySoft,
-                  borderColor: theme.primary,
-                  borderWidth: 1,
-                },
-              ]}
-            >
-              <View style={styles.notifLayout}>
-                <View
-                  style={[
-                    styles.iconBox,
-                    { backgroundColor: !item.is_read ? theme.surfaceRaised : theme.primarySoft },
-                  ]}
-                >
-                  <MaterialCommunityIcons name="bullhorn-outline" size={20} color={theme.primary} />
-                </View>
-                <View style={styles.contentBox}>
-                  <View style={styles.notifHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                      {!item.is_read && (
-                        <View style={[styles.unreadDot, { backgroundColor: theme.primary }]} />
-                      )}
-                      <Text style={[styles.notifTitleText, { color: theme.text }]} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                    </View>
-                    <Text style={[styles.notifTimeText, { color: theme.textSecondary }]}>{formatTime(item.created_at)}</Text>
-                  </View>
-                  <Text
-                    style={[styles.notifBodyText, { color: theme.textSecondary }]}
-                    numberOfLines={2}
-                    ellipsizeMode="tail"
-                  >
-                    {item.body}
-                  </Text>
-                </View>
-              </View>
-            </Card>
-          </Pressable>
+          <SwipeableNotification
+            item={item}
+            onPress={() => handleSelectNotification(item)}
+            onDismiss={() => dismiss(item)}
+            onToggleRead={() => (item.is_read ? markUnread(item) : markRead(item))}
+            formatTime={formatTime}
+          />
         )}
       />
 
@@ -234,7 +358,7 @@ export default function NotificationsScreen() {
             <View style={styles.modalDragIndicator} />
 
             <View style={styles.modalHeader}>
-              <View style={styles.modalIcon}>
+              <View style={[styles.modalIcon, { backgroundColor: theme.primarySoft }]}>
                 <MaterialCommunityIcons
                   name="bullhorn-outline"
                   size={22}
@@ -262,10 +386,197 @@ export default function NotificationsScreen() {
             <Text style={[styles.modalBody, { color: theme.text }]}>
               {selected?.body}
             </Text>
+
+            <View style={[styles.modalDivider, { backgroundColor: theme.border }]} />
+
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => {
+                  const item = selected;
+                  setSelected(null);
+                  if (item) markUnread(item);
+                }}
+                style={[styles.modalActionBtn, { backgroundColor: theme.surfaceSoft }]}>
+                <MaterialCommunityIcons name="email-outline" size={16} color={theme.text} />
+                <Text style={[styles.modalActionText, { color: theme.text }]}>Mark unread</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  const item = selected;
+                  setSelected(null);
+                  if (item) dismiss(item);
+                }}
+                style={[styles.modalActionBtn, { backgroundColor: theme.errorSoft }]}>
+                <MaterialCommunityIcons name="trash-can-outline" size={16} color={theme.error} />
+                <Text style={[styles.modalActionText, { color: theme.error }]}>Delete</Text>
+              </Pressable>
+            </View>
           </View>
         </Pressable>
       </Modal>
     </View>
+  );
+}
+
+/**
+ * A notification row that can be swiped in either direction to dismiss, with a
+ * tap target for toggling read state. Swiping is the discoverable-by-habit
+ * gesture; the explicit button and the modal actions keep the same operations
+ * reachable for anyone who does not find it.
+ */
+function SwipeableNotification({
+  item,
+  onPress,
+  onDismiss,
+  onToggleRead,
+  formatTime,
+}: {
+  item: Announcement;
+  onPress: () => void;
+  onDismiss: () => void;
+  onToggleRead: () => void;
+  formatTime: (iso: string) => string;
+}) {
+  const theme = useTheme();
+  const translateX = useSharedValue(0);
+  /**
+   * -1 until the row has been measured. `withTiming` cannot interpolate from
+   * `undefined`, so the collapse only animates once a real pixel height is known;
+   * a negative sentinel also lets the style hook return a stable object shape.
+   */
+  const itemHeight = useSharedValue(-1);
+  const opacity = useSharedValue(1);
+
+  const pan = Gesture.Pan()
+    // Let the vertical list win until the gesture is clearly horizontal,
+    // otherwise every scroll attempt starts dragging a row sideways.
+    .activeOffsetX([-16, 16])
+    .failOffsetY([-12, 12])
+    .onUpdate((e) => {
+      translateX.value = e.translationX;
+    })
+    .onEnd((e) => {
+      if (Math.abs(e.translationX) > SWIPE_THRESHOLD) {
+        const direction = e.translationX > 0 ? 1 : -1;
+        translateX.value = withTiming(direction * 500, { duration: ROW_COLLAPSE_MS });
+        opacity.value = withTiming(0, { duration: ROW_COLLAPSE_MS });
+        itemHeight.value = withTiming(0, { duration: ROW_COLLAPSE_MS }, (finished) => {
+          if (finished) runOnJS(onDismiss)();
+        });
+      } else {
+        translateX.value = withTiming(0, { duration: 140 });
+      }
+    });
+
+  const rowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+    opacity: opacity.value,
+  }));
+
+  const containerStyle = useAnimatedStyle(() =>
+    itemHeight.value === undefined ? {} : { height: itemHeight.value, overflow: 'hidden' }
+  );
+
+  const deleteHintStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(Math.abs(translateX.value) / SWIPE_THRESHOLD, 1),
+  }));
+
+  return (
+    <Animated.View style={containerStyle}>
+      <View style={styles.swipeRow}>
+        {/* Delete affordance revealed underneath the sliding card */}
+        <Animated.View
+          style={[styles.swipeBackdrop, { backgroundColor: theme.errorSoft }, deleteHintStyle]}>
+          <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.error} />
+          <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.error} />
+        </Animated.View>
+
+        <GestureDetector gesture={pan}>
+          <Animated.View style={rowStyle}>
+            <Pressable onPress={onPress}>
+              <Card
+                variant="raised"
+                padding="three"
+                style={[
+                  styles.notifCard,
+                  !item.is_read && {
+                    backgroundColor: theme.primarySoft,
+                    borderColor: theme.primary,
+                    borderWidth: 1,
+                  },
+                ]}
+              >
+                <View style={styles.notifLayout}>
+                  <View
+                    style={[
+                      styles.iconBox,
+                      { backgroundColor: !item.is_read ? theme.surfaceRaised : theme.primarySoft },
+                    ]}
+                  >
+                    <MaterialCommunityIcons name="bullhorn-outline" size={20} color={theme.primary} />
+                  </View>
+                  <View style={styles.contentBox}>
+                    <View style={styles.notifHeader}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                        {!item.is_read && (
+                          <View style={[styles.unreadDot, { backgroundColor: theme.primary }]} />
+                        )}
+                        <Text style={[styles.notifTitleText, { color: theme.text }]} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                      </View>
+                      <Text style={[styles.notifTimeText, { color: theme.textSecondary }]}>{formatTime(item.created_at)}</Text>
+                    </View>
+                    <Text
+                      style={[styles.notifBodyText, { color: theme.textSecondary }]}
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
+                    >
+                      {item.body}
+                    </Text>
+
+                    <View style={styles.rowActions}>
+                      <Pressable
+                        onPress={onToggleRead}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={item.is_read ? 'Mark as unread' : 'Mark as read'}
+                        style={styles.rowActionBtn}>
+                        <MaterialCommunityIcons
+                          name={item.is_read ? 'email-outline' : 'email-open-outline'}
+                          size={14}
+                          color={theme.textSecondary}
+                        />
+                        <Text style={[styles.rowActionText, { color: theme.textSecondary }]}>
+                          {item.is_read ? 'Mark unread' : 'Mark read'}
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={onDismiss}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete notification"
+                        style={styles.rowActionBtn}>
+                        <MaterialCommunityIcons
+                          name="trash-can-outline"
+                          size={14}
+                          color={theme.textSecondary}
+                        />
+                        <Text style={[styles.rowActionText, { color: theme.textSecondary }]}>
+                          Delete
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </Card>
+            </Pressable>
+          </Animated.View>
+        </GestureDetector>
+      </View>
+    </Animated.View>
   );
 }
 
@@ -294,6 +605,27 @@ const styles = StyleSheet.create({
     fontSize: FontSize.body,
     fontWeight: FontWeight.bold,
   },
+  headerSubtitle: {
+    fontSize: FontSize.small,
+    marginTop: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  headerActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.oneHalf,
+    borderRadius: BorderRadius.full,
+  },
+  headerActionText: {
+    fontSize: FontSize.small,
+    fontWeight: FontWeight.bold,
+  },
   listContainer: {
     padding: Spacing.three,
     gap: Spacing.three,
@@ -316,6 +648,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: Spacing.five,
     lineHeight: 18,
+  },
+  swipeRow: {
+    position: 'relative',
+  },
+  swipeBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: BorderRadius.md + 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.four,
   },
   notifCard: {
     borderRadius: BorderRadius.md + 4,
@@ -352,6 +695,22 @@ const styles = StyleSheet.create({
   notifBodyText: {
     fontSize: FontSize.caption + 1,
     lineHeight: 18,
+  },
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.four,
+    marginTop: Spacing.one,
+  },
+  rowActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingVertical: 2,
+  },
+  rowActionText: {
+    fontSize: FontSize.small,
+    fontWeight: FontWeight.semibold,
   },
 
   /* ── Detail Modal ── */
@@ -392,7 +751,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#EAE8FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -420,6 +778,23 @@ const styles = StyleSheet.create({
   modalBody: {
     fontSize: FontSize.body,
     lineHeight: 24,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  modalActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one,
+    paddingVertical: Spacing.twoHalf,
+    borderRadius: BorderRadius.md,
+  },
+  modalActionText: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.bold,
   },
   unreadDot: {
     width: 8,

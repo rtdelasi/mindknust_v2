@@ -42,8 +42,10 @@ export default function TabLayout() {
     loadPendingBadge();
 
     if (role === 'admin' && supabase) {
-      const channel = supabase
-        .channel('admin_badge_count')
+      const client = supabase;
+      const channelName = `admin_badge_count-${Date.now()}`;
+      const channel = client
+        .channel(channelName)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'counselor_profiles' },
@@ -54,7 +56,7 @@ export default function TabLayout() {
         .subscribe();
 
       return () => {
-        supabase.removeChannel(channel);
+        client.removeChannel(channel);
       };
     }
   }, [role]);

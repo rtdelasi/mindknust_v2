@@ -83,6 +83,9 @@ export function Badge({
 
     prevCount.current = count;
     prevIsVisible.current = isVisible;
+    // `scale` is a Reanimated shared value with a stable identity, so it does
+    // not belong in the dependency array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, isVisible, animate]);
 
   const animatedStyle = useAnimatedStyle(() => {

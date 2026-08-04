@@ -1,11 +1,11 @@
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://htclrivgkcxsvnboojrf.supabase.co';
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseKey) {
-  console.log('No Supabase Key configured in .env');
+if (!supabaseUrl || !supabaseKey) {
+  console.log('Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env');
   process.exit(0);
 }
 

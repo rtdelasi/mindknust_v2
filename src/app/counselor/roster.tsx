@@ -162,7 +162,7 @@ export default function StudentRosterScreen() {
                     variant="primary"
                     icon="message-outline"
                     style={styles.actionBtn}
-                    onPress={() => router.push('/chats')}
+                    onPress={() => router.push('/(counselor-tabs)/chats')}
                   />
                 </View>
               </Card>

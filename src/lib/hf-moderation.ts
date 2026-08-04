@@ -10,7 +10,9 @@
  * the local keyword engine as a safe fallback.
  */
 
-const HF_API_KEY = process.env.EXPO_PUBLIC_HF_API_KEY ?? '';
+import { configuredValue } from '@/lib/env';
+
+const HF_API_KEY = configuredValue(process.env.EXPO_PUBLIC_HF_API_KEY) ?? '';
 const HF_BASE = 'https://router.huggingface.co/hf-inference/models';
 
 // Timeout for each HF request (ms) — keeps UX snappy even on slow connections

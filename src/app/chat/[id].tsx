@@ -27,7 +27,6 @@ import {
   sendMessage as submitDbMessage,
   SupabaseMessage,
   markMessagesAsRead,
-  isValidUUID,
 } from '@/lib/supabase-db';
 import { usePresence } from '@/contexts/presence-context';
 
@@ -68,7 +67,6 @@ export default function ChatRoomScreen() {
   const recipientName = params.name || 'Wellbeing Advisor';
   const recipientRole = params.role || 'Counselor';
   const recipientId = params.recipientId || '';
-  const isMockChat = !isValidUUID(chatId);
   const { isUserOnline } = usePresence();
   const otherUserStatus: 'Online' | 'Offline' = isUserOnline(recipientId) ? 'Online' : 'Offline';
 
@@ -109,8 +107,9 @@ export default function ChatRoomScreen() {
   useEffect(() => {
     if (!chatId || !supabase) return;
 
+    const channelName = `chat-room-${chatId}-${Date.now()}`;
     const channel = supabase
-      .channel(`chat-room-${chatId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -306,10 +305,10 @@ export default function ChatRoomScreen() {
       {role === 'student' && (
         <Pressable
           onPress={handleCrisisHotline}
-          style={[styles.crisisBanner, { backgroundColor: '#FF3B3014', borderColor: '#FF3B3026' }]}>
-          <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#FF3B30" />
-          <Text style={styles.crisisText}>Need urgent help? Tap for Crisis Support</Text>
-          <MaterialCommunityIcons name="chevron-right" size={16} color="#FF3B30" />
+          style={[styles.crisisBanner, { backgroundColor: theme.errorSoft, borderColor: theme.error }]}>
+          <MaterialCommunityIcons name="alert-circle-outline" size={16} color={theme.error} />
+          <Text style={[styles.crisisText, { color: theme.error }]}>Need urgent help? Tap for Crisis Support</Text>
+          <MaterialCommunityIcons name="chevron-right" size={16} color={theme.error} />
         </Pressable>
       )}
 
@@ -378,7 +377,7 @@ export default function ChatRoomScreen() {
                           : [styles.incomingBubble, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }],
                         isDark ? Shadows.dark.card : Shadows.light.card,
                       ]}>
-                      <Text style={[styles.messageText, { color: isOutgoing ? '#FFFFFF' : theme.text }]}>
+                      <Text style={[styles.messageText, { color: isOutgoing ? theme.onPrimary : theme.text }]}>
                         {msg.text}
                       </Text>
                     </View>
@@ -469,8 +468,8 @@ export default function ChatRoomScreen() {
             </Pressable>
 
             <Pressable onPress={handleBlockUser} style={[styles.modalOption, { borderTopWidth: 1, borderTopColor: theme.border, marginTop: 4 }]}>
-              <MaterialCommunityIcons name="shield-alert-outline" size={20} color="#FF3B30" />
-              <Text style={[styles.optionText, { color: '#FF3B30' }]}>Report & Block Contact</Text>
+              <MaterialCommunityIcons name="shield-alert-outline" size={20} color={theme.error} />
+              <Text style={[styles.optionText, { color: theme.error }]}>Report & Block Contact</Text>
             </Pressable>
 
             <Pressable onPress={() => setMenuVisible(false)} style={[styles.modalOption, { borderTopWidth: 1, borderTopColor: theme.border, marginTop: 4 }]}>
@@ -550,7 +549,6 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   crisisText: {
-    color: '#FF3B30',
     fontSize: FontSize.caption + 1,
     fontWeight: FontWeight.bold,
     flex: 1,

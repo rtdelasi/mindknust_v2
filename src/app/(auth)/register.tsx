@@ -311,9 +311,9 @@ export default function RegisterScreen() {
 
           {/* Error Banner */}
           {error ? (
-            <View style={[styles.errorBox, { backgroundColor: theme.surfaceSoft, borderColor: '#EF4444' }]}>
-              <MaterialCommunityIcons name="alert-circle" size={16} color="#DC2626" />
-              <Text style={styles.errorText}>{error}</Text>
+            <View style={[styles.errorBox, { backgroundColor: theme.errorSoft, borderColor: theme.error }]}>
+              <MaterialCommunityIcons name="alert-circle" size={16} color={theme.error} />
+              <Text style={[styles.errorText, { color: theme.error }]}>{error}</Text>
             </View>
           ) : null}
 
@@ -344,7 +344,7 @@ export default function RegisterScreen() {
                     <View style={styles.labelWithBadgeRow}>
                       <Text style={[styles.inputLabel, { color: theme.text }]}>Email Address *</Text>
                       {email.length > 3 && (
-                        <Text style={[styles.emailBadge, { color: isKnustEmail ? '#10B981' : theme.textSecondary }]}>
+                        <Text style={[styles.emailBadge, { color: isKnustEmail ? theme.success : theme.textSecondary }]}>
                           {isKnustEmail ? '✓ Valid KNUST Email' : 'Standard Email'}
                         </Text>
                       )}
@@ -511,7 +511,7 @@ export default function RegisterScreen() {
           {role === 'counselor' && (
             <Card variant="raised" padding="four" style={styles.card}>
               {/* Counselor Stepper Bar */}
-              <View style={styles.stepperBar}>
+              <View style={[styles.stepperBar, { borderColor: theme.border }]}>
                 <View style={[styles.stepItem, counselorStep >= 1 && { borderBottomColor: theme.primary }]}>
                   <Text style={[styles.stepItemText, { color: counselorStep >= 1 ? theme.primary : theme.textSecondary }]}>
                     1. Basic
@@ -643,7 +643,7 @@ export default function RegisterScreen() {
                             </Text>
                             <Text style={[styles.changeDocText, { color: theme.primary }]}>Tap to change</Text>
                           </View>
-                          <MaterialCommunityIcons name="check-circle" size={22} color="#10B981" />
+                          <MaterialCommunityIcons name="check-circle" size={22} color={theme.success} />
                         </View>
                       ) : (
                         <View style={styles.uploadPlaceholder}>
@@ -889,7 +889,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   errorText: {
-    color: '#DC2626',
     fontSize: FontSize.caption,
     fontWeight: FontWeight.semibold,
   },
@@ -1004,7 +1003,6 @@ const styles = StyleSheet.create({
   stepperBar: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderColor: '#E2E8F0',
     marginBottom: Spacing.two,
   },
   stepItem: {

@@ -33,7 +33,7 @@ import {
   BarChart,
   Bar
 } from 'recharts';
-import { supabase } from './supabase';
+import { supabase, hasSupabaseConfig } from './supabase';
 
 // Type definitions
 interface Profile {
@@ -116,6 +116,7 @@ export default function App() {
   const [flaggedContent, setFlaggedContent] = useState<FlaggedContent[]>([]);
   const [counselorApps, setCounselorApps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   // Flagged Content sub-filter
   const [flaggedSubTab, setFlaggedSubTab] = useState<'flagged' | 'blocked' | 'escalations'>('flagged');
@@ -141,66 +142,89 @@ export default function App() {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError('');
+
+    // Without Supabase credentials every query fails after a slow DNS timeout,
+    // which previously left the dashboard spinning for ~49s and then showed
+    // empty tables with no explanation. Fail fast with an actionable message.
+    if (!hasSupabaseConfig) {
+      setLoadError(
+        'Supabase is not configured. Create admin-dashboard/.env with VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (see .env.example), then restart the dev server.'
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
-      // 1. Fetch profiles
-      const { data: profData } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-      setProfiles(profData || []);
-
-      // 2. Fetch posts
-      const { data: postData } = await supabase
-        .from('posts')
-        .select('*, profiles:user_id(name, role)')
-        .order('created_at', { ascending: false });
-      setPosts(postData || []);
-
-      // 3. Fetch mood logs
-      const { data: moodData } = await supabase
-        .from('mood_logs')
-        .select('*')
-        .order('created_at', { ascending: false });
-      setMoodLogs(moodData || []);
-
-      // 4. Fetch appointments
-      const { data: apptData } = await supabase
-        .from('appointments')
-        .select(`
+      // Run every query concurrently — these are independent, and issuing them
+      // sequentially multiplied any per-request latency by seven.
+      const [
+        profRes,
+        postRes,
+        moodRes,
+        apptRes,
+        notifRes,
+        flagRes,
+        cAppRes,
+      ] = await Promise.all([
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase
+          .from('posts')
+          .select('*, profiles:user_id(name, role)')
+          .order('created_at', { ascending: false }),
+        supabase.from('mood_logs').select('*').order('created_at', { ascending: false }),
+        supabase
+          .from('appointments')
+          .select(`
           *,
           student_profile:student_id(name),
           counselor_profile:counselor_id(name)
         `)
-        .order('appointment_date', { ascending: false });
-      setAppointments(apptData || []);
-
-      // 5. Fetch announcements
-      const { data: notifData } = await supabase
-        .from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false });
-      setAnnouncements(notifData || []);
-
-      // 6. Fetch flagged/blocked posts from moderation engine
-      const { data: flagData } = await supabase
-        .from('posts')
-        .select('*, profiles:user_id(name, role)')
-        .in('moderation_status', ['flagged', 'blocked'])
-        .order('created_at', { ascending: false });
-      setFlaggedContent((flagData || []) as FlaggedContent[]);
-
-      // 7. Fetch pending counselor applications
-      const { data: cAppData } = await supabase
-        .from('counselor_profiles')
-        .select(`
+          .order('appointment_date', { ascending: false }),
+        supabase.from('notifications').select('*').order('created_at', { ascending: false }),
+        supabase
+          .from('posts')
+          .select('*, profiles:user_id(name, role)')
+          .in('moderation_status', ['flagged', 'blocked'])
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('counselor_profiles')
+          .select(`
           *,
           profile:profiles!user_id(name, email, avatar_url)
         `)
-        .order('created_at', { ascending: false });
-      setCounselorApps(cAppData || []);
+          .order('created_at', { ascending: false }),
+      ]);
 
+      setProfiles(profRes.data || []);
+      setPosts(postRes.data || []);
+      setMoodLogs(moodRes.data || []);
+      setAppointments(apptRes.data || []);
+      setAnnouncements(notifRes.data || []);
+      setFlaggedContent((flagRes.data || []) as FlaggedContent[]);
+      setCounselorApps(cAppRes.data || []);
+
+      // supabase-js resolves with an `error` field rather than throwing, so a
+      // try/catch alone would report success on a total connection failure.
+      const failures = [
+        ['profiles', profRes.error],
+        ['posts', postRes.error],
+        ['mood_logs', moodRes.error],
+        ['appointments', apptRes.error],
+        ['notifications', notifRes.error],
+        ['flagged posts', flagRes.error],
+        ['counselor_profiles', cAppRes.error],
+      ].filter(([, err]) => err) as [string, { message: string }][];
+
+      if (failures.length > 0) {
+        console.error('Error fetching database tables:', failures);
+        setLoadError(
+          `Failed to load ${failures.map(([t]) => t).join(', ')}: ${failures[0][1].message}`
+        );
+      }
     } catch (err) {
       console.error('Error fetching database tables:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unknown error loading dashboard data.');
     } finally {
       setLoading(false);
     }
@@ -556,6 +580,20 @@ export default function App() {
             <div className="h-96 flex flex-col items-center justify-center gap-4">
               <div className="w-8 h-8 border-4 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
               <p className="text-slate-400 text-sm">Synchronizing dashboard views...</p>
+            </div>
+          ) : loadError ? (
+            <div className="h-96 flex flex-col items-center justify-center gap-4 px-6">
+              <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-red-400" />
+              </div>
+              <p className="text-slate-200 font-semibold">Could not load dashboard data</p>
+              <p className="text-slate-400 text-sm text-center max-w-xl">{loadError}</p>
+              <button
+                onClick={loadData}
+                className="mt-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg border border-slate-700 transition-colors"
+              >
+                Retry
+              </button>
             </div>
           ) : (
             <>

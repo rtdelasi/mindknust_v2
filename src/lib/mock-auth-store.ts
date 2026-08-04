@@ -17,6 +17,11 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 let listeners: (() => void)[] = [];
 
+// Firebase restores its persisted session asynchronously. Until the first
+// onAuthStateChanged callback fires, `auth.currentUser` is null even for a
+// signed-in user, which would bounce them to the login screen on cold start.
+let firebaseAuthResolved = !(hasFirebaseConfig && auth);
+
 function notifyListeners() {
   listeners.forEach((listener) => listener());
 }
@@ -85,7 +90,10 @@ if (hasFirebaseConfig && auth) {
       await safeStorage.removeItem(AUTH_KEY);
       await safeStorage.removeItem(USER_KEY);
       await safeStorage.removeItem(AVATAR_KEY);
+      await safeStorage.removeItem(ANON_ID_KEY);
+      await safeStorage.removeItem(APPROVAL_STATUS_KEY);
     }
+    firebaseAuthResolved = true;
     notifyListeners();
   });
 }
@@ -98,8 +106,19 @@ export const mockAuth = {
     return (await safeStorage.getItem(ROLE_KEY)) as UserRole | null;
   },
   isAuthenticated: async (): Promise<boolean> => {
-    if (hasFirebaseConfig && auth) {
-      return auth.currentUser !== null;
+    const client = auth;
+    if (hasFirebaseConfig && client) {
+      // Wait for Firebase to restore its persisted session before answering,
+      // so a returning user is not reported as logged out on cold start.
+      if (!firebaseAuthResolved) {
+        await new Promise<void>((resolve) => {
+          const unsub = client.onAuthStateChanged(() => {
+            unsub();
+            resolve();
+          });
+        });
+      }
+      return client.currentUser !== null;
     }
     const localAuth = await safeStorage.getItem(AUTH_KEY);
     return localAuth === 'true';

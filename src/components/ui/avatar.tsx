@@ -1,6 +1,6 @@
 import { ImageSourcePropType, StyleSheet, Text, View, Image } from 'react-native';
 
-import { FontSize, FontWeight, Size, BorderRadius } from '@/constants/theme';
+import { FontSize, FontWeight, Size } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type AvatarSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';

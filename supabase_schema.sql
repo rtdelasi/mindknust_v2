@@ -269,6 +269,34 @@ create policy "View own chat messages"
     )
   );
 
+-- ############################################################################
+-- ##  SECURITY WARNING — READ BEFORE DEPLOYING                              ##
+-- ############################################################################
+-- The block below disables RLS on every table and grants full CRUD to the
+-- `anon` role. Because EXPO_PUBLIC_SUPABASE_ANON_KEY ships inside the app
+-- bundle, ANY user who extracts it has unrestricted read/write access to every
+-- profile, chat message, mood log and appointment in this database.
+--
+-- This is acceptable for local sandbox development ONLY. It must not reach
+-- production for an app handling mental-health data.
+--
+-- Note also that the policies defined above (lines ~200-270) are currently
+-- dead code twice over:
+--   1. They are revoked by the `disable row level security` block below.
+--   2. They test `auth.uid()`, which is always NULL here — the app
+--      authenticates with Firebase and never establishes a Supabase session,
+--      so every request arrives as the anonymous role. Simply re-enabling RLS
+--      would therefore deny all traffic and break the entire app.
+--
+-- To secure this properly, one of the following is required:
+--   a) Migrate authentication to Supabase Auth, so auth.uid() is populated; or
+--   b) Mint a Supabase JWT signed with the project secret after Firebase login
+--      and call supabase.auth.setSession(), then rewrite policies against the
+--      Firebase UID claim; or
+--   c) Move all data access behind server-side Edge Functions holding the
+--      service-role key, and revoke anon privileges entirely.
+-- ############################################################################
+
 -- Master Disable RLS block for dev/testing
 alter table if exists public.profiles disable row level security;
 alter table if exists public.student_profiles disable row level security;

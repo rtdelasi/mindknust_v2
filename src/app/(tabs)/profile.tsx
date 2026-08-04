@@ -215,7 +215,7 @@ export default function ProfileScreen() {
                 </View>
               </View>
               <Pressable
-                onPress={() => router.push('/chats')}
+                onPress={() => router.push('/(tabs)/chats')}
                 style={[styles.counselorBannerBtn, { backgroundColor: theme.primary }]}
               >
                 <MaterialCommunityIcons name="message-outline" size={16} color={theme.onPrimary} />

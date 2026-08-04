@@ -1,9 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-let CameraView: any = null;
-const useCameraPermissions = () => [
-  { granted: false, canAskAgain: true, status: 'unavailable' },
-  async () => ({ granted: false }),
-] as any;
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -28,7 +24,6 @@ import {
   createCall,
   updateCallStatus,
   subscribeToCallStatus,
-  SupabaseCall,
 } from '@/lib/supabase-db';
 import { getCounselorPhoto } from '@/lib/counselor-utils';
 
@@ -167,8 +162,9 @@ export default function VideoCallScreen() {
   // 6. Broadcast hang-up listener
   useEffect(() => {
     if (!supabase) return;
+    const channelName = `calls-hangup-local-${Date.now()}`;
     const channel = supabase
-      .channel('calls-hangup-local')
+      .channel(channelName)
       .on('broadcast', { event: 'call_hangup' }, (event) => {
         const payload = event.payload as { callId: string };
         if (payload.callId === callIdRef.current) {

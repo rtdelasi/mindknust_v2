@@ -137,8 +137,8 @@ export default function CounselorProfileScreen() {
           <Card variant="surface" padding="three" style={{ borderRadius: 16 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
-                  <MaterialCommunityIcons name="theme-light-dark" size={18} color="#CBD5E1" />
+                <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: theme.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+                  <MaterialCommunityIcons name="theme-light-dark" size={18} color={theme.primary} />
                 </View>
                 <Text style={{ fontSize: 15, fontWeight: '500', color: theme.text }}>Dark Mode</Text>
               </View>
@@ -146,7 +146,7 @@ export default function CounselorProfileScreen() {
                 value={themeMode === 'dark'}
                 onValueChange={(val) => setThemeMode(val ? 'dark' : 'light')}
                 trackColor={{ true: theme.primary, false: theme.surfaceMuted }}
-                thumbColor="#FFFFFF"
+                thumbColor={theme.onPrimary}
               />
             </View>
           </Card>
@@ -166,8 +166,8 @@ export default function CounselorProfileScreen() {
                 router.replace('/(auth)/login');
               }}
               style={styles.logoutBtn}>
-              <MaterialCommunityIcons name="logout" size={18} color="#FF3B30" style={{ marginRight: 6 }} />
-              <Text style={styles.logoutText}>Log Out Account</Text>
+              <MaterialCommunityIcons name="logout" size={18} color={theme.error} style={{ marginRight: 6 }} />
+              <Text style={[styles.logoutText, { color: theme.error }]}>Log Out Account</Text>
             </Pressable>
           </View>
 
@@ -296,11 +296,11 @@ function SpecialtyChip({
         },
       ]}>
       {active ? (
-        <MaterialCommunityIcons name="check-circle" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
+        <MaterialCommunityIcons name="check-circle" size={14} color={theme.onPrimary} style={{ marginRight: 4 }} />
       ) : (
         <MaterialCommunityIcons name="plus" size={14} color={theme.textSecondary} style={{ marginRight: 4 }} />
       )}
-      <Text style={[styles.chipText, { color: active ? '#FFFFFF' : theme.textSecondary }]}>
+      <Text style={[styles.chipText, { color: active ? theme.onPrimary : theme.textSecondary }]}>
         {label}
       </Text>
     </Pressable>
@@ -601,7 +601,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   logoutText: {
-    color: '#FF3B30',
     fontSize: FontSize.body - 1,
     fontWeight: FontWeight.bold,
   },

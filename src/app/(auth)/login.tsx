@@ -18,6 +18,7 @@ import { Card } from '@/components/ui/card';
 import { BorderRadius, FontSize, FontWeight, Shadows, Size, Spacing } from '@/constants/theme';
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { useMockAuth } from '@/lib/mock-auth-store';
+import type { ApprovalStatus, UserRole } from '@/lib/mock-auth-store';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, hasFirebaseConfig } from '@/lib/firebase';
 import { supabase, hasSupabaseConfig } from '@/lib/supabase';
@@ -47,11 +48,14 @@ export default function LoginScreen() {
 
     try {
       let displayName = email.split('@')[0];
+      let resolvedRole: UserRole = role;
+      let resolvedApproval: ApprovalStatus = 'approved';
+
       if (hasFirebaseConfig && auth) {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
 
         // Enforce user role from Supabase to block wrong portal login
-        let dbRole: 'student' | 'counselor' = 'student';
+        let dbRole: UserRole = 'student';
         let profileExists = false;
 
         if (hasSupabaseConfig && supabase) {
@@ -62,7 +66,7 @@ export default function LoginScreen() {
             .maybeSingle();
 
           if (!roleError && data?.role) {
-            dbRole = data.role as 'student' | 'counselor';
+            dbRole = data.role as UserRole;
             profileExists = true;
             if (data.name) {
               displayName = data.name;
@@ -74,7 +78,9 @@ export default function LoginScreen() {
           dbRole = email.endsWith('@counselcare.edu') ? 'counselor' : 'student';
         }
 
-        if (dbRole !== role) {
+        // Admins sign in from either portal tab; students and counselors must
+        // use the portal matching their registered role.
+        if (dbRole !== 'admin' && dbRole !== role) {
           const { signOut } = await import('firebase/auth');
           await signOut(auth);
           throw new Error(`This account is registered as a ${dbRole}. Please use the ${dbRole === 'student' ? 'Student' : 'Counselor'} Portal.`);
@@ -86,8 +92,28 @@ export default function LoginScreen() {
           await upsertProfile(userCredential.user.uid, defaultName, email, dbRole);
           displayName = defaultName;
         }
+
+        // Counselors must carry their real approval status, otherwise the
+        // pending/rejected gate in app/index.tsx is bypassed. Counselors who
+        // registered before the approval flow existed have no
+        // counselor_profiles row at all — treat those as approved rather than
+        // pending, or an established counselor is locked out of their own
+        // chats and appointments. Only an explicit row can gate access.
+        if (dbRole === 'counselor' && hasSupabaseConfig && supabase) {
+          const { data: cData, error: cError } = await supabase
+            .from('counselor_profiles')
+            .select('approval_status')
+            .eq('user_id', userCredential.user.uid)
+            .maybeSingle();
+          if (!cError && cData?.approval_status) {
+            resolvedApproval = cData.approval_status as ApprovalStatus;
+          }
+        }
+
+        resolvedRole = dbRole;
       }
-      await login(role, email, displayName);
+
+      await login(resolvedRole, email, displayName, undefined, undefined, resolvedApproval);
       setLoading(false);
       router.replace('/');
     } catch (err: any) {

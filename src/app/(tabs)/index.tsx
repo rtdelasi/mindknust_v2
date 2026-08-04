@@ -34,8 +34,8 @@ import {
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
+import { countUnread } from '@/lib/notification-state';
 import { supabase } from '@/lib/supabase';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   analyzeJournalMentalState,
   analyzeSentiment,
@@ -241,18 +241,11 @@ export default function HomeScreen() {
       if (!supabase) return;
       const { data, error } = await supabase
         .from('notifications')
-        .select('id, is_read')
+        .select('id, user_id, is_read')
         .or(`user_id.is.null,user_id.eq.${currentUserId}`);
 
       if (!error && data) {
-        const localReadJson = await AsyncStorage.getItem('counselcare_read_notification_ids');
-        const localReadIds: string[] = localReadJson ? JSON.parse(localReadJson) : [];
-
-        const count = data.filter(
-          (n: any) => !n.is_read && !localReadIds.includes(n.id)
-        ).length;
-
-        setUnreadCount(count);
+        setUnreadCount(await countUnread(data, currentUserId));
       }
     } catch (err) {
       console.warn('Error fetching unread count:', err);
@@ -276,9 +269,11 @@ export default function HomeScreen() {
   // Real-time notification badge updates
   useEffect(() => {
     if (!supabase) return;
+    const client = supabase;
 
-    const channel = supabase
-      .channel('home-notifications')
+    const channelName = `home-notifications-${currentUserId || 'guest'}-${Date.now()}`;
+    const channel = client
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -297,7 +292,7 @@ export default function HomeScreen() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      client.removeChannel(channel);
     };
   }, [currentUserId]);
 

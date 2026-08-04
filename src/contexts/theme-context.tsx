@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
-import { Colors, ThemeColor } from '@/constants/theme';
+import { Colors } from '@/constants/theme';
 import { safeStorage } from '@/lib/safe-storage';
 
 const THEME_KEY = 'counselcare_theme_mode';

@@ -1601,8 +1601,9 @@ export function subscribeToCallStatus(
   onUpdate: (call: SupabaseCall) => void,
 ): () => void {
   if (!supabase) return () => {};
+  const channelName = `call-${callId}-${Date.now()}`;
   const channel = supabase
-    .channel(`call-${callId}`)
+    .channel(channelName)
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` },
@@ -1626,8 +1627,9 @@ export function subscribeToIncomingCalls(
   onIncoming: (call: SupabaseCall) => void,
 ): () => void {
   if (!supabase) return () => {};
+  const channelName = `incoming-calls-${calleeId}-${Date.now()}`;
   const channel = supabase
-    .channel(`incoming-calls-${calleeId}`)
+    .channel(channelName)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'calls', filter: `callee_id=eq.${calleeId}` },

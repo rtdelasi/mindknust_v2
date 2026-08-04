@@ -56,9 +56,11 @@ export default function CounselorPendingScreen() {
   // Realtime subscription: auto-transition when admin approves while this screen is open
   useEffect(() => {
     if (!supabase || !currentUserId) return;
+    const client = supabase;
 
-    const channel = supabase
-      .channel(`counselor-status-${currentUserId}`)
+    const channelName = `counselor-status-${currentUserId}-${Date.now()}`;
+    const channel = client
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -80,7 +82,7 @@ export default function CounselorPendingScreen() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      client.removeChannel(channel);
     };
   }, [currentUserId, checkStatus]);
 
@@ -100,14 +102,14 @@ export default function CounselorPendingScreen() {
             style={[
               styles.iconCircle,
               {
-                backgroundColor: isRejected ? '#FEE2E2' : theme.primarySoft,
-                borderColor: isRejected ? '#EF4444' : theme.primary,
+                backgroundColor: isRejected ? theme.errorSoft : theme.primarySoft,
+                borderColor: isRejected ? theme.error : theme.primary,
               },
             ]}>
             <MaterialCommunityIcons
               name={isRejected ? 'close-circle-outline' : 'clock-outline'}
               size={48}
-              color={isRejected ? '#DC2626' : theme.primary}
+              color={isRejected ? theme.error : theme.primary}
             />
           </View>
 
@@ -131,14 +133,14 @@ export default function CounselorPendingScreen() {
                 style={[
                   styles.statusBadge,
                   {
-                    backgroundColor: isRejected ? '#FEE2E2' : theme.primarySoft,
-                    borderColor: isRejected ? '#EF4444' : theme.primary,
+                    backgroundColor: isRejected ? theme.errorSoft : theme.primarySoft,
+                    borderColor: isRejected ? theme.error : theme.primary,
                   },
                 ]}>
                 <Text
                   style={[
                     styles.statusBadgeText,
-                    { color: isRejected ? '#DC2626' : theme.primary },
+                    { color: isRejected ? theme.error : theme.primary },
                   ]}>
                   {isRejected ? 'REJECTED' : 'PENDING REVIEW'}
                 </Text>
@@ -165,8 +167,8 @@ export default function CounselorPendingScreen() {
             )}
 
             {isRejected && profile?.rejection_reason && (
-              <View style={[styles.reasonBox, { backgroundColor: theme.surfaceSoft, borderColor: '#EF4444' }]}>
-                <Text style={[styles.reasonTitle, { color: '#DC2626' }]}>Reason for Rejection:</Text>
+              <View style={[styles.reasonBox, { backgroundColor: theme.surfaceSoft, borderColor: theme.error }]}>
+                <Text style={[styles.reasonTitle, { color: theme.error }]}>Reason for Rejection:</Text>
                 <Text style={[styles.reasonText, { color: theme.text }]}>{profile.rejection_reason}</Text>
               </View>
             )}
