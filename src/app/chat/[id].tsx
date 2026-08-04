@@ -84,7 +84,16 @@ export default function ChatRoomScreen() {
         delivered_at: m.delivered_at,
         read_at: m.read_at,
       }));
-      setMessages(mapped);
+      setMessages((prev) => {
+        // Keep optimistic messages the server hasn't echoed back yet, so a
+        // resync that lands mid-send doesn't make the user's own bubble vanish.
+        const pending = prev.filter(
+          (p) =>
+            p.id.startsWith('temp-') &&
+            !mapped.some((s) => s.senderId === p.senderId && s.text === p.text)
+        );
+        return [...mapped, ...pending];
+      });
     } catch (err) {
       console.warn('Error loading chat messages:', err);
     } finally {
@@ -120,9 +129,16 @@ export default function ChatRoomScreen() {
         },
         (payload) => {
           const insertMsg = payload.new as SupabaseMessage;
+
+          // Side effect kept out of the state updater below: updaters must stay
+          // pure, and React may invoke them more than once per dispatch.
+          if (insertMsg.sender_id !== currentUserId) {
+            markMessagesAsRead(chatId, currentUserId);
+          }
+
           setMessages((prev) => {
             if (prev.some((m) => m.id === insertMsg.id)) return prev;
-            
+
             const newMapped: ChatMessage = {
               id: insertMsg.id,
               senderId: insertMsg.sender_id,
@@ -134,9 +150,19 @@ export default function ChatRoomScreen() {
               read_at: insertMsg.read_at,
             };
 
-            // If incoming message from other user, automatically mark read
-            if (insertMsg.sender_id !== currentUserId) {
-              markMessagesAsRead(chatId, currentUserId);
+            // Our own message can arrive over the channel before the insert
+            // call resolves. Replace the optimistic row rather than appending a
+            // second copy of it.
+            const pendingIndex = prev.findIndex(
+              (m) =>
+                m.id.startsWith('temp-') &&
+                m.senderId === insertMsg.sender_id &&
+                m.text === insertMsg.text
+            );
+            if (pendingIndex !== -1) {
+              const next = [...prev];
+              next[pendingIndex] = newMapped;
+              return next;
             }
 
             return [...prev, newMapped];
@@ -172,7 +198,19 @@ export default function ChatRoomScreen() {
           setOtherUserTyping(payload.typing);
         }
       })
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          // Anything inserted between the initial fetch and the channel going
+          // live is not replayed, so resync once the socket is actually live.
+          loadChatThread();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(
+            `[Chat Realtime] channel ${status} for chat ${chatId}.`,
+            err?.message ??
+              'If this persists, confirm public.messages is a member of the supabase_realtime publication.'
+          );
+        }
+      });
 
     channelRef.current = channel;
 
@@ -233,8 +271,13 @@ export default function ChatRoomScreen() {
     try {
       const sent = await submitDbMessage(chatId, currentUserId, bodyText);
       if (sent) {
-        setMessages((prev) =>
-          prev.map((m) =>
+        setMessages((prev) => {
+          // The realtime INSERT may have already swapped the optimistic row for
+          // the real one; in that case just drop the placeholder.
+          if (prev.some((m) => m.id === sent.id)) {
+            return prev.filter((m) => m.id !== mockId);
+          }
+          return prev.map((m) =>
             m.id === mockId
               ? {
                   ...m,
@@ -244,8 +287,8 @@ export default function ChatRoomScreen() {
                   read_at: sent.read_at,
                 }
               : m
-          )
-        );
+          );
+        });
       }
     } catch (err) {
       console.warn('DB message submit failed, using fallback:', err);

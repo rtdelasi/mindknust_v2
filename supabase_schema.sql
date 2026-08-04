@@ -180,8 +180,8 @@ create table if not exists public.calls (
   ended_at timestamp with time zone
 );
 
--- Enable Realtime for the calls table so clients receive postgres_changes events
-alter publication supabase_realtime add table public.calls;
+-- Realtime for the calls table is enabled in the consolidated Realtime section
+-- at the bottom of this file (see "15. Realtime Publication").
 
 -- Disable RLS for sandbox dev (consistent with other tables)
 alter table if exists public.calls disable row level security;
@@ -327,3 +327,49 @@ grant all on public.likes to anon, authenticated, postgres, service_role;
 grant all on public.comments to anon, authenticated, postgres, service_role;
 grant all on public.notifications to anon, authenticated, postgres, service_role;
 grant all on public.calls to anon, authenticated, postgres, service_role;
+
+-- ############################################################################
+-- 15. Realtime Publication
+--
+-- Postgres only streams WAL changes for tables that belong to the
+-- `supabase_realtime` publication. A `.on('postgres_changes', ...)`
+-- subscription against a table that is NOT a member silently receives
+-- nothing -- the channel still reports SUBSCRIBED, so the failure is invisible
+-- from the client. Every table the app subscribes to must be listed here.
+--
+-- Client subscription sites (keep this list in sync):
+--   messages           -> src/app/chat/[id].tsx        (INSERT + UPDATE)
+--   notifications      -> src/app/_layout.tsx, (tabs)/index.tsx,
+--                         (counselor-tabs)/index.tsx
+--   counselor_profiles -> src/app/(tabs)/_layout.tsx, (tabs)/approvals.tsx,
+--                         src/app/counselor-pending.tsx
+--   calls              -> src/lib/supabase-db.ts
+-- ############################################################################
+
+do $$
+declare
+  t text;
+begin
+  for t in
+    select unnest(array[
+      'messages',
+      'notifications',
+      'counselor_profiles',
+      'calls'
+    ])
+  loop
+    if not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+      raise notice 'Added public.% to supabase_realtime', t;
+    else
+      raise notice 'public.% already in supabase_realtime, skipping', t;
+    end if;
+  end loop;
+end
+$$;
