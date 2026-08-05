@@ -373,3 +373,47 @@ begin
   end loop;
 end
 $$;
+
+-- Seed Default Demo/Fallback Profiles if they do not exist
+insert into public.profiles (id, name, email, role)
+values 
+  ('student-user', 'Student User', 'student@mindknust.edu.gh', 'student'),
+  ('kwame-boateng', 'Dr. Kwame Boateng', 'kwame.boateng@mindknust.edu.gh', 'counselor')
+on conflict (id) do nothing;
+
+insert into public.student_profiles (user_id, program, year_of_study)
+values ('student-user', 'Computer Science', 3)
+on conflict (user_id) do nothing;
+
+insert into public.counselor_profiles (user_id, license_number, qualification, specializations, approval_status)
+values ('kwame-boateng', 'KNUST-CP-001', 'Ph.D Clinical Psychology', array['Clinical Psychology', 'Anxiety & Stress Management'], 'approved')
+on conflict (user_id) do nothing;
+
+-- Storage Bucket Setup for Social Media & Avatars
+insert into storage.buckets (id, name, public)
+values ('social-media', 'social-media', true)
+on conflict (id) do update set public = true;
+
+-- Storage Policies for Public Uploads & Reads
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies where policyname = 'Allow Public Uploads to social-media'
+  ) then
+    create policy "Allow Public Uploads to social-media"
+    on storage.objects for insert
+    with check (bucket_id = 'social-media');
+  end if;
+
+  if not exists (
+    select 1 from pg_policies where policyname = 'Allow Public Reads on social-media'
+  ) then
+    create policy "Allow Public Reads on social-media"
+    on storage.objects for select
+    using (bucket_id = 'social-media');
+  end if;
+end
+$$;
+
+
+

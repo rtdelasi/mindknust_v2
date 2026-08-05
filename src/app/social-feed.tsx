@@ -3,12 +3,11 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Clipboard,
-  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -41,26 +40,8 @@ import {
   toggleLikePost,
   updatePostModeration
 } from '@/lib/supabase-db';
-import { getPublicUrl, uploadFile } from '@/lib/supabase-storage';
+import { uploadFileFromUri } from '@/lib/supabase-storage';
 import { getDisplayIdentity, getAuthorInitials, getHandleTag } from '@/lib/display-identity';
-
-const { width } = Dimensions.get('window');
-
-// 12 Mock Gallery images matching user's Figma screenshot (umbrella, lake, dog, corgi, etc.)
-const GALLERY_MOCK_IMAGES = [
-  'https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=500', // Umbrella girl
-  'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=500', // Mountain lake
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500', // Sweater girl
-  'https://images.unsplash.com/photo-1525609004556-c46c7d6cf0a3?w=500', // Orange beetle car
-  'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=500', // Black dog with bandana
-  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500', // Curly hair girl
-  'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=500', // Ferris wheel sunset
-  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=500', // Beach bike couple
-  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=500', // Neon hat
-  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=500', // Black & White portrait
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=500', // Yellow background girl
-  'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=500', // Running Corgi
-];
 
 const AVATAR_GRADIENTS = [
   ['#8B7CFF', '#5B4FE5'], // Purple Indigo
@@ -93,8 +74,6 @@ function PostCardImage({ uri, onPreview }: { uri: string; onPreview: () => void 
     );
   }
 
-  const isLocalFileUri = uri.startsWith('file:///');
-
   return (
     <Pressable onPress={onPreview} style={styles.postImageContainer}>
       <Image
@@ -108,12 +87,6 @@ function PostCardImage({ uri, onPreview }: { uri: string; onPreview: () => void 
       {loading && (
         <View style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.surfaceSoft, justifyContent: 'center', alignItems: 'center' }]}>
           <ActivityIndicator size="small" color={theme.primary} />
-        </View>
-      )}
-      {isLocalFileUri && (
-        <View style={styles.localUriIndicator}>
-          <MaterialCommunityIcons name="alert-circle-outline" size={14} color="#FFFFFF" />
-          <Text style={[styles.localUriText, { color: '#FFFFFF' }]}>Local File (Storage Upload Failed)</Text>
         </View>
       )}
     </Pressable>
@@ -198,7 +171,7 @@ export default function SocialFeedScreen() {
 
   // Compose Modal & Figma Views State Machine
   const [composeModalVisible, setComposeModalVisible] = useState(false);
-  const [activeSubView, setActiveSubView] = useState<'compose' | 'gallery' | 'camera'>('compose');
+  const [activeSubView, setActiveSubView] = useState<'compose' | 'camera'>('compose');
   const [cameraMode, setCameraMode] = useState<'video' | 'capture'>('capture');
   const [cameraFlashActive, setCameraFlashActive] = useState(false);
   const [flashTriggered, setFlashTriggered] = useState(false);
@@ -208,7 +181,6 @@ export default function SocialFeedScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const [facing, setFacing] = useState<'back' | 'front'>('back');
-  const [devicePhotos] = useState<string[]>([]);
 
   const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
 
@@ -232,29 +204,6 @@ export default function SocialFeedScreen() {
     }, [])
   );
 
-  const loadDevicePhotos = async () => {
-    try {
-      // Use ImagePicker (no audio permission needed) to open the device gallery
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsMultipleSelection: false,
-        quality: 0.85,
-      });
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        setSelectedMediaUri(result.assets[0].uri);
-        setActiveSubView('compose');
-      }
-    } catch (err) {
-      console.error('Error opening device gallery:', err);
-    }
-  };
-
-  useEffect(() => {
-    if (activeSubView === 'gallery') {
-      loadDevicePhotos();
-    }
-  }, [activeSubView]);
-
   const handleCreatePost = async () => {
     if (!newPostContent.trim() && !selectedMediaUri) return;
 
@@ -264,11 +213,8 @@ export default function SocialFeedScreen() {
       if (selectedMediaUri) {
         if (hasSupabaseConfig && !selectedMediaUri.startsWith('http')) {
           try {
-            const response = await fetch(selectedMediaUri);
-            const blob = await response.blob();
             const filename = `feed/${currentUserId}/${Date.now()}.jpg`;
-            await uploadFile('social-media', filename, blob, blob.type || 'image/jpeg');
-            mediaUrl = getPublicUrl('social-media', filename);
+            mediaUrl = await uploadFileFromUri('social-media', filename, selectedMediaUri, 'image/jpeg');
           } catch (uploadErr) {
             console.warn('Storage upload failed, using local URI fallback:', uploadErr);
             mediaUrl = selectedMediaUri;
@@ -331,7 +277,12 @@ export default function SocialFeedScreen() {
           shares_count: 0,
           created_at: new Date().toISOString(),
           is_anonymous: postAsAnonymous,
-          profiles: { name: userName || 'User', role: role || 'student', avatar_url: null },
+          profiles: {
+            name: userName || 'User',
+            role: role || 'student',
+            avatar_url: null,
+            anonymous_id: anonymousId || undefined,
+          },
           has_liked: false,
           moderation_status: localMod.status,
           is_flagged: localMod.isFlagged,
@@ -448,35 +399,34 @@ export default function SocialFeedScreen() {
         }
       } catch (err) {
         setFlashTriggered(false);
-        console.warn('Live capture failed or simulator active, using fallback:', err);
-        setSelectedMediaUri(GALLERY_MOCK_IMAGES[4]);
-        setActiveSubView('compose');
+        console.error('Live capture failed:', err);
+        Alert.alert('Capture Failed', 'We could not take that photo. Please try again.');
       }
     } else {
-      setFlashTriggered(true);
-      setTimeout(() => {
-        setFlashTriggered(false);
-        setSelectedMediaUri(GALLERY_MOCK_IMAGES[4]);
-        setActiveSubView('compose');
-      }, 200);
+      Alert.alert('Camera Not Ready', 'The camera is still starting up. Please try again in a moment.');
     }
   };
 
-  // Standard Imagepicker (device roll) trigger as auxiliary backup
+  // Opens the device photo library. This is the only path to attaching an
+  // image — the compose toolbar calls it directly.
   const handleDeviceRollPick = async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert('Permission Denied', 'Camera roll access is required to attach images.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      setSelectedMediaUri(result.assets[0].uri);
-      setActiveSubView('compose');
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert('Permission Denied', 'Camera roll access is required to attach images.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setSelectedMediaUri(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.error('Error opening device gallery:', err);
+      Alert.alert('Could Not Open Gallery', 'Something went wrong while opening your photos.');
     }
   };
 
@@ -759,9 +709,15 @@ export default function SocialFeedScreen() {
             {/* Modal Composer ScrollView */}
             <ScrollView contentContainerStyle={styles.modalContentContainer}>
               <View style={styles.composerRow}>
-                <View style={[styles.composerAvatar, { backgroundColor: role === 'counselor' ? theme.primary : theme.primarySoft }]}>
-                  <Text style={styles.avatarText}>{(userName || 'US').substring(0, 2).toUpperCase()}</Text>
-                </View>
+                {postAsAnonymous ? (
+                  <View style={[styles.composerAvatar, { backgroundColor: theme.surfaceMuted }]}>
+                    <MaterialCommunityIcons name="incognito" size={20} color={theme.textSecondary} />
+                  </View>
+                ) : (
+                  <View style={[styles.composerAvatar, { backgroundColor: role === 'counselor' ? theme.primary : theme.primarySoft }]}>
+                    <Text style={styles.avatarText}>{(userName || 'US').substring(0, 2).toUpperCase()}</Text>
+                  </View>
+                )}
                 <View style={styles.composerInputWrapper}>
                   <TextInput
                     value={newPostContent}
@@ -813,8 +769,8 @@ export default function SocialFeedScreen() {
             {/* Modal Toolbar Attachment Dock */}
             <View style={[styles.modalToolbar, { backgroundColor: theme.surfaceRaised, borderTopColor: theme.divider }]}>
               <View style={styles.toolbarIcons}>
-                {/* Custom Gallery Grid Trigger */}
-                <Pressable style={styles.toolbarIconBtn} onPress={() => setActiveSubView('gallery')}>
+                {/* Device photo library */}
+                <Pressable style={styles.toolbarIconBtn} onPress={handleDeviceRollPick}>
                   <MaterialCommunityIcons name="image-outline" size={24} color={theme.primary} />
                 </Pressable>
                 {/* Custom Camera Screen Trigger */}
@@ -829,56 +785,7 @@ export default function SocialFeedScreen() {
           </KeyboardAvoidingView>
         )}
 
-        {/* SUBVIEW 2: Custom Gallery Grid Selector */}
-        {activeSubView === 'gallery' && (
-          <View style={[styles.modalScreen, { backgroundColor: theme.background, paddingTop: insets.top }]}>
-            {/* Gallery Header */}
-            <View style={[styles.galleryHeader, { borderBottomColor: theme.divider, backgroundColor: theme.surfaceRaised }]}>
-              <Pressable onPress={() => setActiveSubView('compose')} style={styles.galleryBackButton}>
-                <MaterialCommunityIcons name="chevron-left" size={Size.iconXl} color={theme.text} />
-                <Text style={[styles.galleryBackText, { color: theme.text }]}>Back</Text>
-              </Pressable>
-              <Text style={[styles.galleryTitle, { color: theme.text }]}>Select Media</Text>
-              {/* Auxiliary native upload button */}
-              <Pressable onPress={handleDeviceRollPick} style={styles.galleryUploadBtn}>
-                <MaterialCommunityIcons name="file-upload-outline" size={20} color={theme.primary} />
-              </Pressable>
-            </View>
-
-            {/* 3-Column Photo Grid */}
-            <ScrollView contentContainerStyle={styles.galleryGridContainer}>
-              <View style={styles.gridRow}>
-                {devicePhotos.length > 0 ? (
-                  devicePhotos.map((imgUri, index) => (
-                    <Pressable
-                      key={index}
-                      style={styles.gridImageWrapper}
-                      onPress={() => {
-                        setSelectedMediaUri(imgUri);
-                        setActiveSubView('compose');
-                      }}>
-                      <Image source={{ uri: imgUri }} style={styles.gridImage} />
-                    </Pressable>
-                  ))
-                ) : (
-                  GALLERY_MOCK_IMAGES.map((imgUri, index) => (
-                    <Pressable
-                      key={index}
-                      style={styles.gridImageWrapper}
-                      onPress={() => {
-                        setSelectedMediaUri(imgUri);
-                        setActiveSubView('compose');
-                      }}>
-                      <Image source={{ uri: imgUri }} style={styles.gridImage} />
-                    </Pressable>
-                  ))
-                )}
-              </View>
-            </ScrollView>
-          </View>
-        )}
-
-        {/* SUBVIEW 3: Custom Camera Simulator */}
+        {/* SUBVIEW 2: Custom Camera Simulator */}
         {activeSubView === 'camera' && (
           <View style={[styles.modalScreen, { backgroundColor: '#000000', paddingTop: insets.top, paddingBottom: insets.bottom }]}>
             {/* Camera Header controls */}
@@ -1317,46 +1224,6 @@ const styles = StyleSheet.create({
   },
   charCounter: {
     fontSize: FontSize.caption,
-  },
-  // Custom Gallery Styling
-  galleryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-    borderBottomWidth: 1,
-  },
-  galleryBackButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  galleryBackText: {
-    fontSize: FontSize.body,
-    fontWeight: FontWeight.semibold,
-  },
-  galleryTitle: {
-    fontSize: FontSize.body,
-    fontWeight: FontWeight.bold,
-  },
-  galleryUploadBtn: {
-    padding: 6,
-  },
-  galleryGridContainer: {
-    paddingVertical: 1,
-  },
-  gridRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  gridImageWrapper: {
-    width: width / 3 - 1,
-    height: width / 3 - 1,
-    margin: 0.5,
-  },
-  gridImage: {
-    width: '100%',
-    height: '100%',
   },
   // Custom Camera Simulator Layout
   cameraHeader: {

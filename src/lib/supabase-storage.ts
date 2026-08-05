@@ -1,6 +1,29 @@
 import { supabase } from './supabase';
 
 /**
+ * Convert a local file URI (file://, content://, ph://, blob:) into an ArrayBuffer
+ * for seamless React Native compatibility with Supabase storage upload.
+ */
+export async function uriToArrayBuffer(uri: string): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = function () {
+      if (xhr.status === 200 || xhr.status === 0) {
+        resolve(xhr.response);
+      } else {
+        reject(new Error(`XHR failed with status ${xhr.status}`));
+      }
+    };
+    xhr.onerror = function (e) {
+      reject(new TypeError(`Network request failed reading file URI: ${uri}`));
+    };
+    xhr.responseType = 'arraybuffer';
+    xhr.open('GET', uri, true);
+    xhr.send(null);
+  });
+}
+
+/**
  * Upload a file/buffer to a specific Supabase storage bucket
  * @param bucketName The name of the storage bucket
  * @param path The destination path inside the bucket (e.g. 'avatars/student1.png')
@@ -29,6 +52,32 @@ export async function uploadFile(
   }
 
   return data;
+}
+
+/**
+ * Upload a local file URI (or remote URL) directly to Supabase storage.
+ * Automatically handles ArrayBuffer conversion for React Native compatibility.
+ */
+export async function uploadFileFromUri(
+  bucketName: string,
+  path: string,
+  fileUri: string,
+  contentType: string = 'image/jpeg'
+): Promise<string> {
+  if (!supabase) {
+    throw new Error('Supabase client is not initialized.');
+  }
+
+  let fileBody: any;
+  if (fileUri.startsWith('http://') || fileUri.startsWith('https://')) {
+    const res = await fetch(fileUri);
+    fileBody = await res.arrayBuffer();
+  } else {
+    fileBody = await uriToArrayBuffer(fileUri);
+  }
+
+  await uploadFile(bucketName, path, fileBody, contentType);
+  return getPublicUrl(bucketName, path);
 }
 
 /**

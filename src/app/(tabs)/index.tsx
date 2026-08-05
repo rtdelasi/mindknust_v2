@@ -20,7 +20,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { CounselorCard } from '@/components/ui/counselor-card';
-import { SearchBar } from '@/components/ui/search-bar';
 import { SectionHeader } from '@/components/ui/section-header';
 import {
   BorderRadius,
@@ -38,9 +37,12 @@ import { countUnread } from '@/lib/notification-state';
 import { supabase } from '@/lib/supabase';
 import {
   analyzeJournalMentalState,
-  analyzeSentiment,
+  analyzeMood,
+  keywordMood,
+  warmUpHF,
   MentalStateAnalysis,
 } from '@/lib/sentiment';
+import { MOODS, moodEmoji } from '@/lib/moods';
 import {
   fetchAppointments,
   fetchCounselors,
@@ -51,14 +53,6 @@ import {
 import { getCounselorPhoto } from '@/lib/counselor-utils';
 
 
-const moods = [
-  { emoji: '😟', label: 'Distressed' },
-  { emoji: '😔', label: 'Down' },
-  { emoji: '🙂', label: 'Okay' },
-  { emoji: '😊', label: 'Good' },
-  { emoji: '😁', label: 'Great' },
-];
-
 const SPECIALTY_FILTERS = [
   'All',
   'Anxiety',
@@ -67,14 +61,6 @@ const SPECIALTY_FILTERS = [
   'Relationships',
   'Personal Growth',
 ];
-
-function scoreToEmoji(score: number): string {
-  if (score < -0.4) return '😟';
-  if (score < -0.1) return '😔';
-  if (score <= 0.1) return '🙂';
-  if (score <= 0.5) return '😊';
-  return '😁';
-}
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -96,6 +82,12 @@ export default function HomeScreen() {
   const [moodNote, setMoodNote] = useState('');
   const [savingMood, setSavingMood] = useState(false);
   const hfDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic id so a slow HF response for older text can never overwrite the
+  // prediction for what the user has since typed.
+  const predictionSeqRef = useRef(0);
+  const [predictionSource, setPredictionSource] = useState<
+    'idle' | 'pending' | 'huggingface' | 'keyword'
+  >('idle');
   const [mentalAnalysis, setMentalAnalysis] = useState<MentalStateAnalysis>({
     sentiment: { score: 0, label: 'neutral' },
     detectedPatterns: {
@@ -172,29 +164,40 @@ export default function HomeScreen() {
     const analysis = analyzeJournalMentalState(text);
     setMentalAnalysis(analysis);
 
-    // Immediate: keyword-based emoji prediction for snappy feedback
-    if (text.trim().length > 2) {
+    const trimmed = text.trim();
+    const seq = ++predictionSeqRef.current;
+
+    // Immediate: offline lexicon prediction so the row responds to every
+    // keystroke. This is a placeholder — the ML result replaces it below.
+    if (trimmed.length > 2) {
       if (!isManuallySelected) {
-        const keywordScore = analysis.sentiment.score;
-        setSelectedMood(scoreToEmoji(keywordScore));
+        setSelectedMood(moodEmoji(keywordMood(trimmed).mood));
+        setPredictionSource('pending');
       }
     } else {
-      if (!isManuallySelected) setSelectedMood(null);
+      if (!isManuallySelected) {
+        setSelectedMood(null);
+        setPredictionSource('idle');
+      }
     }
 
-    // Debounced: HF Inference refinement for accurate ML-based prediction
+    // Debounced: the emotion model decides the final emoji. Unlike the previous
+    // version this also records when the ML path was unavailable, so a keyword
+    // guess is never presented as an ML prediction.
     if (hfDebounceRef.current) clearTimeout(hfDebounceRef.current);
-    if (text.trim().length > 3 && !isManuallySelected) {
+    if (trimmed.length > 3 && !isManuallySelected) {
       hfDebounceRef.current = setTimeout(async () => {
         try {
-          const hfResult = await analyzeSentiment(text.trim());
-          if (hfResult.source === 'huggingface') {
-            setSelectedMood(scoreToEmoji(hfResult.score));
-          }
+          const result = await analyzeMood(trimmed);
+          // Stale guard: newer text, a manual emoji tap, or a save has since
+          // bumped the sequence, so this prediction is no longer wanted.
+          if (seq !== predictionSeqRef.current) return;
+          setSelectedMood(moodEmoji(result.mood));
+          setPredictionSource(result.source);
         } catch {
-          // Keep keyword prediction on failure
+          if (seq === predictionSeqRef.current) setPredictionSource('keyword');
         }
-      }, 800);
+      }, 700);
     }
 
     if (analysis.detectedPatterns.crisis && !hasOpenedCrisisSheet) {
@@ -204,6 +207,12 @@ export default function HomeScreen() {
       setHasOpenedCrisisSheet(false);
     }
   };
+
+  // Load the emotion model ahead of the first keystroke so its cold start does
+  // not land on the user's first prediction.
+  useEffect(() => {
+    warmUpHF();
+  }, []);
 
   // Clean up debounce on unmount
   useEffect(() => {
@@ -314,11 +323,16 @@ export default function HomeScreen() {
     setSavingMood(true);
     try {
       const noteText = moodNote.trim();
-      const sentiment = await analyzeSentiment(noteText);
-      await insertMoodLog(currentUserId, selectedMood, noteText);
+      // Reuse this result for the DB row instead of letting insertMoodLog run
+      // a second round trip against the same text.
+      const result = await analyzeMood(noteText);
+      const sentiment = result.sentiment;
+      await insertMoodLog(currentUserId, selectedMood, noteText, sentiment);
       setMoodNote('');
       setSelectedMood(null);
       setIsManuallySelected(false);
+      setPredictionSource('idle');
+      predictionSeqRef.current++;
       setMentalAnalysis({
         sentiment: { score: 0, label: 'neutral' },
         detectedPatterns: {
@@ -455,13 +469,6 @@ export default function HomeScreen() {
             How are you feeling today?
           </Text>
 
-          {/* ── Search Bar ── */}
-          <SearchBar
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Search counselors, topics..."
-            containerStyle={styles.searchBarContainer}
-          />
 
           {/* ── Mood Journal Card ── */}
           <Card
@@ -472,13 +479,19 @@ export default function HomeScreen() {
               <Text style={[styles.moodHeader, { color: theme.text }]}>
                 Daily Wellbeing Journal
               </Text>
-              {moodNote.trim().length > 2 && (
+              {moodNote.trim().length > 2 && !isManuallySelected && (
                 <Text
                   style={[
                     styles.predictedBadge,
-                    { color: theme.primary, backgroundColor: theme.primarySoft },
+                    predictionSource === 'keyword'
+                      ? { color: theme.textSecondary, backgroundColor: theme.surfaceSoft }
+                      : { color: theme.primary, backgroundColor: theme.primarySoft },
                   ]}>
-                  AI Suggested
+                  {predictionSource === 'huggingface'
+                    ? 'AI Suggested'
+                    : predictionSource === 'keyword'
+                      ? 'Offline Guess'
+                      : 'Analyzing...'}
                 </Text>
               )}
             </View>
@@ -505,7 +518,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.emojiRow}>
-              {moods.map((m) => {
+              {MOODS.map((m) => {
                 const isSelected = selectedMood === m.emoji;
                 return (
                   <Pressable
@@ -513,6 +526,10 @@ export default function HomeScreen() {
                     onPress={() => {
                       setSelectedMood(m.emoji);
                       setIsManuallySelected(true);
+                      // Cancel any in-flight prediction so it cannot overwrite
+                      // the mood the user just picked.
+                      if (hfDebounceRef.current) clearTimeout(hfDebounceRef.current);
+                      predictionSeqRef.current++;
                     }}
                     style={[
                       styles.emojiButton,
@@ -1307,17 +1324,21 @@ const styles = StyleSheet.create({
   emojiRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: Spacing.one,
+    gap: Spacing.one - 2,
   },
   emojiButton: {
     flex: 1,
     alignItems: 'center',
+    justifyContent: 'flex-start',
     paddingVertical: Spacing.two - 2,
+    paddingHorizontal: 2,
     borderRadius: BorderRadius.md,
     gap: 2,
   },
   emojiText: { fontSize: 20 },
-  emojiLabel: { fontSize: FontSize.small - 2 },
+  // Six columns leaves ~50px per label, so the longest ("Distressed") wraps.
+  // Centering keeps the wrapped line aligned under its emoji.
+  emojiLabel: { fontSize: FontSize.small - 3, textAlign: 'center' },
   moodSubmitBtn: {
     height: Size.buttonHeight - 8,
     borderRadius: BorderRadius.full,

@@ -9,12 +9,17 @@
  */
 
 import {
+  hfAnalyzeEmotion,
   hfAnalyzeSentiment,
   hfDetectToxicity,
   hfDetectCrisis,
   isHFConfigured,
+  warmUpHF,
 } from './hf-moderation';
-export { isHFConfigured };
+import type { HFEmotionLabel } from './hf-moderation';
+import { lexicalScoreToMoodKey, scoreToMoodKey } from './moods';
+import type { MoodKey } from './moods';
+export { isHFConfigured, warmUpHF };
 
 // ---------------------------------------------------------------------------
 // Local keyword lexicons (fallback)
@@ -38,7 +43,41 @@ const NEGATIVE_WORDS = new Set([
   'frustrated', 'irritated', 'resentful', 'bitter', 'jealous', 'envious',
   'disappointed', 'regret', 'guilty', 'ashamed', 'embarrassed', 'humiliated',
   'rejected', 'abandoned', 'ignored', 'neglected', 'unwanted', 'invisible',
+  'annoyed', 'annoying', 'furious', 'mad', 'rage', 'livid', 'betrayed',
 ]);
+
+/**
+ * Anger-specific terms. Kept separate from NEGATIVE_WORDS because the valence
+ * score alone cannot distinguish anger from sadness — "I feel annoyed at a
+ * friend" and "I feel sad about a friend" score identically on a −1→1 axis but
+ * belong to different moods. Single words are matched per-token; entries with a
+ * space are matched as substrings.
+ */
+const ANGER_WORDS = [
+  'angry', 'anger', 'annoyed', 'annoying', 'annoyance', 'irritated',
+  'irritating', 'irritable', 'furious', 'fury', 'rage', 'raging', 'enraged',
+  'livid', 'mad', 'pissed', 'resentful', 'resentment', 'bitter', 'hate',
+  'hateful', 'disgusted', 'disgusting', 'outraged', 'outrage', 'betrayed',
+  'betrayal', 'frustrated', 'frustrating', 'frustration', 'agitated',
+  'offended', 'insulted', 'disrespected', 'unfair', 'infuriating',
+  'fed up', 'sick of', 'had enough', 'ticked off', 'worked up', 'so done with',
+  'cannot stand', "can't stand", 'gets on my nerves', 'on my nerves',
+];
+
+/**
+ * Markers of despair. The emotion model saturates at sadness≈0.99 for both
+ * "I feel sad and lonely today" and "I feel hopeless and empty", so it cannot
+ * grade severity within sadness — and the zero-shot crisis score is identical
+ * (0.034) for both. These terms are what separate 😔 Down from 😟 Distressed.
+ */
+const DESPAIR_WORDS = [
+  'hopeless', 'worthless', 'pointless', 'no point', 'nothing matters',
+  'give up', 'giving up', 'gave up', 'cant go on', "can't go on",
+  'cannot go on', 'cant take it', "can't take it", 'cannot take it',
+  'unbearable', 'empty inside', 'so empty', 'feel empty', 'feeling empty',
+  'numb', 'nothing left', 'no future', 'no way out', 'trapped', 'drowning',
+  'falling apart', 'breaking down', 'cant cope', "can't cope", 'despair',
+];
 
 const NEGATION_WORDS = new Set([
   'not', "n't", 'dont', "don't", 'doesnt', "doesn't", 'didnt', "didn't",
@@ -86,6 +125,30 @@ function tokenize(text: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Local keyword anger detection (fallback)
+// ---------------------------------------------------------------------------
+/**
+ * Multi-word entries are matched against the raw lowercase text (so
+ * apostrophes survive); single words are matched per-token so "madness" does
+ * not count as "mad".
+ */
+function detectAnger(note: string): boolean {
+  const lower = note.toLowerCase();
+  const tokens = new Set(tokenize(note));
+  return ANGER_WORDS.some((w) =>
+    w.includes(' ') ? lower.includes(w) : tokens.has(w)
+  );
+}
+
+function detectDespair(note: string): boolean {
+  const lower = note.toLowerCase();
+  const tokens = new Set(tokenize(note));
+  return DESPAIR_WORDS.some((w) =>
+    w.includes(' ') ? lower.includes(w) : tokens.has(w)
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Local keyword sentiment (fallback)
 // ---------------------------------------------------------------------------
 function keywordSentiment(note: string): SentimentResult {
@@ -124,7 +187,16 @@ function keywordSentiment(note: string): SentimentResult {
   }
 
   const total = pos + neg;
-  const score = total > 0 ? (pos - neg) / total : 0;
+  /**
+   * Additive smoothing. Dividing by `total` alone saturates the scale: a note
+   * with two negative words and no positive ones scored exactly −1.0, the same
+   * magnitude as a long entry full of despair, so almost anything mildly
+   * negative registered as maximally distressed. The constant makes the score
+   * grow with the weight of evidence — one negative word ≈ −0.25, two ≈ −0.4,
+   * three ≈ −0.5 — while leaving the ±0.1 positive/negative label boundaries
+   * comfortably clear.
+   */
+  const score = total > 0 ? (pos - neg) / (total + 3) : 0;
   const isFlagged = CRISIS_WORDS.some((w) => lower.includes(w));
 
   let label: 'positive' | 'neutral' | 'negative' = 'neutral';
@@ -245,6 +317,203 @@ export async function moderateContent(content: string): Promise<ModerationResult
   }
 
   return keywordModerate(content);
+}
+
+// ---------------------------------------------------------------------------
+// Mood prediction — the engine behind the journal's emoji suggestion
+// ---------------------------------------------------------------------------
+
+export interface MoodAnalysis {
+  mood: MoodKey;
+  /** Top emotion class, when the ML model produced one. */
+  emotion: HFEmotionLabel | null;
+  /** Confidence in `mood`, 0–1. */
+  confidence: number;
+  sentiment: SentimentResult;
+  isFlagged: boolean;
+  source: 'huggingface' | 'keyword';
+}
+
+/**
+ * Thresholds for turning a 7-way emotion distribution into one of six moods,
+ * tuned against live model output rather than guessed:
+ *
+ *   "I feel annoyed at a friend"        anger .991            → 😠
+ *   "I am fed up with this group work"  anger .30 + disgust .09 → 😠
+ *   "I am terrified about my exam"      fear .99              → 😟
+ *   "I feel sad and lonely today"       sadness .988          → 😔
+ *   "I feel hopeless and empty"         sadness .988 + despair → 😟
+ *   "I am so happy today"               joy .971              → 😁
+ *   "Had a decent day, nothing special" joy .426 / neutral .468 → 😊
+ *
+ * Anger and disgust are summed: disgust rarely wins outright but reliably
+ * co-fires with anger on irritation entries.
+ */
+const ANGER_MIN = 0.35;      // anger+disgust needed to select 😠
+const FEAR_MIN = 0.45;       // fear needed to select 😟
+const SADNESS_MIN = 0.35;    // sadness needed to select 😔
+const JOY_GREAT_MIN = 0.85;  // joy needed for 😁 rather than 😊
+const JOY_GOOD_MIN = 0.3;    // joy needed to select 😊
+
+export interface MoodSignals {
+  /** Crisis/self-harm detected — overrides everything. */
+  isFlagged?: boolean;
+  /** Despair vocabulary present; grades sadness up from 😔 to 😟. */
+  hasDespairMarkers?: boolean;
+}
+
+/**
+ * Pure mapping from the emotion model's output onto the mood scale.
+ * Exported so the thresholds above can be reasoned about and tested directly.
+ */
+export function emotionToMood(
+  scores: Record<HFEmotionLabel, number>,
+  sentimentScore: number,
+  signals: MoodSignals = {}
+): { mood: MoodKey; confidence: number } {
+  // Safety outranks emotion: a crisis entry is never anything but distressed.
+  if (signals.isFlagged) return { mood: 'distressed', confidence: 1 };
+
+  const anger = (scores.anger ?? 0) + (scores.disgust ?? 0);
+  const fear = scores.fear ?? 0;
+  const sadness = scores.sadness ?? 0;
+  const joy = scores.joy ?? 0;
+
+  // Anger first — it is the class the old valence-only pipeline could not
+  // express, and it yields only when sadness or fear clearly dominates.
+  if (anger >= ANGER_MIN && anger >= sadness && anger >= fear) {
+    return { mood: 'angry', confidence: anger };
+  }
+
+  if (fear >= FEAR_MIN && fear >= sadness) {
+    return { mood: 'distressed', confidence: fear };
+  }
+
+  if (sadness >= SADNESS_MIN) {
+    return {
+      mood: signals.hasDespairMarkers ? 'distressed' : 'down',
+      confidence: sadness,
+    };
+  }
+
+  // Positive tiers key off joy, not the valence score: the sentiment model
+  // returns ~0.95 for "Today was fine" and ~0.99 for "I am so happy", so it
+  // cannot separate contentment from elation. Joy can (0.35 vs 0.97).
+  if (joy >= JOY_GREAT_MIN) return { mood: 'great', confidence: joy };
+  if (joy >= JOY_GOOD_MIN) return { mood: 'good', confidence: joy };
+
+  // Nothing dominant — defer to the valence axis, which still separates
+  // "nothing happened today" from a quietly good or bad entry.
+  return { mood: scoreToMoodKey(sentimentScore), confidence: scores.neutral ?? 0 };
+}
+
+/**
+ * Offline mood prediction. Anger is checked before the valence buckets so an
+ * angry entry does not land on 🙂 the way it did when the fallback had only a
+ * −1→1 score to work with.
+ */
+export function keywordMood(note: string): MoodAnalysis {
+  const sentiment = keywordSentiment(note);
+
+  if (!note.trim()) {
+    return {
+      mood: 'okay',
+      emotion: null,
+      confidence: 0,
+      sentiment,
+      isFlagged: false,
+      source: 'keyword',
+    };
+  }
+
+  let mood: MoodKey;
+  if (sentiment.isFlagged || detectDespair(note)) {
+    mood = 'distressed';
+  } else if (detectAnger(note)) {
+    mood = 'angry';
+  } else {
+    mood = lexicalScoreToMoodKey(sentiment.score);
+  }
+
+  return {
+    mood,
+    emotion: null,
+    confidence: Math.abs(sentiment.score),
+    sentiment,
+    isFlagged: sentiment.isFlagged,
+    source: 'keyword',
+  };
+}
+
+/**
+ * Predicts the journal mood for `note`.
+ *
+ * ML-first by design: the emotion model decides the mood whenever it answers,
+ * and the keyword lexicon runs only when HF is unconfigured, unreachable, or
+ * returns nothing usable. The two HF calls run concurrently, and a failure in
+ * either one no longer discards the other's result.
+ */
+export async function analyzeMood(note: string): Promise<MoodAnalysis> {
+  if (!note?.trim()) return keywordMood('');
+
+  if (isHFConfigured()) {
+    try {
+      const [emotionRes, sentRes, crisisRes] = await Promise.all([
+        hfAnalyzeEmotion(note),
+        hfAnalyzeSentiment(note),
+        hfDetectCrisis(note),
+      ]);
+
+      const isFlagged = crisisRes?.isCrisis ?? false;
+
+      let sentiment: SentimentResult;
+      if (sentRes) {
+        const multiplier =
+          sentRes.label === 'positive' ? 1 : sentRes.label === 'negative' ? -1 : 0;
+        sentiment = {
+          score: parseFloat((multiplier * sentRes.score).toFixed(2)),
+          label: isFlagged ? 'negative' : sentRes.label,
+          isFlagged,
+          source: 'huggingface',
+        };
+      } else {
+        const local = keywordSentiment(note);
+        sentiment = { ...local, isFlagged: isFlagged || local.isFlagged };
+      }
+
+      if (emotionRes) {
+        const { mood, confidence } = emotionToMood(emotionRes.scores, sentiment.score, {
+          isFlagged,
+          hasDespairMarkers: detectDespair(note),
+        });
+        return {
+          mood,
+          emotion: emotionRes.label,
+          confidence,
+          sentiment,
+          isFlagged,
+          source: 'huggingface',
+        };
+      }
+
+      // Emotion model unavailable but sentiment answered — still better than
+      // the lexicon, just without an anger dimension.
+      if (sentRes) {
+        return {
+          mood: isFlagged ? 'distressed' : scoreToMoodKey(sentiment.score),
+          emotion: null,
+          confidence: sentRes.score,
+          sentiment,
+          isFlagged,
+          source: 'huggingface',
+        };
+      }
+    } catch (err) {
+      console.warn('[Mood] HF pipeline failed, using keyword fallback:', err);
+    }
+  }
+
+  return keywordMood(note);
 }
 
 export interface MentalStateAnalysis {

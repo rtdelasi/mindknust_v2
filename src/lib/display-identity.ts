@@ -11,7 +11,10 @@ export function getDisplayIdentity(
   viewerRole: ViewerRole
 ): string {
   if (viewerRole === 'counselor' || viewerRole === 'admin') {
-    return user?.name || 'Unknown';
+    // Staff normally see the real name. On anonymous feed content the data
+    // layer strips it for every non-author, so fall back to the anonymous ID
+    // rather than rendering a bare "Unknown".
+    return user?.name || (isAnonymous ? user?.anonymous_id : undefined) || 'Unknown';
   }
   if (isAnonymous && user?.anonymous_id) {
     return user.anonymous_id;

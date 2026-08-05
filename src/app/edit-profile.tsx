@@ -26,7 +26,7 @@ import { auth, hasFirebaseConfig } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { upsertProfile, updateCounselorMetadata, fetchCounselors } from '@/lib/supabase-db';
 import { hasSupabaseConfig, supabase } from '@/lib/supabase';
-import { getPublicUrl, uploadFile } from '@/lib/supabase-storage';
+import { uploadFileFromUri } from '@/lib/supabase-storage';
 
 export default function EditProfileScreen() {
   const theme = useTheme();
@@ -159,11 +159,8 @@ export default function EditProfileScreen() {
       // Upload profile image to Supabase storage if it is a local path
       if (photoUri && !photoUri.startsWith('http') && hasSupabaseConfig) {
         try {
-          const response = await fetch(photoUri);
-          const blob = await response.blob();
           const filename = `avatars/${activeUserUid}/${Date.now()}.jpg`;
-          await uploadFile('social-media', filename, blob, blob.type || 'image/jpeg');
-          finalAvatarUrl = getPublicUrl('social-media', filename);
+          finalAvatarUrl = await uploadFileFromUri('social-media', filename, photoUri, 'image/jpeg');
         } catch (uploadErr) {
           console.warn('Storage image upload failed, using local URI fallback:', uploadErr);
         }

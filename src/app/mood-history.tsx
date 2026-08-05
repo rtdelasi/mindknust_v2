@@ -16,6 +16,7 @@ import { BorderRadius, FontSize, FontWeight, Size, Spacing } from '@/constants/t
 import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { fetchMoodLogs } from '@/lib/supabase-db';
+import { moodLabel } from '@/lib/moods';
 import { safeStorage } from '@/lib/safe-storage';
 
 interface MoodLog {
@@ -116,16 +117,7 @@ export default function MoodHistoryScreen() {
     );
   };
 
-  const getMoodLabel = (emoji: string) => {
-    const map: Record<string, string> = {
-      '😟': 'Distressed',
-      '😔': 'Down',
-      '🙂': 'Okay',
-      '😊': 'Good',
-      '😁': 'Great',
-    };
-    return map[emoji] || 'Logged';
-  };
+  const getMoodLabel = (emoji: string) => moodLabel(emoji);
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>

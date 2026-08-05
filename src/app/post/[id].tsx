@@ -40,7 +40,7 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id: postId } = useLocalSearchParams<{ id: string }>();
-  const { userName, role } = useMockAuth();
+  const { userName, role, anonymousId } = useMockAuth();
 
   const [post, setPost] = useState<SupabasePost | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
@@ -139,7 +139,12 @@ export default function PostDetailScreen() {
           content: replyText.trim(),
           created_at: new Date().toISOString(),
           is_anonymous: replyAsAnonymous,
-          profiles: { name: userName || 'User', role: role || 'student', avatar_url: null }
+          profiles: {
+            name: userName || 'User',
+            role: role || 'student',
+            avatar_url: null,
+            anonymous_id: anonymousId || undefined,
+          }
         };
       }
 

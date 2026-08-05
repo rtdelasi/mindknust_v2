@@ -1,5 +1,6 @@
 import { supabase, hasSupabaseConfig } from './supabase';
 import { analyzeSentiment, moderateContent } from './sentiment';
+import type { SentimentResult } from './sentiment';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface SupabaseProfile {
@@ -142,6 +143,50 @@ export async function upsertProfile(
     return { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
   }
 }
+
+export async function ensureProfileExists(
+  id: string,
+  role: 'student' | 'counselor' | 'admin' = 'student',
+  name?: string,
+  email?: string
+): Promise<SupabaseProfile | null> {
+  if (!hasSupabaseConfig || !supabase || !id) return null;
+
+  try {
+    const { data: existing } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (existing) {
+      return existing as any;
+    }
+
+    const defaultName =
+      name ||
+      (id === 'student-user'
+        ? 'Student User'
+        : id === 'kwame-boateng'
+        ? 'Dr. Kwame Boateng'
+        : `User (${id.slice(0, 6)})`);
+    const sanitizedId = id.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'user';
+    const defaultEmail = email || `${sanitizedId}@mindknust.edu.gh`;
+    const userRole = id === 'kwame-boateng' ? 'counselor' : role;
+
+    const profile = await upsertProfile(id, defaultName, defaultEmail, userRole);
+
+    if (userRole === 'student') {
+      await createStudentProfile({ userId: id });
+    }
+
+    return profile;
+  } catch (err) {
+    console.warn('[Supabase Profiles] Error ensuring profile exists:', err);
+    return null;
+  }
+}
+
 
 // ------------------------------
 // STUDENT PROFILES
@@ -905,13 +950,23 @@ export async function markMessagesAsRead(chatId: string, userId: string): Promis
 // ------------------------------
 // MOOD LOGS
 // ------------------------------
-export async function insertMoodLog(studentId: string, mood: string, note: string): Promise<SupabaseMoodLog | null> {
+export async function insertMoodLog(
+  studentId: string,
+  mood: string,
+  note: string,
+  precomputedSentiment?: SentimentResult
+): Promise<SupabaseMoodLog | null> {
   if (!hasSupabaseConfig || !supabase) return null;
 
-  // Run ML sentiment analyzer (HF API → keyword fallback)
-  const sentiment = await analyzeSentiment(note);
+  // Ensure user profile exists in public.profiles to prevent foreign key (23503) errors
+  await ensureProfileExists(studentId, 'student');
 
-  const { data, error } = await supabase
+  // Run ML sentiment analyzer (HF API → keyword fallback), unless the caller
+  // already has a result for this exact note — the journal screen does, and a
+  // second round trip would only duplicate it.
+  const sentiment = precomputedSentiment ?? (await analyzeSentiment(note));
+
+  let { data, error } = await supabase
     .from('mood_logs')
     .insert({
       student_id: studentId,
@@ -924,9 +979,37 @@ export async function insertMoodLog(studentId: string, mood: string, note: strin
     .select()
     .maybeSingle();
 
+  if (error && error.code === '23503') {
+    console.warn('[Supabase Mood Logs] Foreign key 23503 notice. Ensuring profile & retrying...');
+    await ensureProfileExists(studentId, 'student');
+    const retry = await supabase
+      .from('mood_logs')
+      .insert({
+        student_id: studentId,
+        mood,
+        note,
+        sentiment_score: sentiment.score,
+        sentiment_label: sentiment.label,
+        is_flagged: sentiment.isFlagged,
+      })
+      .select()
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
+
   if (error) {
-    console.error('Error logging mood:', error);
-    throw error;
+    console.warn('[Supabase Mood Logs] Error logging mood to DB, using local fallback:', error.message || error);
+    return {
+      id: generateFallbackUUID(),
+      student_id: studentId,
+      mood,
+      note,
+      sentiment_score: sentiment.score,
+      sentiment_label: sentiment.label,
+      is_flagged: sentiment.isFlagged,
+      created_at: new Date().toISOString(),
+    };
   }
 
   // Escalation Check: Check if last 3 entries are negative or flagged
@@ -1284,6 +1367,8 @@ export async function createPost(
   isAnonymous: boolean = false
 ): Promise<SupabasePost | null> {
   if (!hasSupabaseConfig || !supabase) return null;
+
+  await ensureProfileExists(userId, 'student');
 
   // Run ML moderation analyzer if not pre-moderated (HF API → keyword fallback)
   const mod = moderationResult || await moderateContent(content);
