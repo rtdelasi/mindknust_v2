@@ -112,6 +112,57 @@ export function generateAnonymousId(): string {
   return result;
 }
 
+/**
+ * Returns the profile's anonymous ID, generating and persisting one when the
+ * profile predates the anonymous-identity flow.
+ *
+ * Registration is not the only way a profile gets created — sign-in
+ * auto-provisioning (login.tsx) and ensureProfileExists() both upsert without
+ * an ID — so anything keyed off the anonymous ID has to backfill rather than
+ * assume it is already there.
+ */
+export async function ensureAnonymousId(userId: string): Promise<string | null> {
+  if (!hasSupabaseConfig || !supabase || !userId) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('anonymous_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Anonymous ID] Could not read profile:', error.message || error);
+      return null;
+    }
+
+    // No row yet. Writing an ID now would cache one locally that the row never
+    // receives, so leave it to whoever creates the profile.
+    if (!data) return null;
+    if (data.anonymous_id) return data.anonymous_id;
+
+    // anonymous_id is unique; retry a couple of times on collision.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const candidate = generateAnonymousId();
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ anonymous_id: candidate })
+        .eq('id', userId);
+
+      if (!updateError) return candidate;
+      if (updateError.code !== '23505') {
+        console.warn('[Anonymous ID] Backfill failed:', updateError.message || updateError);
+        return null;
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.warn('[Anonymous ID] Backfill error:', err);
+    return null;
+  }
+}
+
 export async function upsertProfile(
   id: string,
   name: string,
@@ -177,6 +228,10 @@ export async function ensureProfileExists(
     const profile = await upsertProfile(id, defaultName, defaultEmail, userRole);
 
     if (userRole === 'student') {
+      // Issued after the profile row lands rather than as part of the upsert:
+      // anonymous_id is unique, so folding it into the insert would let a
+      // collision fail profile creation outright. ensureAnonymousId retries.
+      await ensureAnonymousId(id);
       await createStudentProfile({ userId: id });
     }
 

@@ -4,6 +4,7 @@ import { signOut } from 'firebase/auth';
 import { safeStorage } from '@/lib/safe-storage';
 import { auth, hasFirebaseConfig } from '@/lib/firebase';
 import { supabase, hasSupabaseConfig } from '@/lib/supabase';
+import { ensureAnonymousId } from '@/lib/supabase-db';
 
 const ROLE_KEY = 'counselcare_mock_role';
 const AUTH_KEY = 'counselcare_mock_authenticated';
@@ -55,6 +56,13 @@ if (hasFirebaseConfig && auth) {
             }
             if (data.anonymous_id) {
               await safeStorage.setItem(ANON_ID_KEY, data.anonymous_id);
+            } else if (resolvedRole === 'student') {
+              // Profiles created by sign-in auto-provisioning have no ID.
+              // Backfill so anonymous posting has something to display.
+              const backfilled = await ensureAnonymousId(firebaseUser.uid);
+              if (backfilled) {
+                await safeStorage.setItem(ANON_ID_KEY, backfilled);
+              }
             }
           }
 

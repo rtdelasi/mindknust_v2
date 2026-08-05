@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { useState, useEffect } from 'react';
 
-import { BottomTabBar } from '@/components/ui/bottom-tab-bar';
+import { FloatingTabBar } from '@/components/ui/floating-tab-bar';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { fetchPendingCounselorsCount } from '@/lib/supabase-db';
 import { supabase } from '@/lib/supabase';
@@ -63,7 +63,7 @@ export default function TabLayout() {
 
   return (
     <Tabs
-      tabBar={(props) => <BottomTabBar {...props} />}
+      tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{
         headerShown: false,
       }}>

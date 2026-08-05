@@ -23,7 +23,7 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, hasFirebaseConfig } from '@/lib/firebase';
 import { supabase, hasSupabaseConfig } from '@/lib/supabase';
 
-import { upsertProfile } from '@/lib/supabase-db';
+import { ensureAnonymousId, upsertProfile } from '@/lib/supabase-db';
 
 export default function LoginScreen() {
   const theme = useTheme();
@@ -91,6 +91,11 @@ export default function LoginScreen() {
           const defaultName = email.split('@')[0];
           await upsertProfile(userCredential.user.uid, defaultName, email, dbRole);
           displayName = defaultName;
+          if (dbRole === 'student') {
+            // Students need an anonymous ID for anonymous posts and bookings.
+            // Registration supplies one; this path has to issue its own.
+            await ensureAnonymousId(userCredential.user.uid);
+          }
         }
 
         // Counselors must carry their real approval status, otherwise the

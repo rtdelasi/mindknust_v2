@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
-import { BottomTabBar } from '@/components/ui/bottom-tab-bar';
+import { FloatingTabBar } from '@/components/ui/floating-tab-bar';
 import { useMockAuth } from '@/lib/mock-auth-store';
 
 function TabIcon({
@@ -42,7 +42,7 @@ export default function CounselorTabLayout() {
 
   return (
     <Tabs
-      tabBar={(props) => <BottomTabBar {...props} />}
+      tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{
         headerShown: false,
       }}>

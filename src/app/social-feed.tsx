@@ -733,13 +733,13 @@ export default function SocialFeedScreen() {
               </View>
 
               {/* Anonymous posting toggle */}
-              {role === 'student' && anonymousId ? (
+              {role === 'student' ? (
                 <View style={[styles.anonToggleRow, { borderTopColor: theme.border }]}>
                   <View style={styles.anonToggleInfo}>
                     <MaterialCommunityIcons name="incognito" size={18} color={theme.primary} />
                     <View>
                       <Text style={[styles.anonToggleLabel, { color: theme.text }]}>
-                        Post as {postAsAnonymous ? anonymousId : userName}
+                        Post as {postAsAnonymous ? (anonymousId || 'Anonymous User') : userName}
                       </Text>
                       <Text style={[styles.anonToggleHint, { color: theme.textSecondary }]}>
                         {postAsAnonymous ? 'Your real name is hidden' : 'Tap to post anonymously'}

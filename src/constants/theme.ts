@@ -228,6 +228,10 @@ export const Size = {
   avatarLg: 72,
   avatarXl: 96,
   tabBarHeight: 84,
+  // Height of the floating tab pill itself, excluding the gap it leaves to the
+  // screen edges. Shorter than tabBarHeight because the safe-area inset sits
+  // outside the pill rather than inside it.
+  tabBarPillHeight: 64,
   minTouchTarget: 44,
 } as const;
 

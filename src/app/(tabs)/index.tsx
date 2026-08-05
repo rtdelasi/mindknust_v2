@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { CounselorCard } from '@/components/ui/counselor-card';
+import { floatingTabBarClearance } from '@/components/ui/floating-tab-bar';
 import { SectionHeader } from '@/components/ui/section-header';
 import {
   BorderRadius,
@@ -836,10 +837,13 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* ── FAB for Social timeline ── */}
+      {/* The floating tab bar is painted by the navigator as a later sibling of
+          the screen container, so no zIndex here can lift the FAB above it —
+          it has to be positioned clear of the bar instead. */}
       <Pressable
         style={[
           styles.fab,
-          { backgroundColor: theme.primary },
+          { backgroundColor: theme.primary, bottom: floatingTabBarClearance(insets.bottom) },
         ]}
         onPress={() => router.push('/social-feed')}>
         <MaterialCommunityIcons name="earth" size={26} color="#FFFFFF" />
@@ -1456,15 +1460,24 @@ const styles = StyleSheet.create({
   },
 
   /* ── FAB ── */
+  // `bottom` is set inline from floatingTabBarClearance(insets.bottom) so the
+  // button tracks the floating tab bar instead of hardcoding a gap.
   fab: {
     position: 'absolute',
-    bottom: Spacing.four,
     right: Spacing.four,
     width: 56,
     height: 56,
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
+    // Lifts the FAB above sibling cards within this screen. It cannot clear the
+    // tab bar itself — that lives outside this view's stacking context.
+    zIndex: 20,
+    elevation: 8,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
   },
 
   /* ── Crisis modal (preserved) ── */
