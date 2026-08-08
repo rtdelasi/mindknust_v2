@@ -44,9 +44,22 @@ export interface SupabaseCounselor {
   id: string;
   specialties: string[];
   rating: number;
+  review_count: number;
   note: string;
   bio: string;
   profile?: SupabaseProfile;
+}
+
+export interface SupabaseReview {
+  id: string;
+  appointment_id: string;
+  counselor_id: string;
+  student_id: string;
+  rating: number;
+  comment?: string;
+  is_anonymous: boolean;
+  created_at: string;
+  student_profile?: SupabaseProfile;
 }
 
 export interface SupabaseSlot {
@@ -186,12 +199,19 @@ export async function upsertProfile(
 
     if (error) {
       console.warn('[Supabase Profiles] RLS or DB notice during upsert:', error.message || error);
-      return { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
+      const fallback = { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
+      AsyncStorage.setItem(`counselcare_user_created_at:${id}`, fallback.created_at).catch(() => {});
+      return fallback;
+    }
+    if (data?.created_at) {
+      AsyncStorage.setItem(`counselcare_user_created_at:${id}`, data.created_at).catch(() => {});
     }
     return data;
   } catch (err) {
     console.warn('[Supabase Profiles] Catching upsert error, falling back locally:', err);
-    return { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
+    const fallback = { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
+    AsyncStorage.setItem(`counselcare_user_created_at:${id}`, fallback.created_at).catch(() => {});
+    return fallback;
   }
 }
 
@@ -467,7 +487,7 @@ export async function fetchCounselors(): Promise<SupabaseCounselor[]> {
   const { data: counselorData, error: counselorError } = await supabase
     .from('counselors')
     .select(`
-      id, specialties, rating, note, bio,
+      id, specialties, rating, review_count, note, bio,
       profile:profiles (id, name, email, role, avatar_url)
     `);
 
@@ -494,7 +514,8 @@ export async function fetchCounselors(): Promise<SupabaseCounselor[]> {
       list.push({
         id: prof.id,
         specialties: ['General Support', 'Peer Connection'],
-        rating: 5.0,
+        rating: 0,
+        review_count: 0,
         note: 'Ready to connect.',
         bio: 'KNUST Student Support Counselor.',
         profile: prof
@@ -512,7 +533,7 @@ export async function fetchCounselorDetail(id: string): Promise<SupabaseCounselo
   const { data, error } = await supabase
     .from('counselors')
     .select(`
-      id, specialties, rating, note, bio,
+      id, specialties, rating, review_count, note, bio,
       profile:profiles (id, name, email, role, avatar_url)
     `)
     .eq('id', id)
@@ -537,7 +558,8 @@ export async function fetchCounselorDetail(id: string): Promise<SupabaseCounselo
     return {
       id: prof.id,
       specialties: ['General Support', 'Peer Connection'],
-      rating: 5.0,
+      rating: 0,
+      review_count: 0,
       note: 'Ready to connect.',
       bio: 'KNUST Student Support Counselor.',
       profile: prof
@@ -557,7 +579,7 @@ export async function createCounselorMetadata(
 
   const { data, error } = await supabase
     .from('counselors')
-    .insert({ id, specialties, rating: 5.00, note, bio })
+    .insert({ id, specialties, rating: 0.00, note, bio })
     .select()
     .maybeSingle();
 
@@ -588,6 +610,119 @@ export async function updateCounselorMetadata(
     throw error;
   }
   return data;
+}
+
+// ------------------------------
+// COUNSELOR REVIEWS
+// ------------------------------
+
+/**
+ * Records a student's rating of a completed session.
+ *
+ * `counselors.rating` / `review_count` are denormalized aggregates maintained
+ * by the counselor_reviews_recalc trigger — this only writes the review row.
+ *
+ * One review per appointment is enforced by a unique constraint on
+ * appointment_id rather than a pre-read, so a double submit surfaces as 23505
+ * instead of racing.
+ */
+export async function submitCounselorReview(
+  appointmentId: string,
+  counselorId: string,
+  studentId: string,
+  rating: number,
+  comment?: string,
+  isAnonymous: boolean = false
+): Promise<{ ok: boolean; alreadyReviewed?: boolean; error?: string }> {
+  if (!hasSupabaseConfig || !supabase) return { ok: false, error: 'Offline' };
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return { ok: false, error: 'Rating must be a whole number from 1 to 5.' };
+  }
+
+  try {
+    const { error } = await supabase.from('counselor_reviews').insert({
+      appointment_id: appointmentId,
+      counselor_id: counselorId,
+      student_id: studentId,
+      rating,
+      comment: comment?.trim() || null,
+      is_anonymous: isAnonymous,
+    });
+
+    if (error) {
+      if (error.code === '23505') {
+        return { ok: false, alreadyReviewed: true, error: 'You have already rated this session.' };
+      }
+      console.warn('[Supabase Reviews] Error submitting review:', error.message || error);
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    console.warn('[Supabase Reviews] Exception submitting review:', err);
+    return { ok: false, error: 'Could not submit your rating right now.' };
+  }
+}
+
+/**
+ * Reviews for a counselor's public profile, newest first.
+ *
+ * Anonymous reviews keep their row but lose the reviewer's name before the
+ * data leaves this layer, matching how fetchPosts/fetchComments handle it.
+ */
+export async function fetchCounselorReviews(
+  counselorId: string,
+  limit: number = 20
+): Promise<SupabaseReview[]> {
+  if (!hasSupabaseConfig || !supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('counselor_reviews')
+      .select(`
+        id, appointment_id, counselor_id, student_id, rating, comment, is_anonymous, created_at,
+        student_profile:profiles!counselor_reviews_student_id_fkey (id, name, email, role, avatar_url)
+      `)
+      .eq('counselor_id', counselorId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.warn('[Supabase Reviews] Error fetching reviews:', error.message || error);
+      return [];
+    }
+
+    const reviews = (data || []) as unknown as SupabaseReview[];
+
+    reviews.forEach((review) => {
+      if (review.is_anonymous && review.student_profile) {
+        review.student_profile = { ...review.student_profile, name: '' };
+      }
+    });
+
+    return reviews;
+  } catch (err) {
+    console.warn('[Supabase Reviews] Exception fetching reviews:', err);
+    return [];
+  }
+}
+
+/** Whether this appointment already has a review, so the UI can hide the prompt. */
+export async function hasReviewedAppointment(appointmentId: string): Promise<boolean> {
+  if (!hasSupabaseConfig || !supabase) return false;
+
+  try {
+    const { data, error } = await supabase
+      .from('counselor_reviews')
+      .select('id')
+      .eq('appointment_id', appointmentId)
+      .maybeSingle();
+
+    return !error && !!data;
+  } catch {
+    return false;
+  }
 }
 
 // ------------------------------
@@ -704,6 +839,27 @@ export async function fetchAppointments(
     return combined;
   } catch {
     return localAppts;
+  }
+}
+
+export async function fetchAppointmentById(appointmentId: string): Promise<SupabaseAppointment | null> {
+  if (!hasSupabaseConfig || !supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`
+        id, student_id, counselor_id, appointment_date, time_slot, status, topic, is_anonymous_display,
+        student_profile:profiles!appointments_student_id_fkey(id, name, email, avatar_url),
+        counselor_profile:profiles!appointments_counselor_id_fkey(id, name, email, avatar_url)
+      `)
+      .eq('id', appointmentId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data as unknown as SupabaseAppointment;
+  } catch {
+    return null;
   }
 }
 
@@ -1137,11 +1293,17 @@ export async function fetchMoodLogs(studentId: string): Promise<SupabaseMoodLog[
 // NOTIFICATIONS
 // ------------------------------
 
-/** Insert a user-targeted notification. Pass null userId for broadcast announcements. */
+/**
+ * Insert a user-targeted notification. Pass null userId for broadcast announcements.
+ *
+ * `link` is an optional in-app route the notification deep-links to (e.g. the
+ * rating screen for a completed session). Null for plain messages.
+ */
 export async function createNotification(
   userId: string | null,
   title: string,
-  body: string
+  body: string,
+  link?: string
 ): Promise<void> {
   if (!hasSupabaseConfig || !supabase) return;
 
@@ -1149,6 +1311,7 @@ export async function createNotification(
     title,
     body,
     user_id: userId,
+    link: link || null,
   });
 
   if (error) {
@@ -1189,14 +1352,37 @@ export async function notifyNewMessage(
 
     const senderName = profile?.name || 'Someone';
     const preview = text.length > 80 ? text.slice(0, 80) + '...' : text;
+    const chatLink = `/chat/${chatId}?recipientId=${senderId}&name=${encodeURIComponent(senderName)}`;
 
     await createNotification(
       recipientId,
       `New message from ${senderName}`,
-      preview
+      preview,
+      chatLink
     );
   } catch (err) {
     console.warn('Failed to create message notification:', err);
+  }
+}
+
+/**
+ * Marks any notifications for a specific chat room as read for a given user.
+ */
+export async function markChatNotificationsAsRead(chatId: string, userId: string): Promise<void> {
+  if (!hasSupabaseConfig || !supabase || !userId || !chatId) return;
+
+  try {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', userId)
+      .ilike('link', `%${chatId}%`);
+
+    if (error) {
+      console.warn('Error marking chat notifications as read:', error.message);
+    }
+  } catch (err) {
+    console.warn('Failed marking chat notifications as read:', err);
   }
 }
 
@@ -1229,6 +1415,7 @@ export async function notifyAppointmentUpdate(
 
     let title = '';
     let body = '';
+    let link: string | undefined;
 
     switch (status) {
       case 'accepted':
@@ -1241,11 +1428,12 @@ export async function notifyAppointmentUpdate(
         break;
       case 'completed':
         title = 'Session Completed';
-        body = `Your ${topic} session on ${dateStr} has been marked as completed. Check your progress!`;
+        body = `Your ${topic} session on ${dateStr} is complete. Tap to rate your counselor.`;
+        link = `/rate-session/${appointmentId}`;
         break;
     }
 
-    await createNotification(recipientId, title, body);
+    await createNotification(recipientId, title, body, link);
   } catch (err) {
     console.warn('Failed to create appointment notification:', err);
   }
@@ -1343,7 +1531,17 @@ export async function fetchPosts(currentUserId?: string): Promise<SupabasePost[]
     throw error;
   }
 
-  const posts = (data || []) as SupabasePost[];
+  let posts = (data || []) as SupabasePost[];
+
+  // Option A Privacy Filter: Hide flagged crisis/self-harm posts from public feed.
+  // Flagged posts are visible ONLY to the student author who posted them (and counselors/admins in dashboard).
+  posts = posts.filter((post) => {
+    if (post.moderation_status === 'blocked') return false;
+    if ((post.moderation_status === 'flagged' || post.is_flagged) && post.user_id !== currentUserId) {
+      return false;
+    }
+    return true;
+  });
 
   // Enforce anonymity at data layer: strip name from anonymous posts for non-owning students
   posts.forEach((post) => {
@@ -1394,6 +1592,11 @@ export async function fetchPostDetail(postId: string, currentUserId?: string): P
 
   if (!data) return null;
   const post = data as unknown as SupabasePost;
+
+  if (post.moderation_status === 'blocked') return null;
+  if ((post.moderation_status === 'flagged' || post.is_flagged) && post.user_id !== currentUserId) {
+    return null; // Restricted: Option A hides flagged posts from other students
+  }
 
   // Enforce anonymity at data layer
   if (post.is_anonymous && post.user_id !== currentUserId && post.profiles) {

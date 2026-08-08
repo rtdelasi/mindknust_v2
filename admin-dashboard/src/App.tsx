@@ -20,7 +20,9 @@ import {
   Ban,
   TriangleAlert,
   ShieldCheck,
-  Eye
+  Eye,
+  Send,
+  Bell
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -286,6 +288,67 @@ export default function App() {
       setFlaggedContent(prev => prev.filter(p => p.id !== postId));
     } catch (err: any) {
       alert('Delete failed: ' + err.message);
+    }
+  };
+
+  const handleNotifyCounselorsForOutreach = async (post: SupabasePost) => {
+    if (!supabase) return;
+    const studentName = post.profiles?.name || 'Student Member';
+    const studentUserId = post.user_id;
+
+    const confirmMsg = `Send urgent crisis outreach alert to ALL approved counselors regarding student "${studentName}"?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      // Fetch all approved counselors
+      const { data: counselorProfiles } = await supabase
+        .from('counselor_profiles')
+        .select('user_id')
+        .eq('approval_status', 'approved');
+
+      let counselorIds: string[] = [];
+      if (counselorProfiles && counselorProfiles.length > 0) {
+        counselorIds = counselorProfiles.map((c) => c.user_id);
+      } else {
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'counselor');
+        counselorIds = profs?.map((p) => p.id) || ['kwame-boateng'];
+      }
+
+      if (counselorIds.length === 0) {
+        alert('No active counselors found in database to receive notification.');
+        return;
+      }
+
+      // Create notification rows for each counselor
+      const notificationRows = counselorIds.map((counselorId) => ({
+        user_id: counselorId,
+        title: '🚨 Crisis Alert: Student Outreach Requested',
+        body: `Admin requested immediate outreach for ${studentName}. Flagged post content: "${post.content}". Click to open direct support chat.`,
+        link: `/chat/new?studentId=${studentUserId}&studentName=${encodeURIComponent(studentName)}`,
+      }));
+
+      const { error: notifErr } = await supabase.from('notifications').insert(notificationRows);
+      if (notifErr) throw notifErr;
+
+      const newReason = post.flag_reason
+        ? `${post.flag_reason} (Outreach Alert Sent to ${counselorIds.length} Counselor${counselorIds.length === 1 ? '' : 's'})`
+        : `Outreach Alert Sent to ${counselorIds.length} Counselor${counselorIds.length === 1 ? '' : 's'}`;
+
+      await supabase
+        .from('posts')
+        .update({ flag_reason: newReason })
+        .eq('id', post.id);
+
+      setFlaggedContent((prev) =>
+        prev.map((p) => (p.id === post.id ? { ...p, flag_reason: newReason } : p))
+      );
+
+      alert(`✅ Crisis outreach alert successfully sent to ${counselorIds.length} counselor(s)! They can now contact ${studentName} directly from their notifications.`);
+    } catch (err: any) {
+      alert('Failed to send counselor notification: ' + (err.message || err));
     }
   };
 
@@ -968,7 +1031,14 @@ export default function App() {
                               <p className="text-xs text-amber-400/70 mt-2">Reason: {p.flag_reason}</p>
                             )}
 
-                            <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-800/50">
+                            <div className="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t border-slate-800/50">
+                              <button
+                                onClick={() => handleNotifyCounselorsForOutreach(p)}
+                                className="flex items-center gap-1.5 bg-amber-500/20 border border-amber-500/40 hover:bg-amber-500/30 text-amber-300 text-xs font-bold px-3.5 py-2 rounded-xl transition-colors shadow-sm"
+                              >
+                                <Send className="w-3.5 h-3.5 text-amber-400" />
+                                Alert Counselors to Contact Student
+                              </button>
                               <button
                                 onClick={() => handleApproveFlaggedPost(p.id)}
                                 className="flex items-center gap-1.5 bg-emerald-600/10 border border-emerald-500/20 hover:bg-emerald-600/20 text-emerald-400 text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"

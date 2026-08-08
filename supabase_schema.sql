@@ -374,6 +374,111 @@ begin
 end
 $$;
 
+-- ############################################################################
+-- 16. Counselor Reviews
+--
+-- `counselors.rating` is a denormalized aggregate, kept in sync by the trigger
+-- below. Never write it directly -- insert into counselor_reviews instead.
+--
+-- One review per completed appointment: the unique constraint on
+-- appointment_id is what enforces "a student may rate a session exactly once".
+-- ############################################################################
+
+create table if not exists public.counselor_reviews (
+  id uuid default gen_random_uuid() primary key,
+  appointment_id uuid references public.appointments(id) on delete cascade not null unique,
+  counselor_id text references public.profiles(id) on delete cascade not null,
+  student_id text references public.profiles(id) on delete cascade not null,
+  rating integer not null check (rating between 1 and 5),
+  comment text,
+  is_anonymous boolean default false not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists counselor_reviews_counselor_idx
+  on public.counselor_reviews (counselor_id, created_at desc);
+
+create index if not exists counselor_reviews_student_idx
+  on public.counselor_reviews (student_id);
+
+-- Review count alongside the existing `rating` column, so the UI can tell
+-- "no reviews yet" apart from a genuine average. Without it every counselor
+-- reads as a perfect 5.00 -- the column default -- before anyone has rated.
+alter table if exists public.counselors
+  add column if not exists review_count integer default 0 not null;
+
+-- Optional in-app route for a notification, so an announcement can deep-link
+-- (e.g. "Session Completed" -> the rating screen). Null for plain messages.
+alter table if exists public.notifications
+  add column if not exists link text;
+
+-- Recompute the denormalized aggregate whenever reviews change.
+-- Upserts rather than updates: fetchCounselors() in src/lib/supabase-db.ts
+-- synthesizes list entries for counselors that have a profiles row but no
+-- counselors row, so the target row is not guaranteed to exist.
+create or replace function public.recalc_counselor_rating()
+returns trigger
+language plpgsql
+as $$
+declare
+  target_id text;
+  avg_rating numeric(3,2);
+  total integer;
+begin
+  target_id := coalesce(new.counselor_id, old.counselor_id);
+
+  select round(avg(rating)::numeric, 2), count(*)
+    into avg_rating, total
+    from public.counselor_reviews
+   where counselor_id = target_id;
+
+  -- 0.00 rather than the 5.00 column default when no reviews remain: paired
+  -- with review_count = 0 it means "unrated", which the UI renders as "New".
+  -- Falling back to 5.00 here would make a counselor whose only review was
+  -- deleted read as perfectly rated again.
+  insert into public.counselors (id, rating, review_count)
+  values (target_id, coalesce(avg_rating, 0.00), coalesce(total, 0))
+  on conflict (id) do update
+    set rating = excluded.rating,
+        review_count = excluded.review_count;
+
+  return null;
+end;
+$$;
+
+drop trigger if exists counselor_reviews_recalc on public.counselor_reviews;
+
+create trigger counselor_reviews_recalc
+after insert or update or delete on public.counselor_reviews
+for each row execute function public.recalc_counselor_rating();
+
+-- The 5.00 column default predates reviews and would make every newly created
+-- counselor read as perfectly rated. Unrated is 0.00 + review_count 0.
+alter table if exists public.counselors
+  alter column rating set default 0.00;
+
+-- Backfill existing rows so the aggregate is correct on first deploy.
+-- Left join, not inner: counselors with no reviews must be reset to 0.00 too,
+-- otherwise they keep the old 5.00 default and read as five-star forever.
+update public.counselors c
+   set rating = coalesce(agg.avg_rating, 0.00),
+       review_count = coalesce(agg.total, 0)
+  from (
+    select p.id as counselor_id, x.avg_rating, x.total
+      from public.profiles p
+      left join (
+        select counselor_id,
+               round(avg(rating)::numeric, 2) as avg_rating,
+               count(*) as total
+          from public.counselor_reviews
+         group by counselor_id
+      ) x on x.counselor_id = p.id
+  ) agg
+ where c.id = agg.counselor_id;
+
+alter table if exists public.counselor_reviews disable row level security;
+grant all on public.counselor_reviews to anon, authenticated, postgres, service_role;
+
 -- Seed Default Demo/Fallback Profiles if they do not exist
 insert into public.profiles (id, name, email, role)
 values 

@@ -93,13 +93,16 @@ if (hasFirebaseConfig && auth) {
         await safeStorage.removeItem(AVATAR_KEY);
       }
     } else {
-      // User is logged out, clear cache
-      await safeStorage.removeItem(ROLE_KEY);
-      await safeStorage.removeItem(AUTH_KEY);
-      await safeStorage.removeItem(USER_KEY);
-      await safeStorage.removeItem(AVATAR_KEY);
-      await safeStorage.removeItem(ANON_ID_KEY);
-      await safeStorage.removeItem(APPROVAL_STATUS_KEY);
+      // Only clear if local demo/mock auth is not explicitly authenticated
+      const localAuth = await safeStorage.getItem(AUTH_KEY);
+      if (localAuth !== 'true') {
+        await safeStorage.removeItem(ROLE_KEY);
+        await safeStorage.removeItem(AUTH_KEY);
+        await safeStorage.removeItem(USER_KEY);
+        await safeStorage.removeItem(AVATAR_KEY);
+        await safeStorage.removeItem(ANON_ID_KEY);
+        await safeStorage.removeItem(APPROVAL_STATUS_KEY);
+      }
     }
     firebaseAuthResolved = true;
     notifyListeners();
@@ -114,10 +117,12 @@ export const mockAuth = {
     return (await safeStorage.getItem(ROLE_KEY)) as UserRole | null;
   },
   isAuthenticated: async (): Promise<boolean> => {
+    const localAuth = await safeStorage.getItem(AUTH_KEY);
+    if (localAuth === 'true') {
+      return true;
+    }
     const client = auth;
     if (hasFirebaseConfig && client) {
-      // Wait for Firebase to restore its persisted session before answering,
-      // so a returning user is not reported as logged out on cold start.
       if (!firebaseAuthResolved) {
         await new Promise<void>((resolve) => {
           const unsub = client.onAuthStateChanged(() => {
@@ -128,8 +133,7 @@ export const mockAuth = {
       }
       return client.currentUser !== null;
     }
-    const localAuth = await safeStorage.getItem(AUTH_KEY);
-    return localAuth === 'true';
+    return false;
   },
   getUserName: async (): Promise<string> => {
     if (hasFirebaseConfig && auth?.currentUser) {

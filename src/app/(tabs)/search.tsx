@@ -25,7 +25,7 @@ import {
 } from '@/constants/theme';
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { fetchCounselors, SupabaseCounselor } from '@/lib/supabase-db';
-import { getCounselorPhoto } from '@/lib/counselor-utils';
+import { getCounselorPhoto, formatCounselorRating } from '@/lib/counselor-utils';
 
 const categories = [
   { id: 'anxiety', label: 'Anxiety', icon: 'brain' },
@@ -46,7 +46,7 @@ function mapCounselorToCard(c: SupabaseCounselor): CounselorCardData {
     id: c.id,
     name,
     specialty: c.specialties[0] || 'Peer Guide',
-    rating: c.rating ? c.rating.toFixed(1) : '5.0',
+    rating: formatCounselorRating(c.rating, c.review_count).display,
     nextSlot: 'Available now',
     availability: `Available now`,
     initials,

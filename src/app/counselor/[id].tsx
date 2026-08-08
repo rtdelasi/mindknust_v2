@@ -34,8 +34,10 @@ import {
   fetchOrCreateChat,
   fetchAvailabilitySlots,
   createAppointment,
+  fetchCounselorReviews,
   SupabaseCounselor,
   SupabaseSlot,
+  SupabaseReview,
 } from '@/lib/supabase-db';
 import { getCounselorPhoto } from '@/lib/counselor-utils';
 
@@ -47,6 +49,7 @@ export default function CounselorDetailScreen() {
   const { role, anonymousId } = useMockAuth();
 
   const [counselor, setCounselor] = useState<SupabaseCounselor | null>(null);
+  const [reviews, setReviews] = useState<SupabaseReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [chatLoading, setChatLoading] = useState(false);
   const [slots, setSlots] = useState<SupabaseSlot[]>([]);
@@ -58,17 +61,37 @@ export default function CounselorDetailScreen() {
 
   const currentUserId = auth?.currentUser?.uid || 'student-user';
 
+  const selectedDayName = selectedDate.toLocaleDateString('en-US', { weekday: 'long' });
+  const filteredSlots = slots.filter(
+    (s) => s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase()
+  );
+
+  useEffect(() => {
+    const daySlots = slots.filter(
+      (s) => s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase()
+    );
+    if (daySlots.length > 0) {
+      const isValid = daySlots.some((s) => s.time_slot === selectedSlotText);
+      if (!isValid) {
+        setSelectedSlotText(daySlots[0].time_slot);
+      }
+    } else {
+      setSelectedSlotText('');
+    }
+  }, [selectedDate, slots]);
+
   const loadCounselorData = async () => {
     if (!counselorId) return;
     try {
       const data = await fetchCounselorDetail(counselorId);
       setCounselor(data);
       if (data) {
-        const avSlots = await fetchAvailabilitySlots(data.id);
+        const [avSlots, revs] = await Promise.all([
+          fetchAvailabilitySlots(data.id),
+          fetchCounselorReviews(data.id),
+        ]);
         setSlots(avSlots);
-        if (avSlots.length > 0) {
-          setSelectedSlotText(avSlots[0].time_slot);
-        }
+        setReviews(revs);
         if (data.specialties.length > 0) {
           setSelectedTopic(data.specialties[0]);
         }
@@ -120,27 +143,28 @@ export default function CounselorDetailScreen() {
 
   const handleBookSession = async () => {
     if (!counselor || booking) return;
-    if (slots.length === 0) {
+    if (!selectedSlotText || filteredSlots.length === 0) {
       Alert.alert(
         'No Slots',
-        'This counselor has not allocated any booking slots yet.'
+        `This counselor has no booking slots available for ${selectedDayName}.`
       );
       return;
     }
     setBooking(true);
     try {
-      const date = selectedDate.toISOString().split('T')[0];
+      const formattedDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+      const formattedDisplayDate = selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       await createAppointment(
         currentUserId,
         counselor.id,
-        date,
-        selectedSlotText || slots[0]?.time_slot || '09:00',
+        formattedDate,
+        selectedSlotText,
         selectedTopic || counselor.specialties[0] || 'General Support',
         anonDisplay
       );
       Alert.alert(
         'Session Booked',
-        `Your session with ${counselor.profile?.name || 'Counselor'} has been scheduled.`,
+        `Your session with ${counselor.profile?.name || 'Counselor'} on ${formattedDisplayDate} at ${selectedSlotText} has been scheduled.`,
         [{ text: 'View Sessions', onPress: () => router.push('/(tabs)/sessions') }]
       );
     } catch (err) {
@@ -354,14 +378,14 @@ export default function CounselorDetailScreen() {
 
           {/* ── Time Slot Picker ── */}
           <SectionHeader
-            title="Available Time Slots"
+            title={`Available Time Slots (${selectedDayName})`}
             actionLabel={
-              slots.length > 0 ? `${slots.length} Slots` : undefined
+              filteredSlots.length > 0 ? `${filteredSlots.length} Slots` : undefined
             }
           />
-          {slots.length > 0 ? (
+          {filteredSlots.length > 0 ? (
             <View style={styles.slotGrid}>
-              {slots.map((s) => {
+              {filteredSlots.map((s) => {
                 const slot = s.time_slot;
                 const isActive = selectedSlotText === slot;
                 return (
@@ -409,7 +433,72 @@ export default function CounselorDetailScreen() {
                   styles.noSlotsText,
                   { color: theme.textSecondary },
                 ]}>
-                No booking slots available yet. Check back later.
+                No booking slots allocated for {selectedDayName}. Select a different day.
+              </Text>
+            </Card>
+          )}
+        {/* Student Reviews & Ratings Section */}
+        <View style={{ marginTop: Spacing.four, gap: Spacing.two }}>
+          <View style={{ marginBottom: Spacing.two }}>
+            <Text style={{ fontSize: FontSize.h3, fontWeight: FontWeight.extrabold, color: theme.text }}>
+              {`Student Reviews (${counselor.review_count || reviews.length})`}
+            </Text>
+            <Text style={{ fontSize: FontSize.caption, color: theme.textSecondary, marginTop: 2 }}>
+              {counselor.rating ? `★ ${counselor.rating.toFixed(1)} average rating` : 'No ratings yet'}
+            </Text>
+          </View>
+          {reviews.length > 0 ? (
+            <View style={{ gap: Spacing.three }}>
+              {reviews.map((rev) => {
+                const reviewerName = rev.is_anonymous || !rev.student_profile?.name
+                  ? 'Anonymous Student'
+                  : rev.student_profile.name;
+                const revDate = new Date(rev.created_at).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                });
+                return (
+                  <Card key={rev.id} variant="surface" padding="three" style={{ borderRadius: 16 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: theme.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+                          <MaterialCommunityIcons
+                            name={rev.is_anonymous ? 'incognito' : 'account'}
+                            size={14}
+                            color={theme.primary}
+                          />
+                        </View>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>{reviewerName}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <MaterialCommunityIcons
+                            key={s}
+                            name={s <= rev.rating ? 'star' : 'star-outline'}
+                            size={14}
+                            color="#F59E0B"
+                          />
+                        ))}
+                      </View>
+                    </View>
+                    {rev.comment ? (
+                      <Text style={{ fontSize: 13, color: theme.textSecondary, lineHeight: 18, marginTop: 4 }}>
+                        "{rev.comment}"
+                      </Text>
+                    ) : null}
+                    <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 6, alignSelf: 'flex-end' }}>
+                      {revDate}
+                    </Text>
+                  </Card>
+                );
+              })}
+            </View>
+          ) : (
+            <Card variant="surface" padding="three" style={styles.noSlotsCard}>
+              <MaterialCommunityIcons name="star-outline" size={24} color={theme.textSecondary} />
+              <Text style={[styles.noSlotsText, { color: theme.textSecondary }]}>
+                No student reviews yet. Be the first to rate your session after an appointment.
               </Text>
             </Card>
           )}
@@ -437,6 +526,7 @@ export default function CounselorDetailScreen() {
             />
           </View>
         ) : null}
+        </View>
       </ScrollView>
 
       {/* ── Bottom bar: Chat + Book ── */}
@@ -465,7 +555,7 @@ export default function CounselorDetailScreen() {
           label={booking ? 'Booking...' : 'Book a Session'}
           variant="primary"
           onPress={handleBookSession}
-          disabled={booking || slots.length === 0}
+          disabled={booking || filteredSlots.length === 0 || !selectedSlotText}
           style={styles.bookButton}
         />
       </View>

@@ -279,34 +279,36 @@ export async function hfDetectCrisis(
   text: string
 ): Promise<HFCrisisResult | null> {
   try {
+    const candidateLabels = [
+      'suicide or self harm',
+      'expressing a desire to die or stop living',
+      'mental distress',
+      'normal content',
+    ];
     const raw = await hfPost(HF_CRISIS_MODEL, {
       inputs: text,
-      parameters: {
-        candidate_labels: ['crisis or self-harm', 'mental distress', 'normal content'],
-      },
+      parameters: { candidate_labels: candidateLabels },
     });
 
     if (!raw) return null;
 
     let crisisScore = 0;
     if (Array.isArray(raw)) {
-      // New format: list of objects
-      const entry = raw.find((item: any) => item && item.label === 'crisis or self-harm');
-      if (entry) {
-        crisisScore = entry.score;
-      } else {
-        return null;
+      // Format: list of { label, score }
+      for (const item of raw) {
+        if (item && (item.label === 'suicide or self harm' || item.label === 'expressing a desire to die or stop living')) {
+          crisisScore += item.score || 0;
+        }
       }
     } else if (typeof raw === 'object') {
-      // Legacy format: { labels: string[], scores: number[] }
-      const result = raw as {
-        labels?: string[];
-        scores?: number[];
-      };
+      // Format: { labels: string[], scores: number[] }
+      const result = raw as { labels?: string[]; scores?: number[] };
       if (Array.isArray(result.labels) && Array.isArray(result.scores)) {
-        const crisisIdx = result.labels.indexOf('crisis or self-harm');
-        if (crisisIdx === -1) return null;
-        crisisScore = result.scores[crisisIdx];
+        result.labels.forEach((label, idx) => {
+          if (label === 'suicide or self harm' || label === 'expressing a desire to die or stop living') {
+            crisisScore += result.scores?.[idx] || 0;
+          }
+        });
       } else {
         return null;
       }
@@ -315,8 +317,8 @@ export async function hfDetectCrisis(
     }
 
     return {
-      isCrisis: crisisScore > 0.55, // threshold: 55% confidence
-      score: crisisScore,
+      isCrisis: crisisScore > 0.35, // threshold for self-harm / suicidal ideation labels
+      score: Math.min(1, parseFloat(crisisScore.toFixed(2))),
     };
   } catch (err) {
     console.warn('[HF Crisis] API call failed, using keyword fallback:', err);

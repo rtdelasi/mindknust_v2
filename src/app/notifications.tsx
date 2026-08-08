@@ -30,6 +30,7 @@ import {
   addDismissedIds,
   addReadIds,
   applyLocalState,
+  getUserCreatedAt,
   isBroadcast,
   removeReadId,
 } from '@/lib/notification-state';
@@ -41,6 +42,8 @@ interface Announcement {
   created_at: string;
   user_id?: string | null;
   is_read?: boolean;
+  /** Optional in-app route this notification deep-links to. */
+  link?: string | null;
 }
 
 /** Horizontal travel past which the row is treated as swiped away. */
@@ -71,14 +74,20 @@ export default function NotificationsScreen() {
     try {
       if (!supabase) return;
 
-      const { data, error } = await supabase
+      const userCreatedAt = await getUserCreatedAt(currentUserId);
+      let query = supabase
         .from('notifications')
         .select('*')
-        .or(`user_id.is.null,user_id.eq.${currentUserId}`)
-        .order('created_at', { ascending: false });
+        .or(`user_id.is.null,user_id.eq.${currentUserId}`);
+
+      if (userCreatedAt) {
+        query = query.gte('created_at', userCreatedAt);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (!error && data) {
-        setAnnouncements(await applyLocalState(data as Announcement[], currentUserId));
+        setAnnouncements(await applyLocalState(data as Announcement[], currentUserId, userCreatedAt));
       }
     } catch (err) {
       console.warn('Error loading announcements:', err);
@@ -225,8 +234,12 @@ export default function NotificationsScreen() {
   }, [announcements, currentUserId]);
 
   const handleSelectNotification = (item: Announcement) => {
-    setSelected(item);
     markRead(item);
+    if (item.link) {
+      router.push(item.link as any);
+    } else {
+      setSelected(item);
+    }
   };
 
   useFocusEffect(
@@ -386,6 +399,39 @@ export default function NotificationsScreen() {
             <Text style={[styles.modalBody, { color: theme.text }]}>
               {selected?.body}
             </Text>
+
+            {selected?.link && (
+              <Pressable
+                onPress={() => {
+                  const link = selected.link;
+                  setSelected(null);
+                  if (link) router.push(link as any);
+                }}
+                style={[
+                  styles.linkButton,
+                  {
+                    backgroundColor:
+                      selected.title?.includes('Crisis') || selected.title?.includes('Outreach')
+                        ? '#EF4444'
+                        : theme.primary,
+                  },
+                ]}>
+                <MaterialCommunityIcons
+                  name={
+                    selected.title?.includes('Crisis') || selected.title?.includes('Outreach')
+                      ? 'account-heart-outline'
+                      : 'arrow-right-circle'
+                  }
+                  size={18}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.linkButtonText}>
+                  {selected.title?.includes('Crisis') || selected.title?.includes('Outreach')
+                    ? 'Contact Student Immediately'
+                    : 'Open'}
+                </Text>
+              </Pressable>
+            )}
 
             <View style={[styles.modalDivider, { backgroundColor: theme.border }]} />
 
@@ -795,6 +841,20 @@ const styles = StyleSheet.create({
   modalActionText: {
     fontSize: FontSize.caption + 1,
     fontWeight: FontWeight.bold,
+  },
+  linkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one,
+    paddingVertical: Spacing.three,
+    borderRadius: BorderRadius.md,
+    marginVertical: Spacing.one,
+  },
+  linkButtonText: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.bold,
+    color: '#FFFFFF',
   },
   unreadDot: {
     width: 8,

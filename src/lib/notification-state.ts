@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '@/lib/supabase';
+import { auth } from '@/lib/firebase';
 
 /**
  * Per-user read/dismissed tracking for notifications.
@@ -30,6 +32,7 @@ export interface NotificationRecord {
   id: string;
   user_id?: string | null;
   is_read?: boolean;
+  created_at?: string;
 }
 
 /** True when the row is an app-wide broadcast rather than a personal notice. */
@@ -99,22 +102,79 @@ export async function addDismissedIds(userId: string, ids: string[]): Promise<vo
 }
 
 /**
+ * Retrieves the account creation timestamp for a user.
+ */
+export async function getUserCreatedAt(userId: string): Promise<string | null> {
+  if (!userId) return null;
+  const cacheKey = `counselcare_user_created_at:${userId}`;
+
+  try {
+    const cached = await AsyncStorage.getItem(cacheKey);
+    if (cached) return cached;
+  } catch {}
+
+  if (auth?.currentUser && auth.currentUser.uid === userId && auth.currentUser.metadata?.creationTime) {
+    const firebaseTime = new Date(auth.currentUser.metadata.creationTime).toISOString();
+    try {
+      await AsyncStorage.setItem(cacheKey, firebaseTime);
+    } catch {}
+    return firebaseTime;
+  }
+
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('created_at')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (data?.created_at) {
+        try {
+          await AsyncStorage.setItem(cacheKey, data.created_at);
+        } catch {}
+        return data.created_at;
+      }
+    } catch (err) {
+      console.warn('[notifications] Error fetching user creation timestamp:', err);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Folds local state into freshly-fetched rows: drops anything the user has
- * dismissed and marks anything they have read.
+ * dismissed, filters out notifications created before account creation, and
+ * marks anything they have read.
  */
 export async function applyLocalState<T extends NotificationRecord>(
   rows: T[],
-  userId: string
+  userId: string,
+  userCreatedAt?: string | null
 ): Promise<T[]> {
-  const [readIds, dismissedIds] = await Promise.all([
+  const [readIds, dismissedIds, resolvedCreatedAt] = await Promise.all([
     getReadIds(userId),
     getDismissedIds(userId),
+    userCreatedAt !== undefined ? Promise.resolve(userCreatedAt) : getUserCreatedAt(userId),
   ]);
   const read = new Set(readIds);
   const dismissed = new Set(dismissedIds);
 
+  const createdAtMs = resolvedCreatedAt ? new Date(resolvedCreatedAt).getTime() : null;
+
   return rows
-    .filter((row) => !dismissed.has(row.id))
+    .filter((row) => {
+      if (dismissed.has(row.id)) return false;
+      if (createdAtMs && !isNaN(createdAtMs) && row.created_at) {
+        const notifMs = new Date(row.created_at).getTime();
+        // Exclude notifications created before the user account was created (with 5s grace period)
+        if (!isNaN(notifMs) && notifMs < createdAtMs - 5000) {
+          return false;
+        }
+      }
+      return true;
+    })
     .map((row) => ({ ...row, is_read: Boolean(row.is_read) || read.has(row.id) }));
 }
 
@@ -122,7 +182,12 @@ export async function applyLocalState<T extends NotificationRecord>(
  * Unread total for the bell badge. Counts the same way the list renders, so the
  * badge can never disagree with what the user actually sees.
  */
-export async function countUnread(rows: NotificationRecord[], userId: string): Promise<number> {
-  const visible = await applyLocalState(rows, userId);
+export async function countUnread(
+  rows: NotificationRecord[],
+  userId: string,
+  userCreatedAt?: string | null
+): Promise<number> {
+  const visible = await applyLocalState(rows, userId, userCreatedAt);
   return visible.filter((row) => !row.is_read).length;
 }
+

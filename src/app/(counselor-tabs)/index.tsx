@@ -27,7 +27,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { Badge } from '@/components/ui/badge';
-import { countUnread } from '@/lib/notification-state';
+import { countUnread, getUserCreatedAt } from '@/lib/notification-state';
 import { supabase } from '@/lib/supabase';
 import {
   fetchAppointments,
@@ -54,13 +54,20 @@ export default function CounselorDashboardScreen() {
   const fetchUnreadCount = async () => {
     try {
       if (!supabase) return;
-      const { data, error } = await supabase
+      const userCreatedAt = await getUserCreatedAt(currentUserId);
+      let query = supabase
         .from('notifications')
-        .select('id, user_id, is_read')
+        .select('id, user_id, is_read, created_at')
         .or(`user_id.is.null,user_id.eq.${currentUserId}`);
 
+      if (userCreatedAt) {
+        query = query.gte('created_at', userCreatedAt);
+      }
+
+      const { data, error } = await query;
+
       if (!error && data) {
-        setUnreadCount(await countUnread(data, currentUserId));
+        setUnreadCount(await countUnread(data, currentUserId, userCreatedAt));
       }
     } catch (err) {
       console.warn('Error fetching unread count:', err);

@@ -9,6 +9,7 @@ import Animated, {
 
 import { BorderRadius, FontSize, FontWeight, Spacing, Shadows, Timing } from '@/constants/theme';
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
+import { formatCounselorRating } from '@/lib/counselor-utils';
 
 type CounselorCardProps = {
   id: string;
@@ -52,6 +53,8 @@ export function CounselorCard({
 
   const handlePress = onPress || (() => router.push({ pathname: '/counselor/[id]', params: { id } }));
 
+  const ratingData = formatCounselorRating(rating, reviewCount);
+
   if (variant === 'horizontal') {
     return (
       <Animated.View style={animatedStyle}>
@@ -77,11 +80,11 @@ export function CounselorCard({
             <View style={styles.ratingRow}>
               <MaterialCommunityIcons name="star" size={13} color={theme.amber} />
               <Text style={[styles.ratingText, { color: theme.text }]}>
-                {rating?.toFixed(1) || '5.0'}
+                {ratingData.display}
               </Text>
-              {reviewCount !== undefined && (
+              {ratingData.countPostfix && (
                 <Text style={[styles.reviewText, { color: theme.textSecondary }]}>
-                  ({reviewCount})
+                  {ratingData.countPostfix}
                 </Text>
               )}
             </View>

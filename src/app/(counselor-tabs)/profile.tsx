@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useState, useCallback } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, Alert, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -18,6 +18,13 @@ import {
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { useThemeContext } from '@/contexts/theme-context';
 import { useMockAuth } from '@/lib/mock-auth-store';
+import { auth } from '@/lib/firebase';
+import {
+  fetchCounselorDetail,
+  fetchCounselorReviews,
+  SupabaseCounselor,
+  SupabaseReview,
+} from '@/lib/supabase-db';
 
 type AvailabilityStatus = 'online' | 'busy' | 'offline';
 
@@ -25,10 +32,34 @@ export default function CounselorProfileScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { logout, userName, avatarUrl } = useMockAuth();
+  const { logout, userName, avatarUrl, role } = useMockAuth();
   const { mode: themeMode, setMode: setThemeMode } = useThemeContext();
 
   const cName = userName || 'Kwame Ampofo';
+  const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'counselor-user');
+
+  const [counselorData, setCounselorData] = useState<SupabaseCounselor | null>(null);
+  const [reviews, setReviews] = useState<SupabaseReview[]>([]);
+
+  const loadFeedbackData = async () => {
+    try {
+      const detail = await fetchCounselorDetail(currentUserId);
+      setCounselorData(detail);
+      if (detail) {
+        const revList = await fetchCounselorReviews(detail.id);
+        setReviews(revList);
+      }
+    } catch (err) {
+      console.warn('[Counselor Profile] Error loading reviews:', err);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadFeedbackData();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentUserId])
+  );
 
   // Availability state
   const [status, setStatus] = useState<AvailabilityStatus>('online');
@@ -124,7 +155,79 @@ export default function CounselorProfileScreen() {
             </View>
           </Card>
 
-          {/* 4. Credentials Verification panel */}
+          {/* 4. Student Reviews & Ratings */}
+          <View style={styles.sectionDivider}>
+            <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>STUDENT FEEDBACK & RATINGS</Text>
+          </View>
+          <Card variant="surface" padding="four">
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <View>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>
+                  ★ {counselorData?.rating ? counselorData.rating.toFixed(1) : '5.0'}
+                </Text>
+                <Text style={{ fontSize: 12, color: theme.textSecondary }}>
+                  Based on {counselorData?.review_count || reviews.length} student reviews
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 2 }}>
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <MaterialCommunityIcons key={s} name="star" size={16} color="#F59E0B" />
+                ))}
+              </View>
+            </View>
+
+            {reviews.length > 0 ? (
+              <View style={{ gap: Spacing.two }}>
+                {reviews.slice(0, 5).map((rev) => {
+                  const revName = rev.is_anonymous || !rev.student_profile?.name
+                    ? 'Anonymous Student'
+                    : rev.student_profile.name;
+                  const revDate = new Date(rev.created_at).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                  });
+                  return (
+                    <View
+                      key={rev.id}
+                      style={{
+                        padding: Spacing.three,
+                        borderRadius: 12,
+                        backgroundColor: theme.surfaceSoft,
+                        gap: 4,
+                      }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>{revName}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                          {[1, 2, 3, 4, 5].map((s) => (
+                            <MaterialCommunityIcons
+                              key={s}
+                              name={s <= rev.rating ? 'star' : 'star-outline'}
+                              size={12}
+                              color="#F59E0B"
+                            />
+                          ))}
+                        </View>
+                      </View>
+                      {rev.comment ? (
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, lineHeight: 16 }}>
+                          "{rev.comment}"
+                        </Text>
+                      ) : null}
+                      <Text style={{ fontSize: 10, color: theme.textSecondary, alignSelf: 'flex-end' }}>
+                        {revDate}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={{ fontSize: 13, color: theme.textSecondary, fontStyle: 'italic' }}>
+                No student reviews recorded yet.
+              </Text>
+            )}
+          </Card>
+
+          {/* 5. Credentials Verification panel */}
           <View style={styles.sectionDivider}>
             <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>TRUST & LICENSING</Text>
           </View>

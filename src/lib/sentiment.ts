@@ -86,14 +86,32 @@ const NEGATION_WORDS = new Set([
 ]);
 
 const CRISIS_WORDS = [
-  'suicide', 'suicidal', 'kill myself', 'end my life', 'want to die', 'cutting', 'overdose',
-  'end my life', 'harming myself', 'feel like dying', 'feeling like dying', 'wishing to die',
-  'wish i was dead', 'better off dead', 'rather be dead',
+  'suicide', 'suicidal', 'kill myself', 'killing myself', 'end my life', 'ending my life',
+  'want to die', 'wanna die', 'wanting to die', 'cutting myself', 'cut myself', 'overdose',
+  'overdosing', 'harming myself', 'harm myself', 'self harm', 'self-harm', 'feel like dying',
+  'feeling like dying', 'wishing to die', 'wishing i was dead', 'wish i was dead',
+  'better off dead', 'rather be dead', 'rather die',
+  'dont want to live', "don't want to live", 'dont wanna live', "don't wanna live",
+  'do not want to live', 'tired of living', 'tired of life', 'tired of this life',
+  'tired of everything', 'no reason to live', 'no reason for living', 'no point in living',
+  'no point living', 'no point to life', 'done with life', 'done living',
+  'giving up on life', 'give up on life', 'gave up on life', 'want to disappear',
+  'wanna disappear', 'wish i could disappear', 'wish i was never born', 'wish i were never born',
+  'dont want to wake up', "don't want to wake up", 'dont wanna wake up', "don't wanna wake up",
+  'rather not wake up', 'end it all', 'ending it all', 'done with everything',
+  'no way out', 'cant take this anymore', "can't take this anymore", 'cannot take this anymore',
+  'cant go on living', "can't go on living", 'nothing to live for', 'hopeless life',
+  'want to jump', 'hanging myself', 'hang myself', 'take my life', 'taking my life',
 ];
 
 const TOXIC_WORDS = [
-  'fuck', 'bitch', 'shit', 'asshole', 'bastard', 'cunt', 'dick', 'pussy',
-  'slut', 'retard', 'bully', 'harass', 'idiot', 'moron',
+  'fuck', 'fucking', 'fucker', 'bitch', 'shit', 'shitty', 'asshole', 'bastard', 'cunt',
+  'dick', 'pussy', 'slut', 'whore', 'retard', 'retarded', 'dumbass', 'dipshit', 'jackass',
+  'idiot', 'moron', 'loser', 'jerk', 'douche', 'douchebag', 'scum', 'scumbag', 'trash',
+  'pathetic', 'garbage', 'kill yourself', 'kys', 'go die', 'you should die',
+  'nobody likes you', 'nobody cares about you', 'stfu', 'shut the fuck up', 'die in a fire',
+  'get cancer', 'waste of space', 'worthless piece of', 'ugly pig', 'ugly ass',
+  'shut up', 'hate you', 'fuck you', 'fuck off', 'piece of shit', 'bite me',
 ];
 
 // ---------------------------------------------------------------------------
@@ -213,13 +231,34 @@ export function keywordModerate(content: string): ModerationResult {
   if (!content.trim()) return { status: 'approved', isFlagged: false, source: 'keyword' };
 
   const lower = content.toLowerCase();
+  const tokens = new Set(tokenize(content));
 
-  if (CRISIS_WORDS.some((w) => lower.includes(w))) {
-    return { status: 'flagged', isFlagged: true, reason: 'Self-harm trigger detected', source: 'keyword' };
+  // Check Crisis / Self-Harm
+  const hasCrisis = CRISIS_WORDS.some((w) =>
+    w.includes(' ') || w.includes("'") ? lower.includes(w) : tokens.has(w)
+  );
+
+  if (hasCrisis) {
+    return {
+      status: 'flagged',
+      isFlagged: true,
+      reason: 'Self-harm / crisis content detected by local safety lexicon',
+      source: 'keyword',
+    };
   }
 
-  if (TOXIC_WORDS.some((w) => lower.includes(w))) {
-    return { status: 'blocked', isFlagged: true, reason: 'Community guidelines violation: profanity/toxicity', source: 'keyword' };
+  // Check Toxic / Harassing words
+  const hasToxicity = TOXIC_WORDS.some((w) =>
+    w.includes(' ') ? lower.includes(w) : tokens.has(w)
+  );
+
+  if (hasToxicity) {
+    return {
+      status: 'blocked',
+      isFlagged: true,
+      reason: 'Community guidelines violation: toxic or abusive language',
+      source: 'keyword',
+    };
   }
 
   return { status: 'approved', isFlagged: false, source: 'keyword' };
@@ -282,37 +321,55 @@ export async function moderateContent(content: string): Promise<ModerationResult
 
   if (isHFConfigured()) {
     try {
-      // Run both detectors in parallel
-      const [toxicResult, crisisResult] = await Promise.all([
+      // Run full HF ML moderation ensemble in parallel for maximum safety
+      const [toxicResult, crisisResult, emotionResult, sentimentResult] = await Promise.all([
         hfDetectToxicity(content),
         hfDetectCrisis(content),
+        hfAnalyzeEmotion(content),
+        hfAnalyzeSentiment(content),
       ]);
 
-      // Crisis takes priority over toxicity
+      // 1. Direct Crisis / Self-Harm detection (BART zero-shot)
       if (crisisResult?.isCrisis) {
         return {
           status: 'flagged',
           isFlagged: true,
-          reason: `Self-harm/crisis content detected (confidence: ${(crisisResult.score * 100).toFixed(0)}%)`,
+          reason: `Self-harm/crisis content detected by HF ML model (confidence: ${(crisisResult.score * 100).toFixed(0)}%)`,
           source: 'huggingface',
         };
       }
 
+      // 2. High Sadness/Fear Emotion + Negative Sentiment cross-verification
+      const isExtremeDespair =
+        (emotionResult?.label === 'sadness' || emotionResult?.label === 'fear') &&
+        emotionResult.score > 0.75 &&
+        sentimentResult?.label === 'negative';
+
+      if (isExtremeDespair && (crisisResult?.score ?? 0) > 0.25) {
+        return {
+          status: 'flagged',
+          isFlagged: true,
+          reason: `High despair/crisis signals detected by HF Emotion & Crisis ML models (${emotionResult.label} ${(emotionResult.score * 100).toFixed(0)}%)`,
+          source: 'huggingface',
+        };
+      }
+
+      // 3. Toxicity detection
       if (toxicResult?.isToxic) {
         return {
           status: 'blocked',
           isFlagged: true,
-          reason: `Toxic content detected by ML model (confidence: ${(toxicResult.score * 100).toFixed(0)}%)`,
+          reason: `Toxic content detected by HF ML model (confidence: ${(toxicResult.score * 100).toFixed(0)}%)`,
           source: 'huggingface',
         };
       }
 
-      // Both models returned results but neither flagged — approved
-      if (toxicResult !== null || crisisResult !== null) {
+      // If HF ML inference ran successfully and neither flagged nor blocked — approved
+      if (toxicResult !== null || crisisResult !== null || emotionResult !== null) {
         return { status: 'approved', isFlagged: false, source: 'huggingface' };
       }
-    } catch {
-      // Silently fall through to keyword engine
+    } catch (err) {
+      console.warn('[HF Moderation] API call exception, falling back to keyword engine:', err);
     }
   }
 

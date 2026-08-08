@@ -1,13 +1,13 @@
 import { DefaultTheme, DarkTheme, ThemeProvider as NavThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming, runOnJS } from 'react-native-reanimated';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -19,6 +19,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { supabase } from '@/lib/supabase';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
+import { getUserCreatedAt } from '@/lib/notification-state';
 import {
   subscribeToIncomingCalls,
   updateCallStatus,
@@ -77,9 +78,10 @@ function RootLayoutWithTheme() {
 
 function RootLayoutContent() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { role } = useMockAuth();
   const theme = useTheme();
-  const [activeAlert, setActiveAlert] = useState<{ title: string; body: string } | null>(null);
+  const [activeAlert, setActiveAlert] = useState<{ title: string; body: string; link?: string | null } | null>(null);
   const [incomingCall, setIncomingCall] = useState<SupabaseCall | null>(null);
   const [callerProfile, setCallerProfile] = useState<SupabaseProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -276,13 +278,24 @@ function RootLayoutContent() {
           schema: 'public',
           table: 'notifications',
         },
-        (payload) => {
-          const newNotif = payload.new as { title: string; body: string; user_id: string | null };
+        async (payload) => {
+          const newNotif = payload.new as { title: string; body: string; user_id: string | null; link?: string | null; created_at?: string };
           // Only show banner for broadcasts (user_id=null) or notifications targeted at this user
           if (newNotif && newNotif.title && (!newNotif.user_id || newNotif.user_id === currentUserId)) {
+            if (currentUserId) {
+              const userCreatedAt = await getUserCreatedAt(currentUserId);
+              if (userCreatedAt && newNotif.created_at) {
+                const notifMs = new Date(newNotif.created_at).getTime();
+                const createdAtMs = new Date(userCreatedAt).getTime();
+                if (!isNaN(notifMs) && !isNaN(createdAtMs) && notifMs < createdAtMs - 5000) {
+                  return;
+                }
+              }
+            }
             setActiveAlert({
               title: newNotif.title,
               body: newNotif.body,
+              link: newNotif.link,
             });
             // Auto dismiss alert after 8 seconds
             setTimeout(() => {
@@ -316,24 +329,25 @@ function RootLayoutContent() {
         <Stack.Screen name="+not-found" />
       </Stack>
 
-      {/* Floating Announcement Banner */}
+      {/* Floating Announcement / Notification Toast Banner with Swipe-Up Dismiss */}
       {activeAlert && (
-        <View style={[styles.alertBanner, { top: insets.top + 12, backgroundColor: theme.surfaceRaised, borderColor: theme.border }]}>
-          <View style={[styles.alertIconWrapper, { backgroundColor: theme.primarySoft }]}>
-            <MaterialCommunityIcons name="bullhorn" size={20} color={theme.primary} />
-          </View>
-          <View style={styles.alertTextWrapper}>
-            <Text numberOfLines={1} style={[styles.alertTitle, { color: theme.text }]}>
-              {activeAlert.title}
-            </Text>
-            <Text numberOfLines={2} style={[styles.alertBody, { color: theme.textSecondary }]}>
-              {activeAlert.body}
-            </Text>
-          </View>
-          <Pressable onPress={() => setActiveAlert(null)} style={styles.alertCloseButton}>
-            <MaterialCommunityIcons name="close" size={18} color={theme.textSecondary} />
-          </Pressable>
-        </View>
+        <SwipeableNotificationToast
+          alert={activeAlert}
+          topOffset={insets.top + 12}
+          theme={theme}
+          onDismiss={() => setActiveAlert(null)}
+          onPress={() => {
+            const link = activeAlert.link;
+            setActiveAlert(null);
+            if (link) {
+              router.push(link as any);
+            } else if (activeAlert.title?.toLowerCase().includes('message')) {
+              router.push((role === 'counselor' ? '/(counselor-tabs)/chats' : '/(tabs)/chats') as any);
+            } else {
+              router.push('/notifications' as any);
+            }
+          }}
+        />
       )}
 
       {/* ══════ Incoming Call Overlay ══════ */}
@@ -402,11 +416,106 @@ function RootLayoutContent() {
   );
 }
 
+function SwipeableNotificationToast({
+  alert,
+  onDismiss,
+  onPress,
+  topOffset,
+  theme,
+}: {
+  alert: { title: string; body: string; link?: string | null };
+  onDismiss: () => void;
+  onPress: () => void;
+  topOffset: number;
+  theme: any;
+}) {
+  const translateY = useSharedValue(-100);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    translateY.value = withTiming(0, { duration: 250 });
+    opacity.value = withTiming(1, { duration: 250 });
+  }, []);
+
+  const dismissToast = () => {
+    translateY.value = withTiming(-120, { duration: 200 });
+    opacity.value = withTiming(0, { duration: 200 }, (finished) => {
+      if (finished) {
+        runOnJS(onDismiss)();
+      }
+    });
+  };
+
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      if (e.translationY < 0) {
+        translateY.value = e.translationY;
+        opacity.value = Math.max(0, 1 + e.translationY / 80);
+      }
+    })
+    .onEnd((e) => {
+      if (e.translationY < -25 || e.velocityY < -300) {
+        runOnJS(dismissToast)();
+      } else {
+        translateY.value = withTiming(0, { duration: 180 });
+        opacity.value = withTiming(1, { duration: 180 });
+      }
+    });
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    opacity: opacity.value,
+  }));
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View
+        style={[
+          styles.alertBanner,
+          { top: topOffset, backgroundColor: theme.surfaceRaised, borderColor: theme.border },
+          animatedStyle,
+        ]}>
+        <Pressable onPress={onPress} style={styles.alertInnerPressable}>
+          <View style={[styles.alertIconWrapper, { backgroundColor: theme.primarySoft }]}>
+            <MaterialCommunityIcons
+              name={alert.title?.toLowerCase().includes('message') ? 'message-text' : 'bullhorn'}
+              size={20}
+              color={theme.primary}
+            />
+          </View>
+          <View style={styles.alertTextWrapper}>
+            <Text numberOfLines={1} style={[styles.alertTitle, { color: theme.text }]}>
+              {alert.title}
+            </Text>
+            <Text numberOfLines={2} style={[styles.alertBody, { color: theme.textSecondary }]}>
+              {alert.body}
+            </Text>
+          </View>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              runOnJS(dismissToast)();
+            }}
+            style={styles.alertCloseButton}>
+            <MaterialCommunityIcons name="close" size={18} color={theme.textSecondary} />
+          </Pressable>
+        </Pressable>
+      </Animated.View>
+    </GestureDetector>
+  );
+}
+
 const styles = StyleSheet.create({
   gestureRoot: {
     flex: 1,
   },
   container: {
+    flex: 1,
+  },
+  alertInnerPressable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     flex: 1,
   },
   alertBanner: {

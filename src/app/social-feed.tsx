@@ -224,47 +224,32 @@ export default function SocialFeedScreen() {
         }
       }
 
-      // 1. Run local keyword moderation first (instant fallback)
-      const localMod = keywordModerate(newPostContent.trim());
+      // 1. Await ML-powered Hugging Face Moderation check (with keyword fallback)
+      const moderation = await moderateContent(newPostContent.trim());
 
-      if (localMod.status === 'blocked') {
+      if (moderation.status === 'blocked') {
         Alert.alert(
-          'Post Blocked',
-          'Your post contains language that violates KNUST community guidelines and has been blocked.'
+          'Post Blocked (ML Safety Engine)',
+          `Your post was blocked by Hugging Face ML moderation: ${moderation.reason || 'Violates community guidelines.'}`
         );
         setSubmitting(false);
         return;
       }
 
-      if (localMod.status === 'flagged') {
+      if (moderation.isFlagged || moderation.status === 'flagged') {
         Alert.alert(
           'Support is Available',
-          'Your post contains words associated with self-harm. Please remember that KNUST Counseling services are available 24/7 at 03220-60352.'
+          'Your post contains expressions associated with crisis or self-harm. Please remember that KNUST Counseling services are available 24/7 at 03220-60352. You are not alone.'
         );
       }
 
-      // 2. Create the post immediately using the fast local moderation result
-      const created = await createPost(currentUserId, newPostContent.trim(), mediaUrl, localMod, postAsAnonymous);
+      // 2. Create the post with the ML moderation result
+      const created = await createPost(currentUserId, newPostContent.trim(), mediaUrl, moderation, postAsAnonymous);
       if (created) {
         await loadFeed();
         setNewPostContent('');
         setSelectedMediaUri(null);
         setComposeModalVisible(false);
-        setSubmitting(false); // Clear submitting state early so user doesn't wait for background check
-
-        // 3. Trigger Hugging Face API check in the background
-        if (isHFConfigured()) {
-          moderateContent(created.content).then(async (hfMod) => {
-            if (hfMod.source === 'huggingface' && hfMod.status !== localMod.status) {
-              console.log(`[Background Moderation] Post ${created.id} status changed: ${localMod.status} -> ${hfMod.status}`);
-              await updatePostModeration(created.id, hfMod.status, hfMod.isFlagged, hfMod.reason);
-              // Refresh the feed if the post has been blocked or flagged
-              loadFeed();
-            }
-          }).catch((err) => {
-            console.warn('[Background Moderation] Error running HF model:', err);
-          });
-        }
       } else {
         // Fallback for mock sandbox testing
         const newMockPost: SupabasePost = {
@@ -284,30 +269,14 @@ export default function SocialFeedScreen() {
             anonymous_id: anonymousId || undefined,
           },
           has_liked: false,
-          moderation_status: localMod.status,
-          is_flagged: localMod.isFlagged,
-          flag_reason: localMod.reason || undefined
+          moderation_status: moderation.status,
+          is_flagged: moderation.isFlagged,
+          flag_reason: moderation.reason || undefined
         };
         setPosts(prev => [newMockPost, ...prev]);
         setNewPostContent('');
         setSelectedMediaUri(null);
         setComposeModalVisible(false);
-        setSubmitting(false);
-
-        // Run background moderation in sandbox mock mode as well
-        if (isHFConfigured()) {
-          moderateContent(newMockPost.content).then((hfMod) => {
-            if (hfMod.source === 'huggingface' && hfMod.status === 'blocked') {
-              // Remove blocked post from sandbox feed
-              setPosts(prev => prev.filter(p => p.id !== newMockPost.id));
-              Alert.alert('Post Blocked (ML Moderation)', 'Your mock post was removed in the background by the Hugging Face moderation model.');
-            } else if (hfMod.source === 'huggingface' && hfMod.status === 'flagged') {
-              setPosts(prev => prev.map(p => p.id === newMockPost.id ? { ...p, moderation_status: 'flagged', is_flagged: true } : p));
-            }
-          }).catch((err) => {
-            console.warn('[Background Moderation Mock] Error:', err);
-          });
-        }
       }
     } catch (err: any) {
       Alert.alert('Post Failed', err.message || 'Could not save post.');
@@ -1411,5 +1380,25 @@ const styles = StyleSheet.create({
   },
   anonToggleHint: {
     fontSize: FontSize.small,
+  },
+  privateSupportBanner: {
+    padding: Spacing.three,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginBottom: Spacing.two,
+    gap: 4,
+  },
+  privateSupportHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
+  privateSupportTitle: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.bold,
+  },
+  privateSupportBody: {
+    fontSize: FontSize.caption,
+    lineHeight: 18,
   },
 });

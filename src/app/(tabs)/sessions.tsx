@@ -30,12 +30,13 @@ import {
   fetchAppointments,
   fetchCounselors,
   fetchMoodLogs,
+  hasReviewedAppointment,
   SupabaseAppointment,
   SupabaseCounselor,
   SupabaseMoodLog,
 } from '@/lib/supabase-db';
 
-import { getCounselorPhoto } from '@/lib/counselor-utils';
+import { getCounselorPhoto, formatCounselorRating } from '@/lib/counselor-utils';
 import { getDisplayIdentity } from '@/lib/display-identity';
 export { getCounselorPhoto };
 
@@ -48,6 +49,7 @@ export default function MySessionsScreen() {
   const [appointments, setAppointments] = useState<SupabaseAppointment[]>([]);
   const [counselors, setCounselors] = useState<SupabaseCounselor[]>([]);
   const [moodLogs, setMoodLogs] = useState<SupabaseMoodLog[]>([]);
+  const [reviewedApptIds, setReviewedApptIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -63,6 +65,18 @@ export default function MySessionsScreen() {
 
       const logs = await fetchMoodLogs(currentUserId);
       setMoodLogs(logs);
+
+      const completed = list.filter((a) => a.status === 'completed');
+      if (completed.length > 0) {
+        const checkResults = await Promise.all(
+          completed.map(async (a) => {
+            const hasRev = await hasReviewedAppointment(a.id);
+            return { id: a.id, hasRev };
+          })
+        );
+        const reviewedSet = new Set(checkResults.filter((r) => r.hasRev).map((r) => r.id));
+        setReviewedApptIds(reviewedSet);
+      }
     } catch (err) {
       console.warn('Error fetching appointments list:', err);
     } finally {
@@ -181,7 +195,7 @@ export default function MySessionsScreen() {
                 {filteredCounselors.map((c, index) => {
                   const nameVal = c.profile?.name || 'Counselor';
                   const roleVal = c.specialties[0] || 'Peer Guide';
-                  const ratingVal = c.rating ? c.rating.toFixed(1) : '5.0';
+                  const ratingVal = formatCounselorRating(c.rating, c.review_count).display;
                   const imgUrl = getCounselorPhoto(nameVal, c.profile?.avatar_url);
                   const gradient = getCardGradient(index);
 
@@ -385,13 +399,28 @@ export default function MySessionsScreen() {
                           <View style={[styles.timelineDot, { backgroundColor: theme.primary }]} />
                           {!isLast && <View style={[styles.timelineLine, { backgroundColor: theme.border }]} />}
                         </View>
-                        <View style={styles.timelineContent}>
-                          <Text style={[styles.timelineTitle, { color: theme.text }]} numberOfLines={1}>
-                            {session.topic || 'General session'}
-                          </Text>
-                          <Text style={[styles.timelineMeta, { color: theme.textSecondary }]}>
-                            {counselorName.split(' ')[0]} · {new Date(session.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </Text>
+                        <View style={[styles.timelineContent, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text style={[styles.timelineTitle, { color: theme.text }]} numberOfLines={1}>
+                              {session.topic || 'General session'}
+                            </Text>
+                            <Text style={[styles.timelineMeta, { color: theme.textSecondary }]}>
+                              {counselorName.split(' ')[0]} · {new Date(session.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </Text>
+                          </View>
+                          {reviewedApptIds.has(session.id) ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.surfaceSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+                              <MaterialCommunityIcons name="star" size={14} color="#F59E0B" />
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: theme.textSecondary }}>Rated</Text>
+                            </View>
+                          ) : (
+                            <Pressable
+                              onPress={() => router.push(`/rate-session/${session.id}` as any)}
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${theme.primary}1A`, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 }}>
+                              <MaterialCommunityIcons name="star-outline" size={14} color={theme.primary} />
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>Rate</Text>
+                            </Pressable>
+                          )}
                         </View>
                       </View>
                     );

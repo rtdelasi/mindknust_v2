@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { SectionHeader } from '@/components/ui/section-header';
 import { Tag } from '@/components/ui/tag';
+import { WeekDatePicker } from '@/components/ui/week-date-picker';
 import {
   BorderRadius,
   FontSize,
@@ -39,10 +40,30 @@ export default function BookingScreen() {
   const [loading, setLoading] = useState(true);
   const [counselorData, setCounselorData] = useState<SupabaseCounselor | null>(null);
   const [slots, setSlots] = useState<SupabaseSlot[]>([]);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedSlotText, setSelectedSlotText] = useState('');
   const [selectedTopic, setSelectedTopic] = useState('Academic stress');
   const [submitting, setSubmitting] = useState(false);
   const [anonDisplay, setAnonDisplay] = useState(false);
+
+  const selectedDayName = selectedDate.toLocaleDateString('en-US', { weekday: 'long' });
+  const filteredSlots = slots.filter(
+    (s) => s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase()
+  );
+
+  useEffect(() => {
+    const daySlots = slots.filter(
+      (s) => s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase()
+    );
+    if (daySlots.length > 0) {
+      const isValid = daySlots.some((s) => s.time_slot === selectedSlotText);
+      if (!isValid) {
+        setSelectedSlotText(daySlots[0].time_slot);
+      }
+    } else {
+      setSelectedSlotText('');
+    }
+  }, [selectedDate, slots]);
 
   const formatCounselorName = (value: string) => {
     return value
@@ -59,15 +80,13 @@ export default function BookingScreen() {
         setCounselorData(match);
         const avSlots = await fetchAvailabilitySlots(match.id);
         setSlots(avSlots);
-        if (avSlots.length > 0) {
-          setSelectedSlotText(avSlots[0].time_slot);
-        }
       } else {
         // Fallback mockup
         setCounselorData({
           id: counselor,
           specialties: ['Anxiety', 'Academic stress', 'Relationships'],
           rating: 4.9,
+          review_count: 0,
           note: 'Online session - 30 minutes',
           bio: 'Licensed KNUST student counselor providing support.',
           profile: {
@@ -92,28 +111,29 @@ export default function BookingScreen() {
   }, [counselor]);
 
   const handleConfirmBooking = async () => {
-    if (slots.length === 0) {
-      Alert.alert('Booking Error', 'No active availability slots are configured by this counselor.');
+    if (!selectedSlotText || filteredSlots.length === 0) {
+      Alert.alert('Booking Error', `No available slot selected for ${selectedDayName}.`);
       return;
     }
 
     setSubmitting(true);
     const studentId = auth?.currentUser?.uid || 'student-user';
     const cId = counselorData?.id || counselor;
-    const date = new Date().toISOString().split('T')[0]; // Today's date
+    const formattedDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+    const formattedDisplayDate = selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
     try {
-      await createAppointment(studentId, cId, date, selectedSlotText, selectedTopic, anonDisplay);
+      await createAppointment(studentId, cId, formattedDate, selectedSlotText, selectedTopic, anonDisplay);
       Alert.alert(
         'Booking Confirmed',
-        `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} at ${selectedSlotText} has been scheduled.`,
+        `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} has been scheduled.`,
         [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
       );
     } catch (err: any) {
       console.warn('DB booking failed, returning mock confirmation:', err);
       Alert.alert(
         'Booking Confirmed',
-        `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} at ${selectedSlotText} (${selectedTopic}).`,
+        `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic}).`,
         [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
       );
     } finally {
@@ -146,7 +166,7 @@ export default function BookingScreen() {
             <Text style={[styles.eyebrow, { color: theme.primary }]}>Session booking</Text>
             <Text style={[styles.title, { color: theme.text }]}>Book a counselor</Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-              Choose a time, add a concern, and lock in your next support session.
+              Choose a date and available time slot to lock in your next support session.
             </Text>
           </View>
 
@@ -166,12 +186,22 @@ export default function BookingScreen() {
             </View>
           </Card>
 
+          {/* Date Selector block */}
+          <Card variant="surface" padding="four">
+            <SectionHeader title="Select a Date" />
+            <WeekDatePicker
+              selectedDate={selectedDate}
+              onDateSelect={setSelectedDate}
+              minDate={new Date()}
+            />
+          </Card>
+
           {/* Time Selector block */}
           <Card variant="surface" padding="four">
-            <SectionHeader title="Choose a time" />
-            {slots.length > 0 ? (
+            <SectionHeader title={`Available Time Slots (${selectedDayName})`} />
+            {filteredSlots.length > 0 ? (
               <View style={styles.slotGrid}>
-                {slots.map((s) => {
+                {filteredSlots.map((s) => {
                   const slot = s.time_slot;
                   const isActive = selectedSlotText === slot;
                   return (
@@ -194,7 +224,7 @@ export default function BookingScreen() {
               <View style={[styles.noSlotsCard, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
                 <MaterialCommunityIcons name="calendar-remove" size={26} color="#FF3B30" />
                 <Text style={[styles.noSlotsText, { color: theme.textSecondary }]}>
-                  This counselor has not allocated any booking slots yet. Please check back later.
+                  This counselor has no availability slots allocated for {selectedDayName}. Please select a different day.
                 </Text>
               </View>
             )}
@@ -251,7 +281,7 @@ export default function BookingScreen() {
 
           <Button
             label={submitting ? 'Booking...' : 'Confirm booking'}
-            disabled={submitting || slots.length === 0}
+            disabled={submitting || filteredSlots.length === 0 || !selectedSlotText}
             onPress={handleConfirmBooking}
           />
         </View>

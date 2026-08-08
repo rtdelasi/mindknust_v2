@@ -27,7 +27,10 @@ import {
   sendMessage as submitDbMessage,
   SupabaseMessage,
   markMessagesAsRead,
+  markChatNotificationsAsRead,
+  fetchOrCreateChat,
 } from '@/lib/supabase-db';
+
 import { usePresence } from '@/contexts/presence-context';
 
 interface ChatMessage {
@@ -46,14 +49,32 @@ export default function ChatRoomScreen() {
   const isDark = useThemeMode() === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ id: string; name: string; role: string; recipientId: string }>();
-  const chatId = params.id || '';
+  const params = useLocalSearchParams<{
+    id: string;
+    name?: string;
+    role?: string;
+    recipientId?: string;
+    studentId?: string;
+    studentName?: string;
+  }>();
   const { role } = useMockAuth();
+
+  const [activeChatId, setActiveChatId] = useState<string>(params.id !== 'new' ? params.id || '' : '');
+  const [resolvedRecipientId, setResolvedRecipientId] = useState<string>(params.recipientId || params.studentId || '');
+  const [resolvedRecipientName, setResolvedRecipientName] = useState<string>(
+    params.name || (params.studentName ? decodeURIComponent(params.studentName) : 'Student Member')
+  );
+
+  const chatId = activeChatId;
+  const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
+  const recipientName = resolvedRecipientName;
+  const recipientRole = params.role || (role === 'counselor' ? 'Student' : 'Counselor');
+  const recipientId = resolvedRecipientId;
 
   const [text, setText] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Realtime States
   const [otherUserTyping, setOtherUserTyping] = useState(false);
 
@@ -63,12 +84,29 @@ export default function ChatRoomScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const channelRef = useRef<any>(null);
 
-  const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
-  const recipientName = params.name || 'Wellbeing Advisor';
-  const recipientRole = params.role || 'Counselor';
-  const recipientId = params.recipientId || '';
   const { isUserOnline } = usePresence();
   const otherUserStatus: 'Online' | 'Offline' = isUserOnline(recipientId) ? 'Online' : 'Offline';
+
+  useEffect(() => {
+    const resolveNewChat = async () => {
+      if (params.id === 'new' && (params.studentId || params.recipientId)) {
+        const targetSid = params.studentId || params.recipientId || '';
+        try {
+          const chat = await fetchOrCreateChat(targetSid, currentUserId);
+          if (chat) {
+            setActiveChatId(chat.id);
+            setResolvedRecipientId(targetSid);
+            if (params.studentName) {
+              setResolvedRecipientName(decodeURIComponent(params.studentName));
+            }
+          }
+        } catch (err) {
+          console.warn('Error resolving chat room from notification:', err);
+        }
+      }
+    };
+    resolveNewChat();
+  }, [params.id, params.studentId, params.recipientId, currentUserId, params.studentName]);
 
   const loadChatThread = async () => {
     if (!chatId) return;
@@ -85,8 +123,6 @@ export default function ChatRoomScreen() {
         read_at: m.read_at,
       }));
       setMessages((prev) => {
-        // Keep optimistic messages the server hasn't echoed back yet, so a
-        // resync that lands mid-send doesn't make the user's own bubble vanish.
         const pending = prev.filter(
           (p) =>
             p.id.startsWith('temp-') &&
@@ -105,7 +141,10 @@ export default function ChatRoomScreen() {
     const initChat = async () => {
       await loadChatThread();
       if (chatId) {
-        await markMessagesAsRead(chatId, currentUserId);
+        await Promise.all([
+          markMessagesAsRead(chatId, currentUserId),
+          markChatNotificationsAsRead(chatId, currentUserId),
+        ]);
       }
     };
     initChat();

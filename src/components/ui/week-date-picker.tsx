@@ -122,9 +122,12 @@ export function WeekDatePicker({
     if (!maxDate || next <= maxDate) onDateSelect(next);
   };
 
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
   const isDisabled = (date: Date) => {
-    if (minDate && date < minDate) return true;
-    if (maxDate && date > maxDate) return true;
+    const target = startOfDay(date);
+    if (minDate && target < startOfDay(minDate)) return true;
+    if (maxDate && target > startOfDay(maxDate)) return true;
     return false;
   };
 
