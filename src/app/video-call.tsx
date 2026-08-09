@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { HMSView, HMSVideoViewMode } from '@100mslive/react-native-hms';
+import { HMSVideoViewMode, HMSConstants } from '@100mslive/react-native-hms';
+import { HmsViewComponent } from '@100mslive/react-native-hms/src/classes/HmsView';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -652,9 +653,10 @@ export default function VideoCallScreen() {
               console.log('[VideoDebug] rendering HmsView with trackId:', realTrackId);
               return (
                 <View style={styles.remoteVideoCanvas}>
-                  <HMSView
+                  <HmsViewComponent
                     key={realTrackId}
                     trackId={realTrackId}
+                    id={HMSConstants?.DEFAULT_SDK_ID || '100ms_sdk_id'}
                     style={StyleSheet.absoluteFillObject}
                     scaleType={HMSVideoViewMode.ASPECT_FILL}
                     mirror={false}
