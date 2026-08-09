@@ -1,9 +1,9 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { BorderRadius, FontSize, Shadows, Spacing } from '@/constants/theme';
+import { BorderRadius, FontSize, FontWeight, Shadows, Spacing } from '@/constants/theme';
 import { useTheme, useThemeMode } from '@/hooks/use-theme';
 
 export type CounselorCardData = {
@@ -42,63 +42,114 @@ type SessionCardProps = {
   onPress?: () => void;
 };
 
-export function CounselorCard({ counselor, ctaLabel = 'Book', onPress }: CounselorCardProps) {
+export function CounselorCard({ counselor, ctaLabel = 'Book session', onPress }: CounselorCardProps) {
   const theme = useTheme();
   const isDark = useThemeMode() === 'dark';
   const shadow = isDark ? Shadows.dark : Shadows.light;
+  const router = useRouter();
   const [photoFailed, setPhotoFailed] = useState(false);
   const showPhoto = !!counselor.photoUrl && !photoFailed;
 
+  const handleCardPress =
+    onPress || (() => router.push({ pathname: '/counselor/[id]', params: { id: counselor.id } }));
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handleCardPress}
       style={({ pressed }) => [
         styles.counselorCard,
         pressed && styles.pressed,
-        { backgroundColor: counselor.background || theme.surfaceRaised },
+        {
+          backgroundColor: theme.surfaceRaised,
+          borderColor: theme.border,
+        },
         shadow.card,
       ]}>
+      {/* Top Header Row */}
       <View style={styles.counselorTopRow}>
-        <View style={[styles.avatar, { backgroundColor: counselor.foreground || theme.primary }]}>
-          {showPhoto ? (
-            <Image
-              source={{ uri: counselor.photoUrl }}
-              style={styles.avatarImage}
-              onError={() => setPhotoFailed(true)}
-            />
-          ) : (
-            <Text style={[styles.cardInitial, { color: theme.textInverse }]}>{counselor.initials}</Text>
-          )}
-        </View>
-        <View style={styles.counselorMeta}>
-          <Text style={[styles.cardTitle, { color: theme.text }]}>{counselor.name}</Text>
-          <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>{counselor.specialty}</Text>
-          <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>{counselor.availability}</Text>
-        </View>
-        <View style={[styles.ratingBadge, { backgroundColor: theme.surfaceSoft }]}>
-          <MaterialCommunityIcons name="star" size={14} color={theme.warning} />
-          <Text style={[styles.smallLabel, { color: theme.text }]}>{counselor.rating}</Text>
-        </View>
-      </View>
-      <View style={styles.highlightRow}>
-        {counselor.highlights.map((item) => (
-          <View key={item} style={[styles.highlightPill, { backgroundColor: theme.surfaceSoft }]}>
-            <Text style={[styles.smallLabel, { color: theme.textSecondary }]}>{item}</Text>
+        <View style={styles.avatarWrapper}>
+          <View style={[styles.avatar, { backgroundColor: theme.primarySoft }]}>
+            {showPhoto ? (
+              <Image
+                source={{ uri: counselor.photoUrl }}
+                style={styles.avatarImage}
+                onError={() => setPhotoFailed(true)}
+              />
+            ) : (
+              <Text style={[styles.cardInitial, { color: theme.primary }]}>{counselor.initials}</Text>
+            )}
           </View>
-        ))}
-      </View>
-      <View style={styles.counselorBottomRow}>
-        <View style={[styles.slotPill, { backgroundColor: theme.surfaceSoft }]}>
-          <MaterialCommunityIcons name="calendar-clock" size={15} color={theme.primary} />
-          <Text style={[styles.smallLabel, { color: theme.textSecondary }]}>{counselor.nextSlot}</Text>
+          <View style={[styles.onlineDot, { backgroundColor: theme.success, borderColor: theme.surfaceRaised }]} />
         </View>
-        <Link
-          href={{ pathname: '/booking/[counselor]', params: { counselor: counselor.id } }}
-          asChild>
-          <Pressable style={({ pressed }) => [{ backgroundColor: theme.primary, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.four, paddingVertical: Spacing.two }, pressed && styles.pressed]}>
-            <Text style={[styles.primaryButtonText, { color: theme.textInverse }]}>{ctaLabel}</Text>
+
+        <View style={styles.counselorMeta}>
+          <View style={styles.nameRow}>
+            <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
+              {counselor.name}
+            </Text>
+            <MaterialCommunityIcons name="check-decagram" size={16} color={theme.primary} />
+          </View>
+          <Text style={[styles.cardSubtitle, { color: theme.primary }]} numberOfLines={1}>
+            {counselor.specialty}
+          </Text>
+          {counselor.availability ? (
+            <Text style={[styles.cardQualification, { color: theme.textSecondary }]} numberOfLines={1}>
+              {counselor.availability}
+            </Text>
+          ) : null}
+        </View>
+
+        <View style={[styles.ratingBadge, { backgroundColor: theme.warningSoft }]}>
+          <MaterialCommunityIcons name="star" size={13} color={theme.warning} />
+          <Text style={[styles.ratingText, { color: theme.warning }]}>{counselor.rating}</Text>
+        </View>
+      </View>
+
+      {/* Specialty Highlights Pills */}
+      {counselor.highlights && counselor.highlights.length > 0 && (
+        <View style={styles.highlightRow}>
+          {counselor.highlights.map((item) => (
+            <View key={item} style={[styles.highlightPill, { backgroundColor: theme.surfaceSoft }]}>
+              <Text style={[styles.highlightText, { color: theme.textSecondary }]}>#{item}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Card Footer */}
+      <View style={[styles.counselorBottomRow, { borderTopColor: theme.border }]}>
+        <View style={styles.slotPill}>
+          <MaterialCommunityIcons name="calendar-clock-outline" size={15} color={theme.primary} />
+          <Text style={[styles.slotText, { color: theme.textSecondary }]}>
+            {counselor.nextSlot || 'Available Today'}
+          </Text>
+        </View>
+
+        <View style={styles.cardActionsRow}>
+          <Pressable
+            onPress={() => router.push({ pathname: '/counselor/[id]', params: { id: counselor.id } })}
+            style={({ pressed }) => [
+              styles.profileBtn,
+              { backgroundColor: theme.surfaceSoft, borderColor: theme.border },
+              pressed && styles.pressed,
+            ]}>
+            <Text style={[styles.profileBtnText, { color: theme.text }]}>Profile</Text>
           </Pressable>
-        </Link>
+
+          <Link
+            href={{ pathname: '/booking/[counselor]', params: { counselor: counselor.id } }}
+            asChild>
+            <Pressable
+              style={({ pressed }) => [
+                styles.bookBtn,
+                { backgroundColor: theme.primary },
+                pressed && styles.pressed,
+              ]}>
+              <MaterialCommunityIcons name="calendar-plus" size={15} color="#FFFFFF" />
+              <Text style={styles.bookBtnText}>{ctaLabel}</Text>
+            </Pressable>
+          </Link>
+        </View>
       </View>
     </Pressable>
   );
@@ -147,16 +198,20 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     padding: Spacing.four,
     gap: Spacing.three,
+    borderWidth: 1,
   },
   counselorTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
   },
+  avatarWrapper: {
+    position: 'relative',
+  },
   avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -165,66 +220,111 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  onlineDot: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+  },
   cardInitial: {
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.2,
+    fontSize: 18,
+    fontWeight: FontWeight.bold,
   },
   counselorMeta: {
     flex: 1,
     gap: 2,
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   cardTitle: {
-    fontSize: FontSize.bodyLg,
-    lineHeight: 22,
-    fontWeight: '700',
+    fontSize: FontSize.bodyLg - 1,
+    fontWeight: FontWeight.bold,
     letterSpacing: -0.2,
   },
   cardSubtitle: {
     fontSize: FontSize.caption,
-    lineHeight: 18,
+    fontWeight: FontWeight.semibold,
   },
-  smallLabel: {
-    fontSize: FontSize.caption,
-    lineHeight: 18,
-    fontWeight: '600',
+  cardQualification: {
+    fontSize: FontSize.caption - 1,
   },
   ratingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 4,
     alignSelf: 'flex-start',
     borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  ratingText: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
   },
   highlightRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.one,
+    gap: 6,
   },
   highlightPill: {
     borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  highlightText: {
+    fontSize: FontSize.caption - 1,
+    fontWeight: FontWeight.medium,
   },
   counselorBottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
+    paddingTop: Spacing.two,
+    borderTopWidth: 1,
   },
   slotPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.one,
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    gap: 5,
   },
-  primaryButtonText: {
+  slotText: {
     fontSize: FontSize.caption,
-    fontWeight: '700',
+    fontWeight: FontWeight.medium,
+  },
+  cardActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  profileBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  profileBtnText: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
+  },
+  bookBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.full,
+  },
+  bookBtnText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
   },
   sessionCard: {
     borderRadius: BorderRadius.lg,

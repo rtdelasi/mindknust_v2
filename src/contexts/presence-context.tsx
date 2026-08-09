@@ -18,15 +18,25 @@ export function PresenceProvider({ userId, children }: { userId: string; childre
     if (!supabase || !userId) return;
 
     const channel = supabase.channel('online-presence');
+
+    const updatePresenceState = () => {
+      const state = channel.presenceState();
+      const uids = Object.values(state)
+        .flat()
+        .flatMap((u: any) => [u.userId, ...(u.aliases || [])])
+        .filter(Boolean);
+      setOnlineUsers(Array.from(new Set(uids)));
+    };
+
+    const aliases = ['student-user', 'kwame-boateng'];
+
     channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const uids = Object.values(state).flat().map((u: any) => u.userId);
-        setOnlineUsers(uids);
-      })
+      .on('presence', { event: 'sync' }, updatePresenceState)
+      .on('presence', { event: 'join' }, updatePresenceState)
+      .on('presence', { event: 'leave' }, updatePresenceState)
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await channel.track({ userId });
+          await channel.track({ userId, aliases });
         }
       });
 
@@ -35,7 +45,10 @@ export function PresenceProvider({ userId, children }: { userId: string; childre
     };
   }, [userId]);
 
-  const isUserOnline = (id: string) => onlineUsers.includes(id);
+  const isUserOnline = (id: string) => {
+    if (!id) return false;
+    return onlineUsers.includes(id) || onlineUsers.some((u) => u && (u.includes(id) || id.includes(u)));
+  };
 
   return (
     <PresenceContext.Provider value={{ onlineUsers, isUserOnline }}>

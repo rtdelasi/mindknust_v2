@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Linking,
   Modal,
   Pressable,
@@ -19,7 +20,6 @@ import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { CounselorCard } from '@/components/ui/counselor-card';
 import { floatingTabBarClearance } from '@/components/ui/floating-tab-bar';
 import { SectionHeader } from '@/components/ui/section-header';
 import {
@@ -35,6 +35,7 @@ import { useTheme, useThemeMode } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { countUnread, getUserCreatedAt } from '@/lib/notification-state';
+import { fetchNewsArticles, NewsArticle } from '@/lib/news-service';
 import { supabase } from '@/lib/supabase';
 import {
   analyzeJournalMentalState,
@@ -46,21 +47,16 @@ import {
 import { MOODS, moodEmoji } from '@/lib/moods';
 import {
   fetchAppointments,
-  fetchCounselors,
   insertMoodLog,
   SupabaseAppointment,
-  SupabaseCounselor,
 } from '@/lib/supabase-db';
-import { getCounselorPhoto } from '@/lib/counselor-utils';
 
-
-const SPECIALTY_FILTERS = [
+const NEWS_CATEGORIES = [
   'All',
-  'Anxiety',
+  'Campus News',
+  'Mental Health',
+  'Self-Care',
   'Academic Stress',
-  'Burnout',
-  'Relationships',
-  'Personal Growth',
 ];
 
 function getGreeting(): string {
@@ -238,11 +234,14 @@ export default function HomeScreen() {
 
   // ── Dashboard data ──
   const [appointments, setAppointments] = useState<SupabaseAppointment[]>([]);
-  const [counselors, setCounselors] = useState<SupabaseCounselor[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('All');
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // ── News & Wellness Insights state ──
+  const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
+  const [activeNewsCategory, setActiveNewsCategory] = useState('All');
+  const [selectedNews, setSelectedNews] = useState<NewsArticle | null>(null);
+  const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
 
   const currentUserId = auth?.currentUser?.uid || 'student-user';
 
@@ -273,8 +272,8 @@ export default function HomeScreen() {
     try {
       const appts = await fetchAppointments(currentUserId, 'student');
       setAppointments(appts);
-      const list = await fetchCounselors();
-      setCounselors(list);
+      const news = await fetchNewsArticles(activeNewsCategory);
+      setNewsArticles(news);
       await fetchUnreadCount();
     } catch (err) {
       console.warn('Dashboard sync error:', err);
@@ -282,6 +281,10 @@ export default function HomeScreen() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchNewsArticles(activeNewsCategory).then(setNewsArticles).catch(console.warn);
+  }, [activeNewsCategory]);
 
   // Real-time notification badge updates
   useEffect(() => {
@@ -300,9 +303,8 @@ export default function HomeScreen() {
         },
         (payload) => {
           const notif = payload.new as { user_id: string | null };
-          // Only increment for broadcasts or notifications targeted at this user
           if (!notif.user_id || notif.user_id === currentUserId) {
-            setUnreadCount((prev) => prev + 1);
+            fetchUnreadCount();
           }
         }
       )
@@ -316,8 +318,8 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadDashboardData();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+      fetchUnreadCount();
+    }, [currentUserId])
   );
 
   const handleLogMood = async () => {
@@ -381,21 +383,8 @@ export default function HomeScreen() {
   );
   const nextSession = upcomingSessions.length > 0 ? upcomingSessions[0] : null;
 
-  // Filter counselors by search + specialty
-  const filteredCounselors = counselors.filter((c) => {
-    const name = c.profile?.name || '';
-    const spec = c.specialties.join(' ');
-    const matchesSearch =
-      !searchQuery ||
-      name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      spec.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter =
-      activeFilter === 'All' ||
-      c.specialties.some((s) =>
-        s.toLowerCase().includes(activeFilter.toLowerCase())
-      );
-    return matchesSearch && matchesFilter;
-  });
+  const featuredNews = newsArticles.length > 0 ? newsArticles[0] : null;
+  const carouselNews = newsArticles.length > 1 ? newsArticles.slice(1) : [];
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
@@ -438,39 +427,35 @@ export default function HomeScreen() {
                 </Text>
               </View>
             </View>
-              <Pressable
-              style={[
-                styles.bellButton,
-                {
-                  backgroundColor: theme.surfaceRaised,
-                },
-              ]}
-              onPress={() => router.push('/notifications')}>
-              <Badge
-                count={unreadCount}
-                size={19}
-                max={9}
-                color={theme.error}
-                style={{
-                  width: 19,
-                  height: 19,
-                  minWidth: 19,
-                  borderRadius: 9.5,
-                  paddingHorizontal: 0,
-                  top: -2,
-                  right: -2,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                }}
-              >
+            <Pressable
+                style={[
+                  styles.bellButton,
+                  {
+                    backgroundColor: theme.surfaceRaised,
+                  },
+                ]}
+                onPress={() => router.push('/notifications')}>
                 <MaterialCommunityIcons
                   name="bell-outline"
                   size={22}
                   color={theme.text}
                 />
-              </Badge>
-            </Pressable>
-          </View>
+                {unreadCount > 0 && (
+                  <View
+                    style={[
+                      styles.bellBadge,
+                      {
+                        backgroundColor: theme.error,
+                        borderColor: theme.surfaceRaised,
+                      },
+                    ]}>
+                    <Text style={styles.bellBadgeText}>
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            </View>
 
           {/* ── Headline ── */}
           <Text style={[styles.headline, { color: theme.text }]}>
@@ -764,27 +749,32 @@ export default function HomeScreen() {
             />
           ) : (
             <>
-              {/* ── Recommended Counselors ── */}
+              {/* ── Campus News & Wellness Insights ── */}
               <SectionHeader
-                title="Recommended Counselors"
-                actionLabel="See all"
-                onActionPress={() => router.push('/(tabs)/sessions')}
+                title="Campus News & Insights"
+                actionLabel="Explore all"
+                onActionPress={() => {
+                  if (newsArticles.length > 0) {
+                    setSelectedNews(newsArticles[0]);
+                    setIsNewsModalOpen(true);
+                  }
+                }}
               />
 
-              {/* Filter pills */}
+              {/* Category filter pills */}
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.filterRow}>
-                {SPECIALTY_FILTERS.map((filter) => (
+                {NEWS_CATEGORIES.map((cat) => (
                   <Pressable
-                    key={filter}
-                    onPress={() => setActiveFilter(filter)}
+                    key={cat}
+                    onPress={() => setActiveNewsCategory(cat)}
                     style={[
                       styles.filterPill,
                       {
                         backgroundColor:
-                          activeFilter === filter
+                          activeNewsCategory === cat
                             ? theme.primary
                             : theme.surfaceSoft,
                       },
@@ -794,51 +784,113 @@ export default function HomeScreen() {
                         styles.filterPillText,
                         {
                           color:
-                            activeFilter === filter
+                            activeNewsCategory === cat
                               ? theme.textInverse
                               : theme.textSecondary,
                         },
                       ]}>
-                      {filter}
+                      {cat}
                     </Text>
                   </Pressable>
                 ))}
               </ScrollView>
 
-              {/* Counselor cards (horizontal list) */}
-              {filteredCounselors.length > 0 ? (
+              {/* Hero Spotlight News Article Card */}
+              {featuredNews && (
+                <Pressable
+                  onPress={() => {
+                    setSelectedNews(featuredNews);
+                    setIsNewsModalOpen(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.heroNewsCard,
+                    { backgroundColor: theme.surfaceRaised },
+                    pressed && styles.pressed,
+                  ]}>
+                  {featuredNews.image_url ? (
+                    <Image
+                      source={{ uri: featuredNews.image_url }}
+                      style={styles.heroNewsImage}
+                      resizeMode="cover"
+                    />
+                  ) : null}
+                  <View style={styles.heroNewsOverlay} />
+                  <View style={styles.heroNewsBadgeRow}>
+                    <View style={[styles.heroCategoryTag, { backgroundColor: theme.primary }]}>
+                      <Text style={styles.heroCategoryText}>{featuredNews.category}</Text>
+                    </View>
+                    {featuredNews.is_pinned && (
+                      <View style={[styles.heroCategoryTag, { backgroundColor: theme.amber }]}>
+                        <MaterialCommunityIcons name="pin" size={12} color="#FFF" style={{ marginRight: 2 }} />
+                        <Text style={styles.heroCategoryText}>Pinned</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.heroNewsContent}>
+                    <Text style={styles.heroNewsSource}>
+                      {featuredNews.source} • {featuredNews.read_time || '3 min read'}
+                    </Text>
+                    <Text style={styles.heroNewsTitle} numberOfLines={2}>
+                      {featuredNews.title}
+                    </Text>
+                    <Text style={styles.heroNewsSummary} numberOfLines={2}>
+                      {featuredNews.summary}
+                    </Text>
+                  </View>
+                </Pressable>
+              )}
+
+              {/* News Cards Carousel (Horizontal list for remaining articles) */}
+              {carouselNews.length > 0 ? (
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.counselorListContent}>
-                  {filteredCounselors.slice(0, 6).map((item) => {
-                    const cName = item.profile?.name || 'Counselor';
-                    const cSpec = item.specialties[0] || 'Peer Connection';
-                    const cPhoto = getCounselorPhoto(
-                      cName,
-                      item.profile?.avatar_url
-                    );
-                    return (
-                      <CounselorCard
-                        key={item.id}
-                        id={item.id}
-                        name={cName}
-                        specialty={cSpec}
-                        photoUrl={cPhoto}
-                        rating={item.rating}
-                        reviewCount={item.review_count}
-                        variant="vertical"
-                      />
-                    );
-                  })}
+                  contentContainerStyle={styles.newsListContent}>
+                  {carouselNews.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => {
+                        setSelectedNews(item);
+                        setIsNewsModalOpen(true);
+                      }}
+                      style={({ pressed }) => [
+                        styles.newsCard,
+                        { backgroundColor: theme.surfaceRaised, borderColor: theme.border },
+                        pressed && styles.pressed,
+                      ]}>
+                      {item.image_url && (
+                        <Image
+                          source={{ uri: item.image_url }}
+                          style={styles.newsCardImage}
+                          resizeMode="cover"
+                        />
+                      )}
+                      <View style={styles.newsCardBody}>
+                        <View style={styles.newsCardMeta}>
+                          <Text style={[styles.newsCardCategory, { color: theme.primary }]}>
+                            {item.category}
+                          </Text>
+                          <Text style={[styles.newsCardReadTime, { color: theme.textSecondary }]}>
+                            {item.read_time || '3 min'}
+                          </Text>
+                        </View>
+                        <Text style={[styles.newsCardTitle, { color: theme.text }]} numberOfLines={2}>
+                          {item.title}
+                        </Text>
+                        <Text style={[styles.newsCardSource, { color: theme.textSecondary }]} numberOfLines={1}>
+                          {item.source}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
                 </ScrollView>
-              ) : (
+              ) : newsArticles.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Text style={{ color: theme.textSecondary }}>
-                    No counselors match your search.
+                    No news articles match this category.
                   </Text>
                 </View>
-              )}
+              ) : null}
             </>
           )}
         </View>
@@ -856,6 +908,99 @@ export default function HomeScreen() {
         onPress={() => router.push('/social-feed')}>
         <MaterialCommunityIcons name="earth" size={26} color="#FFFFFF" />
       </Pressable>
+
+      {/* ── Article Reader Modal ── */}
+      <Modal
+        visible={isNewsModalOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setIsNewsModalOpen(false)}>
+        {selectedNews && (
+          <View style={[styles.screen, { backgroundColor: theme.background }]}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+              {selectedNews.image_url ? (
+                <View style={styles.newsModalHeaderImageWrap}>
+                  <Image
+                    source={{ uri: selectedNews.image_url }}
+                    style={styles.newsModalHeaderImage}
+                    resizeMode="cover"
+                  />
+                  <Pressable
+                    onPress={() => setIsNewsModalOpen(false)}
+                    style={styles.newsModalCloseFloatingBtn}>
+                    <MaterialCommunityIcons name="close" size={24} color="#FFFFFF" />
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={[styles.newsModalTopBar, { paddingTop: insets.top + Spacing.two }]}>
+                  <Pressable
+                    onPress={() => setIsNewsModalOpen(false)}
+                    style={[styles.newsModalCloseBtn, { backgroundColor: theme.surfaceSoft }]}>
+                    <MaterialCommunityIcons name="close" size={22} color={theme.text} />
+                  </Pressable>
+                </View>
+              )}
+
+              <View style={styles.newsModalBody}>
+                <View style={styles.newsModalBadgeRow}>
+                  <View style={[styles.heroCategoryTag, { backgroundColor: theme.primary }]}>
+                    <Text style={styles.heroCategoryText}>{selectedNews.category}</Text>
+                  </View>
+                  <Text style={[styles.newsModalMetaText, { color: theme.textSecondary }]}>
+                    {selectedNews.source} • {selectedNews.read_time || '3 min read'}
+                  </Text>
+                </View>
+
+                <Text style={[styles.newsModalTitle, { color: theme.text }]}>
+                  {selectedNews.title}
+                </Text>
+
+                <Text style={[styles.newsModalDate, { color: theme.textSecondary }]}>
+                  Published {new Date(selectedNews.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                </Text>
+
+                <View style={[styles.newsModalDivider, { backgroundColor: theme.border }]} />
+
+                <Text style={[styles.newsModalSummary, { color: theme.textSecondary }]}>
+                  {selectedNews.summary}
+                </Text>
+
+                <Text style={[styles.newsModalContent, { color: theme.text }]}>
+                  {selectedNews.content}
+                </Text>
+              </View>
+            </ScrollView>
+
+            {/* Bottom CTA Banner */}
+            <View
+              style={[
+                styles.newsModalCtaBar,
+                {
+                  backgroundColor: theme.surfaceRaised,
+                  borderColor: theme.border,
+                  paddingBottom: insets.bottom + Spacing.three,
+                },
+              ]}>
+              <View style={{ flex: 1, marginRight: Spacing.two }}>
+                <Text style={[styles.newsModalCtaTitle, { color: theme.text }]}>
+                  Need personal guidance?
+                </Text>
+                <Text style={[styles.newsModalCtaSub, { color: theme.textSecondary }]}>
+                  Speak confidentially with a counselor.
+                </Text>
+              </View>
+              <Button
+                label="Book Counselor"
+                variant="primary"
+                onPress={() => {
+                  setIsNewsModalOpen(false);
+                  router.push('/(tabs)/sessions');
+                }}
+              />
+            </View>
+          </View>
+        )}
+      </Modal>
 
       {/* ═══════════════════════════════════════════════
          Crisis & Support Intervention Sheet (preserved)
@@ -1289,6 +1434,27 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    zIndex: 10,
+  },
+  bellBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: FontWeight.bold,
+    textAlign: 'center',
+    lineHeight: 12,
   },
 
   /* ── Headline ── */
@@ -1656,4 +1822,191 @@ const styles = StyleSheet.create({
   },
   modalFooter: { marginTop: Spacing.two },
   modalDismissBtn: { width: '100%' },
+
+  // ── News Section Styles ──
+  heroNewsCard: {
+    height: 220,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+    marginTop: Spacing.two,
+    marginBottom: Spacing.three,
+    position: 'relative',
+    justifyContent: 'space-between',
+    padding: Spacing.three,
+  },
+  heroNewsImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  heroNewsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
+  heroNewsBadgeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  heroCategoryTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroCategoryText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.caption - 1,
+    fontWeight: FontWeight.bold,
+  },
+  heroNewsContent: {
+    zIndex: 2,
+  },
+  heroNewsSource: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.medium,
+    marginBottom: 4,
+  },
+  heroNewsTitle: {
+    color: '#FFFFFF',
+    fontSize: FontSize.h3,
+    fontWeight: FontWeight.bold,
+    lineHeight: 22,
+    marginBottom: 4,
+  },
+  heroNewsSummary: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: FontSize.caption,
+    lineHeight: 16,
+  },
+  newsListContent: {
+    paddingVertical: Spacing.one,
+    gap: Spacing.three,
+  },
+  newsCard: {
+    width: 240,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+  },
+  newsCardImage: {
+    width: '100%',
+    height: 120,
+  },
+  newsCardBody: {
+    padding: Spacing.two + 2,
+    gap: 4,
+  },
+  newsCardMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  newsCardCategory: {
+    fontSize: FontSize.caption - 1,
+    fontWeight: FontWeight.bold,
+    textTransform: 'uppercase',
+  },
+  newsCardReadTime: {
+    fontSize: FontSize.caption - 1,
+  },
+  newsCardTitle: {
+    fontSize: FontSize.body - 2,
+    fontWeight: FontWeight.bold,
+    lineHeight: 18,
+  },
+  newsCardSource: {
+    fontSize: FontSize.caption - 1,
+    marginTop: 2,
+  },
+  // News Modal Styles
+  newsModalHeaderImageWrap: {
+    height: 240,
+    width: '100%',
+    position: 'relative',
+  },
+  newsModalHeaderImage: {
+    width: '100%',
+    height: '100%',
+  },
+  newsModalCloseFloatingBtn: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newsModalTopBar: {
+    paddingHorizontal: Spacing.three,
+    alignItems: 'flex-end',
+  },
+  newsModalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newsModalBody: {
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  newsModalBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  newsModalMetaText: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.medium,
+  },
+  newsModalTitle: {
+    fontSize: FontSize.h3,
+    fontWeight: FontWeight.bold,
+    lineHeight: 28,
+  },
+  newsModalDate: {
+    fontSize: FontSize.caption,
+  },
+  newsModalDivider: {
+    height: 1,
+    width: '100%',
+    marginVertical: Spacing.one,
+  },
+  newsModalSummary: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.semibold,
+    lineHeight: 22,
+    fontStyle: 'italic',
+  },
+  newsModalContent: {
+    fontSize: FontSize.body,
+    lineHeight: 24,
+    marginTop: Spacing.one,
+  },
+  newsModalCtaBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.two,
+    borderTopWidth: 1,
+  },
+  newsModalCtaTitle: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.bold,
+  },
+  newsModalCtaSub: {
+    fontSize: FontSize.caption,
+  },
 });

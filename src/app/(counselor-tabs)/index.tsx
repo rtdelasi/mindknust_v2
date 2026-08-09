@@ -237,29 +237,25 @@ export default function CounselorDashboardScreen() {
                 },
               ]}
               onPress={() => router.push('/notifications')}>
-              <Badge
-                count={unreadCount}
-                size={19}
-                max={9}
-                color="#FF3B30"
-                style={{
-                  width: 19,
-                  height: 19,
-                  minWidth: 19,
-                  borderRadius: 9.5,
-                  paddingHorizontal: 0,
-                  top: -2,
-                  right: -2,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                }}
-              >
-                <MaterialCommunityIcons
-                  name="bell-outline"
-                  size={22}
-                  color={theme.text}
-                />
-              </Badge>
+              <MaterialCommunityIcons
+                name="bell-outline"
+                size={22}
+                color={theme.text}
+              />
+              {unreadCount > 0 && (
+                <View
+                  style={[
+                    styles.bellBadge,
+                    {
+                      backgroundColor: theme.error,
+                      borderColor: theme.surfaceRaised,
+                    },
+                  ]}>
+                  <Text style={styles.bellBadgeText}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </Text>
+                </View>
+              )}
             </Pressable>
           </View>
 
@@ -753,6 +749,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
+    position: 'relative',
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    zIndex: 10,
+  },
+  bellBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: FontWeight.bold,
+    textAlign: 'center',
+    lineHeight: 12,
   },
 
   /* ── Stats ── */

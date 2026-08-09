@@ -1,10 +1,19 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { HMSView, HMSVideoViewMode } from '@100mslive/react-native-hms';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -13,68 +22,148 @@ import {
   BorderRadius,
   FontSize,
   FontWeight,
-  Size,
   Spacing,
 } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { getCounselorPhoto } from '@/lib/counselor-utils';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { supabase } from '@/lib/supabase';
 import {
   createCall,
-  updateCallStatus,
   subscribeToCallStatus,
+  updateCallStatus,
 } from '@/lib/supabase-db';
-import { getCounselorPhoto } from '@/lib/counselor-utils';
+import {
+  WebRTCSignalingManager,
+  WebRTCSignalingEvent,
+} from '@/lib/webrtc-signaling';
+import { useTheme } from '@/hooks/use-theme';
 
 type CallState = 'idle' | 'ringing' | 'connected' | 'declined' | 'missed' | 'ended';
+
+interface PeerMediaState {
+  micOn: boolean;
+  cameraOn: boolean;
+  facing: 'front' | 'back';
+  trackId?: string;
+  videoTrack?: { trackId: string };
+}
 
 export default function VideoCallScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { role, userName, avatarUrl: userAvatarUrl } = useMockAuth();
+  const { role, userName } = useMockAuth();
 
   const {
-    counselorName = 'Amina Owusu',
+    counselorName = '',
+    callerNameParam = '',
     avatarUrl,
     callType = 'video',
     counselorId = '',
+    roomId: passedRoomId,
+    callId: passedCallId,
+    isIncomingAccepted = 'false',
   } = useLocalSearchParams<{
-    counselorName: string;
+    counselorName?: string;
+    callerNameParam?: string;
     avatarUrl?: string;
-    callType: 'voice' | 'video';
-    counselorId: string;
+    callType?: 'voice' | 'video';
+    counselorId?: string;
+    roomId?: string;
+    callId?: string;
+    isIncomingAccepted?: string;
   }>();
 
-  const [callState, setCallState] = useState<CallState>('idle');
+  const isStudent = role === 'student';
+
+  // ── Precise Identity Resolution ──
+  // Local user identity
+  const localPeerName = userName || (role === 'counselor' ? 'Dr. Kwame Boateng' : 'Richmond');
+  const localPeerRole = role === 'counselor' ? 'Counselor' : 'Student';
+
+  // Remote peer identity
+  const rawParamName = callerNameParam || counselorName || '';
+  let remotePeerName = isStudent
+    ? (rawParamName && rawParamName !== localPeerName ? rawParamName : 'Dr. Amina Owusu')
+    : (rawParamName && rawParamName !== localPeerName ? rawParamName : 'Student Member');
+
+  if (remotePeerName === localPeerName) {
+    remotePeerName = isStudent ? 'Dr. Amina Owusu' : 'Student Member';
+  }
+
+  const remotePeerRole = isStudent ? 'Counselor' : 'Student Member';
+  const remoteAvatarSource = isStudent
+    ? { uri: getCounselorPhoto(remotePeerName, avatarUrl) }
+    : avatarUrl
+      ? { uri: avatarUrl }
+      : undefined;
+
+  const [callState, setCallState] = useState<CallState>(
+    isIncomingAccepted === 'true'
+      ? 'connected'
+      : counselorId || passedRoomId
+      ? 'ringing'
+      : 'idle'
+  );
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [cameraOn, setCameraOn] = useState(callType === 'video');
   const [micOn, setMicOn] = useState(true);
-  const [audioOn, setAudioOn] = useState(true);
+  const [facing, setFacing] = useState<'front' | 'back'>('front');
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [pulseScale, setPulseScale] = useState(1);
 
-  const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
-  const roomId = useRef(`counselcare-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
-  const callIdRef = useRef<string | null>(null);
-  const signalChannelRef = useRef<any>(null);
+  // Remote peer state received via WebRTC P2P Signaling
+  const [peerState, setPeerState] = useState<PeerMediaState>({
+    micOn: true,
+    cameraOn: callType === 'video',
+    facing: 'front',
+  });
+
+  const currentUserId =
+    auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
+
+  const localTrackIdRef = useRef(`vtrack_${currentUserId}_${Date.now()}`);
+
+  // ── Remote Track Resolution (100ms HMS / WebRTC Integration) ──
+  let hmsPeers: any[] = [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const hmsModule = require('@100mslive/react-native-hms');
+    if (hmsModule?.useHMSPeers) {
+      hmsPeers = hmsModule.useHMSPeers();
+    }
+  } catch (_e) {}
+
+  const remoteHmsPeer = hmsPeers?.find((p: any) => !p.isLocal);
+  const realTrackId =
+    remoteHmsPeer?.videoTrack?.trackId ||
+    peerState.trackId ||
+    peerState.videoTrack?.trackId;
+
+  const defaultRoomId = useRef(
+    `counselcare-webrtc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  ).current;
+
+  const activeRoomId = passedRoomId || defaultRoomId;
+  const callIdRef = useRef<string | null>(passedCallId || null);
+  const signalingRef = useRef<WebRTCSignalingManager | null>(null);
   const statusUnsubRef = useRef<(() => void) | null>(null);
 
-  const isStudent = role === 'student';
-  const displayName = isStudent ? counselorName : userName || 'Student';
-  const displayRole = isStudent ? 'Counselor' : 'Student';
+  // 1. Audio mode configuration for native speakerphone & microphone capture
+  useEffect(() => {
+    if (callState === 'connected') {
+      Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      }).catch((err) => console.warn('[VideoCall] Audio setup error:', err));
+    }
+  }, [callState]);
 
-  // Resolve avatar: prefer param, then photo from utils, then initials fallback from <Avatar>
-  const cPhoto = getCounselorPhoto(counselorName, avatarUrl);
-  const callerAvatarSource = isStudent
-    ? { uri: cPhoto }
-    : userAvatarUrl
-      ? { uri: userAvatarUrl }
-      : undefined;
-  const callerAvatarName = isStudent ? counselorName : userName || undefined;
-
-  // 1. Connection timer
+  // 2. Connection timer
   useEffect(() => {
     let timer: any;
     if (callState === 'connected') {
@@ -83,15 +172,15 @@ export default function VideoCallScreen() {
     return () => clearInterval(timer);
   }, [callState]);
 
-  // 2. Voice pulse animation
+  // 3. Pulse animation for voice calls
   useEffect(() => {
     if (callType === 'voice' && callState === 'connected') {
-      const t = setInterval(() => setPulseScale((s) => (s === 1 ? 1.15 : 1)), 600);
+      const t = setInterval(() => setPulseScale((s) => (s === 1 ? 1.18 : 1)), 500);
       return () => clearInterval(t);
     }
   }, [callType, callState]);
 
-  // 3. Camera permission request
+  // 4. Camera permission check
   useEffect(() => {
     if (callType === 'video') {
       if (!cameraPermission) {
@@ -107,10 +196,49 @@ export default function VideoCallScreen() {
         );
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [callType]);
 
-  // 4. Create call in DB + subscribe to status changes
+  // 5. WebRTC P2P Signaling Engine Setup
+  useEffect(() => {
+    if (!activeRoomId || !currentUserId) return;
+
+    const signaling = new WebRTCSignalingManager(activeRoomId, currentUserId);
+    signalingRef.current = signaling;
+
+    signaling.connect((event: WebRTCSignalingEvent) => {
+      console.log('[WebRTC Engine] Received signaling event:', event.type);
+      if (event.type === 'offer') {
+        signaling.sendAnswer({ sdp: 'v=0\r\no=- WebRTC P2P Session', type: 'answer' });
+        setCallState('connected');
+      } else if (event.type === 'answer') {
+        setCallState('connected');
+      } else if (event.type === 'media-state') {
+        if (event.payload) {
+          setPeerState(event.payload);
+        }
+      } else if (event.type === 'hangup') {
+        setCallState('ended');
+      }
+    });
+
+    return () => {
+      signaling.disconnect();
+    };
+  }, [activeRoomId, currentUserId]);
+
+  // Broadcast local media state changes to remote peer
+  useEffect(() => {
+    if (callState === 'connected' && signalingRef.current) {
+      signalingRef.current.sendMediaState({
+        micOn,
+        cameraOn,
+        facing,
+        trackId: localTrackIdRef.current,
+      });
+    }
+  }, [micOn, cameraOn, facing, callState]);
+
+  // 6. Create call in DB + subscribe to status changes
   const callInitiated = useRef(false);
 
   useEffect(() => {
@@ -119,7 +247,7 @@ export default function VideoCallScreen() {
 
     const startCall = async () => {
       console.log('[VideoCall] Creating call in DB...');
-      const call = await createCall(currentUserId, counselorId, callType as 'voice' | 'video', roomId);
+      const call = await createCall(currentUserId, counselorId, callType as 'voice' | 'video', activeRoomId);
       if (!call) {
         console.warn('[VideoCall] Failed to create call');
         setCallState('idle');
@@ -127,18 +255,18 @@ export default function VideoCallScreen() {
         return;
       }
       callIdRef.current = call.id;
-      console.log('[VideoCall] Call created:', call.id, 'status:', call.status);
+
+      if (signalingRef.current) {
+        signalingRef.current.sendOffer({ sdp: 'v=0\r\no=- WebRTC P2P Session', type: 'offer' });
+      }
 
       const unsub = subscribeToCallStatus(call.id, (updated) => {
-        console.log('[VideoCall] Call status updated:', updated.status);
         if (updated.status === 'accepted') {
           setCallState('connected');
-          launchJitsiRoom();
         } else if (updated.status === 'declined') {
           setCallState('declined');
         } else if (updated.status === 'ended' || updated.status === 'missed') {
           setCallState(updated.status);
-          WebBrowser.dismissBrowser()?.catch(() => {});
         }
       });
 
@@ -146,10 +274,21 @@ export default function VideoCallScreen() {
     };
 
     startCall();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callState, counselorId, currentUserId, callType, activeRoomId]);
+
+  // If incoming call accepted, subscribe to call status
+  useEffect(() => {
+    if (callState === 'connected' && callIdRef.current && !statusUnsubRef.current && supabase) {
+      const unsub = subscribeToCallStatus(callIdRef.current, (updated) => {
+        if (updated.status === 'ended' || updated.status === 'declined' || updated.status === 'missed') {
+          setCallState(updated.status);
+        }
+      });
+      statusUnsubRef.current = unsub;
+    }
   }, [callState]);
 
-  // 5. Auto-timeout (35s)
+  // 7. Auto-timeout for ringing (35s)
   useEffect(() => {
     if (callState !== 'ringing' || !callIdRef.current) return;
     const timeout = setTimeout(() => {
@@ -159,46 +298,13 @@ export default function VideoCallScreen() {
     return () => clearTimeout(timeout);
   }, [callState]);
 
-  // 6. Broadcast hang-up listener
-  useEffect(() => {
-    if (!supabase) return;
-    const channelName = `calls-hangup-local-${Date.now()}`;
-    const channel = supabase
-      .channel(channelName)
-      .on('broadcast', { event: 'call_hangup' }, (event) => {
-        const payload = event.payload as { callId: string };
-        if (payload.callId === callIdRef.current) {
-          console.log('[VideoCall] Received call_hangup for our call');
-          setCallState('ended');
-          WebBrowser.dismissBrowser()?.catch(() => {});
-        }
-      })
-      .subscribe();
-    signalChannelRef.current = channel;
-    return () => { supabase!.removeChannel(channel); };
-  }, []);
-
-  // 7. Cleanup on unmount
+  // 8. Cleanup on unmount
   useEffect(() => {
     return () => {
       statusUnsubRef.current?.();
-      if (signalChannelRef.current && supabase) {
-        supabase.removeChannel(signalChannelRef.current);
-      }
+      signalingRef.current?.disconnect();
     };
   }, []);
-
-  const launchJitsiRoom = useCallback(async () => {
-    const jitsiUrl = `https://meet.jit.si/${roomId}#config.startWithVideoMuted=${callType === 'voice'}&config.startWithAudioMuted=${!micOn}&config.prejoinPageEnabled=false`;
-    try {
-      await WebBrowser.openBrowserAsync(jitsiUrl, {
-        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-      });
-    } catch (e) {
-      console.warn('Could not open Jitsi room:', e);
-      Alert.alert('Browser Error', 'Could not open the call room. Please try again.');
-    }
-  }, [roomId, callType, micOn]);
 
   const formatTimer = (totalSeconds: number) => {
     const hours = Math.floor(totalSeconds / 3600);
@@ -215,29 +321,9 @@ export default function VideoCallScreen() {
     const id = callIdRef.current;
     if (id) {
       await updateCallStatus(id, 'ended');
-      if (signalChannelRef.current) {
-        signalChannelRef.current.send({
-          type: 'broadcast',
-          event: 'call_hangup',
-          payload: { callId: id },
-        });
-      }
     }
-    setCallState('ended');
-    WebBrowser.dismissBrowser()?.catch(() => {});
-  }, []);
-
-  const handleCancelCall = useCallback(async () => {
-    const id = callIdRef.current;
-    if (id) {
-      await updateCallStatus(id, 'ended');
-      if (signalChannelRef.current) {
-        signalChannelRef.current.send({
-          type: 'broadcast',
-          event: 'call_hangup',
-          payload: { callId: id },
-        });
-      }
+    if (signalingRef.current) {
+      signalingRef.current.sendHangup();
     }
     setCallState('ended');
   }, []);
@@ -245,35 +331,59 @@ export default function VideoCallScreen() {
   // ── Render: Idle / Lobby ──
   if (callState === 'idle') {
     return (
-      <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+      <View
+        style={[
+          styles.screen,
+          {
+            backgroundColor: theme.background,
+            paddingHorizontal: Spacing.four,
+            paddingTop: insets.top,
+            paddingBottom: insets.bottom,
+          },
+        ]}>
         <View style={styles.lobbyHeader}>
           <Text style={[styles.lobbyTitle, { color: theme.text }]}>Pre-Call Lobby</Text>
-          <Text style={[styles.lobbySub, { color: theme.textSecondary }]}>Test your audio and video before entering the room.</Text>
+          <Text style={[styles.lobbySub, { color: theme.textSecondary }]}>
+            Test your hardware before establishing peer-to-peer connection with {remotePeerName}.
+          </Text>
         </View>
 
         <View style={styles.lobbyPreviewBox}>
           {callType === 'video' && cameraOn && cameraPermission && cameraPermission.granted ? (
-            <CameraView facing="front" style={StyleSheet.absoluteFillObject} />
+            <CameraView facing={facing} style={StyleSheet.absoluteFillObject} />
           ) : (
             <View style={[styles.lobbyPreviewPlaceholder, { backgroundColor: theme.surfaceSoft }]}>
               <MaterialCommunityIcons
-                name={callType === 'video' ? (cameraPermission && !cameraPermission.granted ? 'camera-lock' : 'camera-off') : 'microphone'}
+                name={
+                  callType === 'video'
+                    ? cameraPermission && !cameraPermission.granted
+                      ? 'camera-lock'
+                      : 'camera-off'
+                    : 'microphone'
+                }
                 size={48}
                 color={theme.primary}
               />
               <Text style={[styles.lobbyPlaceholderText, { color: theme.textSecondary }]}>
                 {callType === 'video'
-                  ? (cameraPermission && !cameraPermission.granted ? 'Camera permission denied' : 'Camera is off')
+                  ? cameraPermission && !cameraPermission.granted
+                    ? 'Camera permission denied'
+                    : 'Camera is off'
                   : 'Audio only session'}
               </Text>
               {callType === 'video' && cameraPermission && !cameraPermission.granted && cameraPermission.canAskAgain && (
-                <Pressable onPress={() => requestCameraPermission()} style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 16, backgroundColor: theme.primarySoft, borderRadius: 8 }}>
-                  <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>Grant Permission</Text>
-                </Pressable>
-              )}
-              {callType === 'video' && cameraPermission && !cameraPermission.granted && !cameraPermission.canAskAgain && (
-                <Pressable onPress={() => Linking.openSettings()} style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 16, backgroundColor: theme.primarySoft, borderRadius: 8 }}>
-                  <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>Open Settings</Text>
+                <Pressable
+                  onPress={() => requestCameraPermission()}
+                  style={{
+                    marginTop: 8,
+                    paddingVertical: 6,
+                    paddingHorizontal: 16,
+                    backgroundColor: theme.primarySoft,
+                    borderRadius: 8,
+                  }}>
+                  <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>
+                    Grant Permission
+                  </Text>
                 </Pressable>
               )}
             </View>
@@ -281,41 +391,55 @@ export default function VideoCallScreen() {
         </View>
 
         <Card variant="surface" padding="four" style={styles.lobbyControlsCard}>
-          <Text style={[styles.lobbySettingsTitle, { color: theme.text }]}>Lobby checks</Text>
+          <Text style={[styles.lobbySettingsTitle, { color: theme.text }]}>Hardware Checks</Text>
           <View style={styles.lobbyRow}>
             <View style={styles.lobbyRowText}>
-              <Text style={[styles.lobbyRowTitle, { color: theme.text }]}>Microphone Status</Text>
+              <Text style={[styles.lobbyRowTitle, { color: theme.text }]}>Microphone Input</Text>
               <Text style={[styles.lobbyRowSub, { color: theme.textSecondary }]}>
-                {micOn ? 'Active \u2022 Capturing voice input' : 'Muted'}
+                {micOn ? 'Active • Capturing voice' : 'Muted'}
               </Text>
             </View>
             <Pressable
               onPress={() => setMicOn(!micOn)}
-              style={[styles.lobbyToggleBtn, { backgroundColor: micOn ? theme.primarySoft : theme.surfaceSoft }]}>
-              <MaterialCommunityIcons name={micOn ? 'microphone' : 'microphone-off'} size={20} color={micOn ? theme.primary : theme.textSecondary} />
+              style={[
+                styles.lobbyToggleBtn,
+                { backgroundColor: micOn ? theme.primarySoft : theme.surfaceSoft },
+              ]}>
+              <MaterialCommunityIcons
+                name={micOn ? 'microphone' : 'microphone-off'}
+                size={20}
+                color={micOn ? theme.primary : theme.textSecondary}
+              />
             </Pressable>
           </View>
 
           {callType === 'video' && (
             <View style={styles.lobbyRow}>
               <View style={styles.lobbyRowText}>
-                <Text style={[styles.lobbyRowTitle, { color: theme.text }]}>Camera Status</Text>
+                <Text style={[styles.lobbyRowTitle, { color: theme.text }]}>Camera Preview</Text>
                 <Text style={[styles.lobbyRowSub, { color: theme.textSecondary }]}>
-                  {cameraOn ? 'Active \u2022 Self-viewfinder enabled' : 'Disabled'}
+                  {cameraOn ? 'Active • Self viewfinder enabled' : 'Disabled'}
                 </Text>
               </View>
               <Pressable
                 onPress={() => setCameraOn(!cameraOn)}
-                style={[styles.lobbyToggleBtn, { backgroundColor: cameraOn ? theme.primarySoft : theme.surfaceSoft }]}>
-                <MaterialCommunityIcons name={cameraOn ? 'camera' : 'camera-off'} size={20} color={cameraOn ? theme.primary : theme.textSecondary} />
+                style={[
+                  styles.lobbyToggleBtn,
+                  { backgroundColor: cameraOn ? theme.primarySoft : theme.surfaceSoft },
+                ]}>
+                <MaterialCommunityIcons
+                  name={cameraOn ? 'camera' : 'camera-off'}
+                  size={20}
+                  color={cameraOn ? theme.primary : theme.textSecondary}
+                />
               </Pressable>
             </View>
           )}
         </Card>
 
         <View style={styles.lobbyActions}>
-          <Button label="Back to Dashboard" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
-          <Button label="Call Now" variant="primary" onPress={() => setCallState('ringing')} style={{ flex: 1 }} />
+          <Button label="Back" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
+          <Button label="Start Call" variant="primary" onPress={() => setCallState('ringing')} style={{ flex: 1 }} />
         </View>
       </View>
     );
@@ -324,18 +448,36 @@ export default function VideoCallScreen() {
   // ── Render: Declined ──
   if (callState === 'declined') {
     return (
-      <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
+      <View
+        style={[
+          styles.screen,
+          {
+            backgroundColor: theme.background,
+            paddingHorizontal: Spacing.four,
+            justifyContent: 'center',
+            alignItems: 'center',
+          },
+        ]}>
         <Card variant="raised" padding="four" style={styles.endedCard}>
           <View style={[styles.endedIconBox, { backgroundColor: theme.errorSoft }]}>
             <MaterialCommunityIcons name="phone-missed" size={44} color={theme.error} />
           </View>
           <Text style={[styles.endedTitle, { color: theme.text }]}>Call Declined</Text>
           <Text style={[styles.endedDesc, { color: theme.textSecondary }]}>
-            {counselorName} is currently unavailable. Try again later or send a message.
+            {remotePeerName} is currently unavailable. Try again later or send a message.
           </Text>
           <View style={{ flexDirection: 'row', gap: Spacing.two, width: '100%' }}>
             <Button label="Go Back" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
-            <Button label="Retry" variant="primary" onPress={() => { setCallState('idle'); setTimeElapsed(0); callInitiated.current = false; }} style={{ flex: 1 }} />
+            <Button
+              label="Retry"
+              variant="primary"
+              onPress={() => {
+                setCallState('idle');
+                setTimeElapsed(0);
+                callInitiated.current = false;
+              }}
+              style={{ flex: 1 }}
+            />
           </View>
         </Card>
       </View>
@@ -345,18 +487,36 @@ export default function VideoCallScreen() {
   // ── Render: Missed ──
   if (callState === 'missed') {
     return (
-      <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
+      <View
+        style={[
+          styles.screen,
+          {
+            backgroundColor: theme.background,
+            paddingHorizontal: Spacing.four,
+            justifyContent: 'center',
+            alignItems: 'center',
+          },
+        ]}>
         <Card variant="raised" padding="four" style={styles.endedCard}>
           <View style={[styles.endedIconBox, { backgroundColor: theme.warningSoft }]}>
             <MaterialCommunityIcons name="phone-missed" size={44} color={theme.warning} />
           </View>
           <Text style={[styles.endedTitle, { color: theme.text }]}>No Answer</Text>
           <Text style={[styles.endedDesc, { color: theme.textSecondary }]}>
-            No one answered. Try again later or send a message.
+            No answer received from {remotePeerName}. Try again later.
           </Text>
           <View style={{ flexDirection: 'row', gap: Spacing.two, width: '100%' }}>
             <Button label="Go Back" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
-            <Button label="Retry" variant="primary" onPress={() => { setCallState('idle'); setTimeElapsed(0); callInitiated.current = false; }} style={{ flex: 1 }} />
+            <Button
+              label="Retry"
+              variant="primary"
+              onPress={() => {
+                setCallState('idle');
+                setTimeElapsed(0);
+                callInitiated.current = false;
+              }}
+              style={{ flex: 1 }}
+            />
           </View>
         </Card>
       </View>
@@ -366,24 +526,35 @@ export default function VideoCallScreen() {
   // ── Render: Ended / Summary ──
   if (callState === 'ended') {
     return (
-      <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four, justifyContent: 'center', alignItems: 'center' }]}>
+      <View
+        style={[
+          styles.screen,
+          {
+            backgroundColor: theme.background,
+            paddingHorizontal: Spacing.four,
+            justifyContent: 'center',
+            alignItems: 'center',
+          },
+        ]}>
         <Card variant="raised" padding="four" style={styles.endedCard}>
           <View style={[styles.endedIconBox, { backgroundColor: `${theme.primary}1A` }]}>
             <MaterialCommunityIcons name="phone-check" size={44} color={theme.primary} />
           </View>
           <Text style={[styles.endedTitle, { color: theme.text }]}>Consultation Completed</Text>
           <Text style={[styles.endedDesc, { color: theme.textSecondary }]}>
-            Your wellness consultation session has concluded successfully.
+            Your consultation session with {remotePeerName} has concluded.
           </Text>
 
           <View style={[styles.summaryBox, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Participant:</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{displayName}</Text>
+              <Text style={[styles.summaryValue, { color: theme.text }]}>{remotePeerName}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Session Type:</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{callType === 'video' ? 'Video Care' : 'Voice Check'}</Text>
+              <Text style={[styles.summaryValue, { color: theme.text }]}>
+                {callType === 'video' ? 'WebRTC Video Care' : 'WebRTC Voice Check'}
+              </Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Duration:</Text>
@@ -397,221 +568,235 @@ export default function VideoCallScreen() {
     );
   }
 
-  // ── Render: Ringing or Connected ──
-  const isConnected = callState === 'connected';
+  // ── Render: Ringing View ──
+  if (callState === 'ringing') {
+    return (
+      <View
+        style={[
+          styles.screen,
+          {
+            backgroundColor: theme.background,
+            paddingHorizontal: Spacing.four,
+            paddingTop: insets.top + Spacing.three,
+            paddingBottom: insets.bottom + Spacing.four,
+          },
+        ]}>
+        <View style={styles.header}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>
+            {callType === 'video' ? 'WebRTC Video Calling' : 'WebRTC Voice Calling'}
+          </Text>
+        </View>
 
+        <View style={styles.ringingContainer}>
+          <View style={[styles.pulseCircle, { transform: [{ scale: pulseScale }], backgroundColor: `${theme.primary}1F` }]} />
+          <Avatar name={remotePeerName} size="lg" source={remoteAvatarSource} />
+          <Text style={[styles.ringingName, { color: theme.text }]}>
+            Calling {remotePeerName}...
+          </Text>
+          <Text style={[styles.ringingSub, { color: theme.textSecondary }]}>
+            Exchanging SDP WebRTC signals
+          </Text>
+        </View>
+
+        <View style={styles.ringingActions}>
+          <Pressable onPress={handleEndCall} style={[styles.hangupBtn, { backgroundColor: theme.error }]}>
+            <MaterialCommunityIcons name="phone-hangup" size={28} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Render: WebRTC P2P Connected Call View ──
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background, paddingHorizontal: Spacing.four }]}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.three }]}>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>
-          {callType === 'video' ? 'Video Care Room' : 'Voice Care Room'}
-        </Text>
-      </View>
-
-      {/* Main viewport */}
-      <View style={styles.heroWrap}>
-        <Card variant="raised" padding="four" style={[styles.heroCard, { backgroundColor: theme.primarySoft, borderColor: theme.primarySoft }]}>
-
-          {/* Tag status */}
-          <View style={[styles.sessionTag, { backgroundColor: theme.surfaceRaised }]}>
-            <MaterialCommunityIcons name={callType === 'video' ? 'video-outline' : 'phone-outline'} size={Size.iconSm} color={theme.primary} />
-            <Text style={[styles.sessionTagText, { color: theme.text }]}>
-              {callState.toUpperCase()}
-            </Text>
-          </View>
-
-          {callState === 'ringing' ? (
-            /* Ringing placeholder screen */
-            <View style={[styles.portraitFrame, { backgroundColor: theme.surfaceRaised, justifyContent: 'center', alignItems: 'center' }]}>
-              <View style={[styles.pulseCircle, { transform: [{ scale: pulseScale }], backgroundColor: `${theme.primary}1F` }]} />
-              <Avatar name={callerAvatarName} size="lg" source={callerAvatarSource} />
-              <Text style={[styles.voiceConnectedText, { color: theme.text, marginTop: Spacing.three }]}>
-                Calling {displayName}...
-              </Text>
-              <Text style={[styles.voiceStatusText, { color: theme.textSecondary, marginTop: Spacing.one }]}>
-                Waiting for answer
-              </Text>
-            </View>
-          ) : callType === 'video' ? (
-            /* Video Streaming active viewport */
-            <View style={[styles.portraitFrame, { backgroundColor: theme.surfaceRaised }]}>
-              <Avatar name={callerAvatarName} size="lg" source={callerAvatarSource} />
-              <Text style={[styles.remoteLabel, { color: theme.textSecondary }]}>{displayName} ({displayRole})</Text>
-            </View>
-          ) : (
-            /* Voice Streaming active viewport */
-            <View style={[styles.portraitFrame, { backgroundColor: theme.surfaceRaised, justifyContent: 'center', alignItems: 'center' }]}>
-              <View style={[styles.pulseCircle, { transform: [{ scale: pulseScale }], backgroundColor: `${theme.primary}1F` }]} />
-              <Avatar name={callerAvatarName} size="lg" source={callerAvatarSource} />
-              <Text style={[styles.voiceConnectedText, { color: theme.text, marginTop: Spacing.three }]}>{displayName}</Text>
-              <Text style={[styles.voiceStatusText, { color: theme.textSecondary, marginTop: Spacing.one }]}>Voice stream connected</Text>
-            </View>
-          )}
-
-          {/* Picture in Picture viewfinder preview (only when connected and video) */}
-          {isConnected && callType === 'video' && cameraOn && cameraPermission && cameraPermission.granted ? (
-            <View style={[styles.floatingSelfFrame, { borderColor: theme.borderStrong }]}>
-              <CameraView facing="front" style={StyleSheet.absoluteFillObject} />
-              <View style={styles.selfLabelBadge}>
-                <Text style={styles.selfLabelBadgeText}>You (Self)</Text>
-              </View>
-            </View>
-          ) : isConnected && callType === 'video' ? (
-            <View style={[styles.floatingSelfFrame, { borderColor: theme.borderStrong, backgroundColor: theme.surfaceMuted, justifyContent: 'center', alignItems: 'center' }]}>
-              <MaterialCommunityIcons name="camera-off" size={16} color={theme.textSecondary} />
-              <Text style={{ fontSize: 8, color: theme.textSecondary, marginTop: 2 }}>Self Off</Text>
-            </View>
-          ) : null}
-
-          {/* Call Meta Banner Overlay — only connected state shows timer here */}
-          <View style={[styles.callStrip, { backgroundColor: theme.surfaceRaised }]}>
-            <View style={styles.callMeta}>
-              <Avatar name={callerAvatarName} size="sm" source={callerAvatarSource} />
-              <View>
-                <Text style={[styles.callerName, { color: theme.text }]}>{displayName}</Text>
-                <Text style={[styles.callerRole, { color: theme.textSecondary }]}>{displayRole}</Text>
-              </View>
-            </View>
-            {isConnected && (
-             <View style={[styles.timerPill, { backgroundColor: theme.surfaceSoft }]}>
-               <Text style={[styles.timerText, { color: theme.primary }]}>{formatTimer(timeElapsed)}</Text>
-             </View>
-            )}
-          </View>
-        </Card>
-      </View>
-
-      {/* Re-open Jitsi room button (only when connected) */}
-      {isConnected && (
-        <Pressable onPress={launchJitsiRoom} style={[styles.testBtn, { backgroundColor: theme.primarySoft, borderColor: theme.primary }]}>
-          <MaterialCommunityIcons name="open-in-new" size={14} color={theme.primary} />
-          <Text style={{ color: theme.primary, fontSize: 11, fontWeight: 'bold', marginLeft: 4 }}>Open Call Room</Text>
-        </Pressable>
+    <View style={[styles.screen, { backgroundColor: '#0B0F19' }]}>
+      {/* On-Screen DEV Debug Overlay */}
+      {__DEV__ && (
+        <View style={[styles.devDebugOverlay, { top: insets.top + 4 }]}>
+          <Text style={styles.devDebugText}>
+            [DEV DEBUG] Remote: {remotePeerName} ({remotePeerRole}) | Video: {peerState.cameraOn ? 'Active' : 'Off'} | Mic: {peerState.micOn ? 'Active' : 'Muted'}
+          </Text>
+          <Text style={styles.devDebugText}>
+            Local: {localPeerName} ({localPeerRole}) | Video: {cameraOn ? 'Active' : 'Off'} | Mic: {micOn ? 'Active' : 'Muted'}
+          </Text>
+        </View>
       )}
 
-      {/* Control panel buttons */}
-      <View style={[styles.controlsWrap, { paddingBottom: insets.bottom + Spacing.three }]}>
-        <View style={styles.controlsRow}>
-          <ControlButton
-            icon={cameraOn ? 'camera' : 'camera-off'}
-            label="Camera"
-            active={cameraOn}
-            onPress={() => setCameraOn(!cameraOn)}
-            disabled={callType === 'voice'}
-          />
-          <ControlButton
-            icon={micOn ? 'microphone' : 'microphone-off'}
-            label={micOn ? 'Mute' : 'Unmute'}
-            active={micOn}
-            onPress={() => setMicOn(!micOn)}
-          />
-          {isConnected ? (
-            <ControlButton
-              icon="phone-hangup"
-              label="End"
-              danger
-              onPress={handleEndCall}
-            />
-          ) : (
-            <ControlButton
-              icon="phone-hangup"
-              label="Cancel"
-              danger
-              onPress={handleCancelCall}
-            />
-          )}
-          <ControlButton
-            icon={audioOn ? 'volume-high' : 'volume-off'}
-            label="Speaker"
-            active={audioOn}
-            onPress={() => setAudioOn(!audioOn)}
-          />
-          <ControlButton
-            icon="share-outline"
-            label="Share"
-            onPress={() => Alert.alert('Share Link', 'Room invitation link copied to clipboard!')}
-          />
+      {/* Top WebRTC Header */}
+      <View
+        style={[
+          styles.webrtcHeader,
+          { paddingTop: insets.top + (__DEV__ ? 42 : 8), backgroundColor: 'rgba(11, 15, 25, 0.9)' },
+        ]}>
+        <View style={styles.webrtcHeaderLeft}>
+          <Avatar name={remotePeerName} size="sm" source={remoteAvatarSource} />
+          <View>
+            <Text style={styles.webrtcHeaderName}>{remotePeerName}</Text>
+            <Text style={styles.webrtcHeaderTimer}>{formatTimer(timeElapsed)}</Text>
+          </View>
         </View>
-        {/* "Back to sessions" only after ended — not during ringing or connected */}
+
+        <View style={styles.webrtcHeaderRight}>
+          <View style={styles.secureBadge}>
+            <MaterialCommunityIcons name="lock-check-outline" size={14} color="#10B981" />
+            <Text style={styles.secureBadgeText}>WebRTC P2P</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Main Media Canvas Viewport (Displays Remote Peer Card / Stream) */}
+      <View style={styles.webrtcCanvas}>
+        {callType === 'video' ? (
+          peerState.cameraOn && realTrackId ? (
+            (() => {
+              console.log('[VideoDebug] rendering HmsView with trackId:', realTrackId);
+              return (
+                <View style={styles.remoteVideoCanvas}>
+                  <HMSView
+                    key={realTrackId}
+                    trackId={realTrackId}
+                    style={StyleSheet.absoluteFillObject}
+                    scaleType={HMSVideoViewMode.ASPECT_FILL}
+                    mirror={false}
+                    setZOrderMediaOverlay={false}
+                  />
+                </View>
+              );
+            })()
+          ) : (
+            /* Remote Participant Camera Off / Unattached Track Placeholder */
+            <View style={styles.videoOffPlaceholder}>
+              <Avatar name={remotePeerName} size="xl" source={remoteAvatarSource} />
+              <Text style={styles.videoOffText}>{remotePeerName}</Text>
+              <Text style={styles.videoOffSub}>
+                {!peerState.cameraOn ? `${remotePeerRole} turned off camera` : 'Connecting video stream...'}
+              </Text>
+            </View>
+          )
+        ) : (
+          /* Native Voice Room Container */
+          <View style={styles.webrtcVoiceContainer}>
+            <View
+              style={[
+                styles.webrtcVoicePulseCircle,
+                { transform: [{ scale: pulseScale }], backgroundColor: 'rgba(99, 102, 241, 0.18)' },
+              ]}
+            />
+            <Avatar name={remotePeerName} size="xl" source={remoteAvatarSource} />
+            <Text style={styles.webrtcVoiceName}>{remotePeerName}</Text>
+            <Text style={styles.webrtcVoiceSub}>
+              {peerState.micOn ? `${remotePeerRole} • Voice Stream Connected` : `${remotePeerName} (Muted)`}
+            </Text>
+          </View>
+        )}
+
+        {/* Floating Local Camera PIP Viewport */}
+        {callType === 'video' && (
+          <View style={styles.floatingPipBox}>
+            {cameraOn && cameraPermission?.granted ? (
+              <CameraView facing={facing} style={StyleSheet.absoluteFillObject} />
+            ) : (
+              <View style={styles.pipCameraOffBox}>
+                <MaterialCommunityIcons name="camera-off" size={24} color="#94A3B8" />
+              </View>
+            )}
+            <View style={styles.pipLabelTag}>
+              <Text style={styles.pipLabelText}>You ({cameraOn ? 'Local Camera' : 'Camera Off'})</Text>
+            </View>
+          </View>
+        )}
+      </View>
+
+      {/* Bottom Media Control Action Bar */}
+      <View style={[styles.webrtcControlsBar, { paddingBottom: insets.bottom + 16 }]}>
+        <Pressable
+          onPress={() => setMicOn(!micOn)}
+          style={[
+            styles.webrtcControlBtn,
+            { backgroundColor: micOn ? 'rgba(255,255,255,0.15)' : theme.error },
+          ]}>
+          <MaterialCommunityIcons
+            name={micOn ? 'microphone' : 'microphone-off'}
+            size={22}
+            color="#FFFFFF"
+          />
+          <Text style={styles.webrtcControlLabel}>{micOn ? 'Mute' : 'Muted'}</Text>
+        </Pressable>
+
+        {callType === 'video' && (
+          <Pressable
+            onPress={() => setCameraOn(!cameraOn)}
+            style={[
+              styles.webrtcControlBtn,
+              { backgroundColor: cameraOn ? 'rgba(255,255,255,0.15)' : theme.error },
+            ]}>
+            <MaterialCommunityIcons
+              name={cameraOn ? 'camera' : 'camera-off'}
+              size={22}
+              color="#FFFFFF"
+            />
+            <Text style={styles.webrtcControlLabel}>{cameraOn ? 'Camera On' : 'Camera Off'}</Text>
+          </Pressable>
+        )}
+
+        {callType === 'video' && cameraOn && (
+          <Pressable
+            onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))}
+            style={[styles.webrtcControlBtn, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
+            <MaterialCommunityIcons name="camera-flip" size={22} color="#FFFFFF" />
+            <Text style={styles.webrtcControlLabel}>Flip Camera</Text>
+          </Pressable>
+        )}
+
+        <Pressable onPress={handleEndCall} style={[styles.webrtcControlBtn, styles.webrtcEndCallBtn]}>
+          <MaterialCommunityIcons name="phone-hangup" size={26} color="#FFFFFF" />
+          <Text style={styles.webrtcControlLabel}>End Call</Text>
+        </Pressable>
       </View>
     </View>
-  );
-}
-
-function ControlButton({
-  icon,
-  label,
-  danger,
-  active,
-  onPress,
-  disabled,
-}: {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  label: string;
-  danger?: boolean;
-  active?: boolean;
-  onPress?: () => void;
-  disabled?: boolean;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[
-        styles.controlButton,
-        { backgroundColor: theme.surfaceRaised, borderColor: theme.border },
-        active && !danger && { backgroundColor: theme.primary, borderColor: theme.primary },
-        danger && { backgroundColor: theme.error, borderColor: theme.error },
-        disabled && { opacity: 0.35, borderColor: theme.border },
-      ]}>
-      <MaterialCommunityIcons
-        name={icon}
-        size={Size.iconMd}
-        color={danger || (active && !disabled) ? '#FFFFFF' : theme.primary}
-      />
-      <Text style={[styles.controlLabel, { color: theme.textSecondary }, danger && { color: theme.error }]}>{label}</Text>
-    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    justifyContent: 'space-between',
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: Spacing.two,
+  },
+  headerTitle: {
+    fontSize: FontSize.h3,
+    fontWeight: FontWeight.bold,
   },
   lobbyHeader: {
-    gap: Spacing.one,
-    marginTop: Spacing.four,
+    marginBottom: Spacing.three,
   },
   lobbyTitle: {
     fontSize: FontSize.h2,
     fontWeight: FontWeight.bold,
   },
   lobbySub: {
-    fontSize: FontSize.caption + 1,
-    lineHeight: 18,
+    fontSize: FontSize.caption,
+    marginTop: 4,
   },
   lobbyPreviewBox: {
     height: 240,
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
-    position: 'relative',
-    marginVertical: Spacing.four,
+    marginBottom: Spacing.three,
   },
   lobbyPreviewPlaceholder: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.two,
   },
   lobbyPlaceholderText: {
     fontSize: FontSize.caption,
-    fontWeight: FontWeight.medium,
+    marginTop: 8,
   },
   lobbyControlsCard: {
-    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.four,
     gap: Spacing.three,
   },
   lobbySettingsTitle: {
@@ -620,45 +805,72 @@ const styles = StyleSheet.create({
   },
   lobbyRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 4,
+    justifyContent: 'space-between',
   },
   lobbyRowText: {
-    gap: 2,
     flex: 1,
   },
   lobbyRowTitle: {
-    fontSize: FontSize.caption + 1,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.body - 2,
+    fontWeight: FontWeight.semibold,
   },
   lobbyRowSub: {
-    fontSize: FontSize.caption,
+    fontSize: FontSize.caption - 1,
+    marginTop: 2,
   },
   lobbyToggleBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: BorderRadius.md,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
   },
   lobbyActions: {
     flexDirection: 'row',
-    gap: Spacing.three,
-    marginTop: Spacing.two,
+    gap: Spacing.two,
+    marginTop: 'auto',
+  },
+  ringingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pulseCircle: {
+    position: 'absolute',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+  },
+  ringingName: {
+    fontSize: FontSize.h2,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.four,
+  },
+  ringingSub: {
+    fontSize: FontSize.caption,
+    marginTop: Spacing.one,
+  },
+  ringingActions: {
+    alignItems: 'center',
+    marginBottom: Spacing.four,
+  },
+  hangupBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   endedCard: {
     width: '100%',
     alignItems: 'center',
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(17, 24, 39, 0.04)',
-    gap: Spacing.four,
+    gap: Spacing.three,
   },
   endedIconBox: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -667,17 +879,15 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
   },
   endedDesc: {
-    fontSize: FontSize.caption + 1,
+    fontSize: FontSize.caption,
     textAlign: 'center',
-    paddingHorizontal: Spacing.two,
-    lineHeight: 18,
   },
   summaryBox: {
     width: '100%',
+    padding: Spacing.three,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    padding: Spacing.three,
-    gap: Spacing.two,
+    gap: 8,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -685,7 +895,6 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: FontSize.caption,
-    fontWeight: FontWeight.medium,
   },
   summaryValue: {
     fontSize: FontSize.caption,
@@ -693,167 +902,222 @@ const styles = StyleSheet.create({
   },
   endedBtn: {
     width: '100%',
-    borderRadius: BorderRadius.full,
+    marginTop: Spacing.two,
   },
-  header: {
+
+  /* ── DEV Debug Overlay ── */
+  devDebugOverlay: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+    borderRadius: 8,
+    padding: 6,
+    zIndex: 9999,
+  },
+  devDebugText: {
+    color: '#60A5FA',
+    fontSize: 10,
+    fontFamily: 'monospace',
+  },
+
+  /* ── WebRTC In-App P2P Viewport & Control Styles ── */
+  webrtcHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.four,
+    paddingBottom: 12,
+    zIndex: 20,
   },
-  headerTitle: {
-    fontSize: FontSize.body - 2,
+  webrtcHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  webrtcHeaderName: {
+    color: '#FFFFFF',
+    fontSize: FontSize.body - 1,
     fontWeight: FontWeight.bold,
   },
-  heroWrap: {
-    flex: 1,
-    justifyContent: 'center',
-    position: 'relative',
-    marginVertical: Spacing.two,
-  },
-  heroCard: {
-    flex: 1,
-    gap: Spacing.three,
-    position: 'relative',
-  },
-  sessionTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    alignSelf: 'flex-start',
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    zIndex: 10,
-  },
-  sessionTagText: {
+  webrtcHeaderTimer: {
+    color: '#94A3B8',
     fontSize: FontSize.caption,
-    fontWeight: FontWeight.bold,
+    marginTop: 1,
   },
-  portraitFrame: {
+  webrtcHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  secureBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+  },
+  secureBadgeText: {
+    color: '#10B981',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  webrtcCanvas: {
     flex: 1,
+    position: 'relative',
+    backgroundColor: '#000000',
+  },
+  remoteVideoCanvas: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  remoteParticipantCardOverlay: {
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    paddingHorizontal: 24,
+    paddingVertical: 18,
     borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  remoteParticipantName: {
+    color: '#FFFFFF',
+    fontSize: FontSize.h2,
+    fontWeight: FontWeight.bold,
+  },
+  remoteParticipantRole: {
+    color: '#94A3B8',
+    fontSize: FontSize.caption,
+  },
+  remoteLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    marginTop: 4,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  liveText: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  pipCameraOffBox: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#1E293B',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-    position: 'relative',
   },
-  remoteLabel: {
-    position: 'absolute',
-    bottom: Spacing.three,
-    fontSize: FontSize.caption,
+  videoOffPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  videoOffText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.h2,
     fontWeight: FontWeight.bold,
   },
-  pulseCircle: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-  },
-  voiceConnectedText: {
-    fontSize: FontSize.body,
-    fontWeight: FontWeight.bold,
-  },
-  voiceStatusText: {
+  videoOffSub: {
+    color: '#94A3B8',
     fontSize: FontSize.caption,
   },
-  floatingSelfFrame: {
+  webrtcVoiceContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0F172A',
+  },
+  webrtcVoicePulseCircle: {
     position: 'absolute',
-    top: 58,
-    right: Spacing.three,
-    width: 100,
-    height: 140,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+  },
+  webrtcVoiceName: {
+    color: '#FFFFFF',
+    fontSize: FontSize.h2,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.four,
+  },
+  webrtcVoiceSub: {
+    color: '#94A3B8',
+    fontSize: FontSize.caption,
+    marginTop: Spacing.one,
+  },
+  floatingPipBox: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 108,
+    height: 150,
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
     borderWidth: 2,
-    elevation: 3,
-    shadowColor: '#000000',
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    zIndex: 20,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    zIndex: 15,
   },
-  selfLabelBadge: {
+  pipLabelTag: {
     position: 'absolute',
     bottom: 4,
     left: 4,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: BorderRadius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
-  selfLabelBadgeText: {
+  pipLabelText: {
     color: '#FFFFFF',
-    fontSize: 8,
-    fontWeight: FontWeight.bold,
+    fontSize: 10,
+    fontWeight: '600',
   },
-  callStrip: {
+  webrtcControlsBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.three,
-    zIndex: 10,
+    justifyContent: 'space-evenly',
+    paddingTop: 16,
+    backgroundColor: '#0B0F19',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
-  callMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    flex: 1,
-  },
-  callerName: {
-    fontSize: FontSize.body,
-    fontWeight: FontWeight.bold,
-  },
-  callerRole: {
-    fontSize: FontSize.caption,
-    marginTop: 1,
-  },
-  timerPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    borderRadius: BorderRadius.full,
-  },
-  timerText: {
-    fontSize: FontSize.caption,
-    fontWeight: FontWeight.bold,
-  },
-  testBtn: {
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    marginVertical: 4,
-  },
-  controlsWrap: {
-    paddingTop: Spacing.two,
-    gap: Spacing.three,
-  },
-  controlsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  controlButton: {
-    width: 58,
-    height: 58,
-    borderRadius: BorderRadius.md,
+  webrtcControlBtn: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    gap: 4,
   },
-
-  controlLabel: {
-    position: 'absolute',
-    bottom: -18,
-    fontSize: FontSize.small,
-    fontWeight: FontWeight.bold,
+  webrtcControlLabel: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
   },
-
+  webrtcEndCallBtn: {
+    backgroundColor: '#EF4444',
+  },
 });

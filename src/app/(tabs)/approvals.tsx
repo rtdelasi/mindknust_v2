@@ -28,8 +28,24 @@ import { supabase } from '@/lib/supabase';
 import {
   fetchCounselorProfilesByStatus,
   updateCounselorApprovalStatus,
+  createNotification,
   SupabaseCounselorProfile,
 } from '@/lib/supabase-db';
+import {
+  fetchNewsArticles,
+  createNewsArticle,
+  deleteNewsArticle,
+  NewsArticle,
+} from '@/lib/news-service';
+
+interface AdminBroadcast {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  user_id: string | null;
+  link?: string | null;
+}
 
 export default function AdminApprovalsTabScreen() {
   const theme = useTheme();
@@ -40,8 +56,8 @@ export default function AdminApprovalsTabScreen() {
 
   const currentUserId = auth?.currentUser?.uid || 'admin-user';
 
-  // Sub-filter tabs: pending | approved | rejected
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  // Sub-filter tabs: pending | approved | rejected | news | broadcasts
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'news' | 'broadcasts'>('pending');
   const [counselorsList, setCounselorsList] = useState<SupabaseCounselorProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -59,6 +75,26 @@ export default function AdminApprovalsTabScreen() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
+  // News Management State
+  const [newsList, setNewsList] = useState<NewsArticle[]>([]);
+  const [postNewsModalVisible, setPostNewsModalVisible] = useState(false);
+  const [newsTitle, setNewsTitle] = useState('');
+  const [newsSummary, setNewsSummary] = useState('');
+  const [newsContent, setNewsContent] = useState('');
+  const [newsImageUrl, setNewsImageUrl] = useState('');
+  const [newsCategory, setNewsCategory] = useState<'Campus News' | 'Mental Health' | 'Self-Care' | 'Academic Stress'>('Campus News');
+  const [newsSource, setNewsSource] = useState('KNUST Wellness');
+  const [newsIsPinned, setNewsIsPinned] = useState(false);
+  const [newsSubmitting, setNewsSubmitting] = useState(false);
+
+  // Admin Broadcasts State
+  const [broadcastsList, setBroadcastsList] = useState<AdminBroadcast[]>([]);
+  const [sendBroadcastModalVisible, setSendBroadcastModalVisible] = useState(false);
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [broadcastBody, setBroadcastBody] = useState('');
+  const [broadcastLink, setBroadcastLink] = useState('');
+  const [broadcastSubmitting, setBroadcastSubmitting] = useState(false);
+
   // Success Toast Banner
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -71,11 +107,30 @@ export default function AdminApprovalsTabScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      // 1. Fetch current active tab list
-      const listData = await fetchCounselorProfilesByStatus(activeTab);
-      setCounselorsList(listData);
+      if (activeTab === 'news') {
+        const articles = await fetchNewsArticles('All');
+        setNewsList(articles);
+      } else if (activeTab === 'broadcasts') {
+        if (supabase) {
+          // CRITICAL FIX: Only fetch broadcast notifications (where user_id IS NULL).
+          // Personal notifications (user_id IS NOT NULL) are explicitly excluded!
+          const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .is('user_id', null)
+            .order('created_at', { ascending: false });
 
-      // 2. Fetch counts for all 3 categories
+          if (!error && data) {
+            setBroadcastsList(data as AdminBroadcast[]);
+          }
+        }
+      } else {
+        // Fetch current active tab list
+        const listData = await fetchCounselorProfilesByStatus(activeTab);
+        setCounselorsList(listData);
+      }
+
+      // 2. Fetch counts for all categories
       const pendingData = await fetchCounselorProfilesByStatus('pending');
       const approvedData = await fetchCounselorProfilesByStatus('approved');
       const rejectedData = await fetchCounselorProfilesByStatus('rejected');
@@ -86,7 +141,7 @@ export default function AdminApprovalsTabScreen() {
         rejected: rejectedData.length,
       });
     } catch (e) {
-      console.warn('Error loading counselor applications:', e);
+      console.warn('Error loading admin data:', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -215,6 +270,99 @@ export default function AdminApprovalsTabScreen() {
     );
   };
 
+  const handlePublishNews = async () => {
+    if (!newsTitle.trim() || !newsContent.trim()) {
+      Alert.alert('Incomplete Form', 'Please provide a title and content for the article.');
+      return;
+    }
+    setNewsSubmitting(true);
+    try {
+      const created = await createNewsArticle({
+        title: newsTitle.trim(),
+        summary: newsSummary.trim() || newsTitle.trim(),
+        content: newsContent.trim(),
+        image_url: newsImageUrl.trim() || 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?q=80&w=1000&auto=format&fit=crop',
+        category: newsCategory,
+        source: newsSource.trim() || 'KNUST Wellness',
+        is_pinned: newsIsPinned,
+        read_time: '3 min read',
+      });
+
+      if (created) {
+        showToast('Campus news article published!');
+        setPostNewsModalVisible(false);
+        setNewsTitle('');
+        setNewsSummary('');
+        setNewsContent('');
+        setNewsImageUrl('');
+        setNewsIsPinned(false);
+        await loadData();
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Failed to publish news article.');
+    } finally {
+      setNewsSubmitting(false);
+    }
+  };
+
+  const handleDeleteNews = async (id: string, title: string) => {
+    Alert.alert('Delete Article', `Are you sure you want to remove "${title}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteNewsArticle(id);
+          showToast('Article deleted.');
+          await loadData();
+        },
+      },
+    ]);
+  };
+
+  const handleSendBroadcast = async () => {
+    if (!broadcastTitle.trim() || !broadcastBody.trim()) {
+      Alert.alert('Incomplete Form', 'Please provide a title and body message for the broadcast.');
+      return;
+    }
+    setBroadcastSubmitting(true);
+    try {
+      await createNotification(
+        null, // null user_id indicates an app-wide broadcast announcement
+        broadcastTitle.trim(),
+        broadcastBody.trim(),
+        broadcastLink.trim() || undefined
+      );
+      showToast('App-wide broadcast announcement sent!');
+      setSendBroadcastModalVisible(false);
+      setBroadcastTitle('');
+      setBroadcastBody('');
+      setBroadcastLink('');
+      await loadData();
+    } catch (err) {
+      Alert.alert('Error', 'Failed to send broadcast announcement.');
+    } finally {
+      setBroadcastSubmitting(false);
+    }
+  };
+
+  const handleDeleteBroadcast = async (id: string, title: string) => {
+    Alert.alert('Delete Broadcast', `Are you sure you want to remove broadcast "${title}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          if (supabase) {
+            await supabase.from('notifications').delete().eq('id', id);
+            showToast('Broadcast removed');
+            await loadData();
+          }
+        },
+      },
+    ]);
+  };
+
   const openDocumentViewer = async (url: string) => {
     try {
       if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -262,9 +410,19 @@ export default function AdminApprovalsTabScreen() {
       {/* Top Header */}
       <View style={[styles.topHeader, { paddingTop: insets.top + Spacing.two, borderBottomColor: theme.border }]}>
         <View style={styles.titleBlock}>
-          <Text style={[styles.topTitle, { color: theme.text }]}>Counselor Approvals</Text>
+          <Text style={[styles.topTitle, { color: theme.text }]}>
+            {activeTab === 'news'
+              ? 'Campus News Manager'
+              : activeTab === 'broadcasts'
+              ? 'App Broadcast Manager'
+              : 'Counselor Approvals'}
+          </Text>
           <Text style={[styles.topSub, { color: theme.textSecondary }]}>
-            Review credentials & verify clinical staff
+            {activeTab === 'news'
+              ? 'Publish campus announcements & wellness insights'
+              : activeTab === 'broadcasts'
+              ? 'Send and manage app-wide broadcast announcements'
+              : 'Review credentials & verify clinical staff'}
           </Text>
         </View>
         <Pressable onPress={loadData} style={[styles.iconBtn, { backgroundColor: theme.surface }]}>
@@ -273,7 +431,11 @@ export default function AdminApprovalsTabScreen() {
       </View>
 
       {/* Segmented Filter Pills */}
-      <View style={[styles.segmentContainer, { backgroundColor: theme.surfaceMuted }]}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={[styles.segmentContainer, { backgroundColor: theme.surfaceMuted }]}>
         <Pressable
           onPress={() => setActiveTab('pending')}
           style={[styles.segmentBtn, activeTab === 'pending' && { backgroundColor: theme.surfaceRaised, ...(isDark ? Shadows.dark.small : Shadows.light.small) }]}>
@@ -312,7 +474,23 @@ export default function AdminApprovalsTabScreen() {
             </View>
           )}
         </Pressable>
-      </View>
+
+        <Pressable
+          onPress={() => setActiveTab('news')}
+          style={[styles.segmentBtn, activeTab === 'news' && { backgroundColor: theme.surfaceRaised, ...(isDark ? Shadows.dark.small : Shadows.light.small) }]}>
+          <Text style={[styles.segmentLabel, { color: activeTab === 'news' ? theme.primary : theme.textSecondary }]}>
+            News & Notices
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setActiveTab('broadcasts')}
+          style={[styles.segmentBtn, activeTab === 'broadcasts' && { backgroundColor: theme.surfaceRaised, ...(isDark ? Shadows.dark.small : Shadows.light.small) }]}>
+          <Text style={[styles.segmentLabel, { color: activeTab === 'broadcasts' ? theme.primary : theme.textSecondary }]}>
+            Broadcasts
+          </Text>
+        </Pressable>
+      </ScrollView>
 
       {/* Main Content List */}
       <ScrollView
@@ -323,8 +501,93 @@ export default function AdminApprovalsTabScreen() {
           <View style={styles.loadingView}>
             <ActivityIndicator size="large" color={theme.primary} />
             <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
-              Fetching {activeTab} counselor applications...
+              Loading {activeTab}...
             </Text>
+          </View>
+        ) : activeTab === 'news' ? (
+          <View style={{ gap: Spacing.two }}>
+            <Button
+              label="+ Post Campus News Article"
+              variant="primary"
+              onPress={() => setPostNewsModalVisible(true)}
+              style={{ marginBottom: Spacing.two }}
+            />
+
+            {newsList.length === 0 ? (
+              <View style={styles.emptyView}>
+                <Text style={{ color: theme.textSecondary }}>No articles published yet.</Text>
+              </View>
+            ) : (
+              newsList.map((item) => (
+                <Card key={item.id} variant="raised" padding="three" style={{ marginBottom: Spacing.two }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                      <View style={[styles.heroCategoryTag, { backgroundColor: theme.primary }]}>
+                        <Text style={styles.heroCategoryText}>{item.category}</Text>
+                      </View>
+                      {item.is_pinned && (
+                        <View style={[styles.heroCategoryTag, { backgroundColor: theme.amber }]}>
+                          <Text style={styles.heroCategoryText}>Pinned</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Pressable onPress={() => handleDeleteNews(item.id, item.title)}>
+                      <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.error} />
+                    </Pressable>
+                  </View>
+                  <Text style={[styles.newsAdminTitle, { color: theme.text }]} numberOfLines={2}>
+                    {item.title}
+                  </Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: FontSize.caption, marginTop: 4 }}>
+                    {item.source} • {new Date(item.created_at).toLocaleDateString()}
+                  </Text>
+                </Card>
+              ))
+            )}
+          </View>
+        ) : activeTab === 'broadcasts' ? (
+          <View style={{ gap: Spacing.two }}>
+            <Button
+              label="+ Send App-Wide Broadcast"
+              variant="primary"
+              onPress={() => setSendBroadcastModalVisible(true)}
+              style={{ marginBottom: Spacing.two }}
+            />
+
+            {broadcastsList.length === 0 ? (
+              <View style={styles.emptyView}>
+                <MaterialCommunityIcons name="bullhorn-outline" size={44} color={theme.textSecondary} />
+                <Text style={[styles.emptyTitle, { color: theme.text }]}>No Past Broadcasts</Text>
+                <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
+                  Only app-wide announcements broadcasted via the admin portal appear here.
+                </Text>
+              </View>
+            ) : (
+              broadcastsList.map((item) => (
+                <Card key={item.id} variant="raised" padding="three" style={{ marginBottom: Spacing.two }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                      <View style={[styles.heroCategoryTag, { backgroundColor: theme.amber }]}>
+                        <MaterialCommunityIcons name="bullhorn" size={12} color="#FFFFFF" style={{ marginRight: 3 }} />
+                        <Text style={styles.heroCategoryText}>App Broadcast</Text>
+                      </View>
+                    </View>
+                    <Pressable onPress={() => handleDeleteBroadcast(item.id, item.title)}>
+                      <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.error} />
+                    </Pressable>
+                  </View>
+                  <Text style={[styles.newsAdminTitle, { color: theme.text }]}>
+                    {item.title}
+                  </Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: FontSize.caption, marginTop: 2 }}>
+                    {item.body}
+                  </Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: FontSize.small, marginTop: 6 }}>
+                    Sent: {new Date(item.created_at).toLocaleString()}
+                  </Text>
+                </Card>
+              ))
+            )}
           </View>
         ) : counselorsList.length === 0 ? (
           <View style={styles.emptyView}>
@@ -699,6 +962,166 @@ export default function AdminApprovalsTabScreen() {
               resizeMode="contain"
             />
           )}
+        </View>
+      </Modal>
+
+      {/* ── Create News Article Modal ── */}
+      <Modal
+        visible={postNewsModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setPostNewsModalVisible(false)}>
+        <View style={[styles.modalScreen, { backgroundColor: theme.background }]}>
+          <ScrollView contentContainerStyle={{ padding: Spacing.four, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.three }}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Post Campus News</Text>
+              <Pressable onPress={() => setPostNewsModalVisible(false)}>
+                <MaterialCommunityIcons name="close" size={24} color={theme.text} />
+              </Pressable>
+            </View>
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Article Title *</Text>
+            <TextInput
+              style={[styles.modalInput, { color: theme.text, backgroundColor: theme.surfaceSoft }]}
+              placeholder="e.g. KNUST Wellness Hub Open House"
+              placeholderTextColor={theme.textSecondary}
+              value={newsTitle}
+              onChangeText={setNewsTitle}
+            />
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Category</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: Spacing.one }}>
+              {(['Campus News', 'Mental Health', 'Self-Care', 'Academic Stress'] as const).map((cat) => (
+                <Pressable
+                  key={cat}
+                  onPress={() => setNewsCategory(cat)}
+                  style={[
+                    styles.heroCategoryTag,
+                    { backgroundColor: newsCategory === cat ? theme.primary : theme.surfaceSoft },
+                  ]}>
+                  <Text style={{ color: newsCategory === cat ? '#FFF' : theme.textSecondary, fontSize: FontSize.caption, fontWeight: FontWeight.bold }}>
+                    {cat}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Cover Image URL</Text>
+            <TextInput
+              style={[styles.modalInput, { color: theme.text, backgroundColor: theme.surfaceSoft }]}
+              placeholder="https://images.unsplash.com/..."
+              placeholderTextColor={theme.textSecondary}
+              value={newsImageUrl}
+              onChangeText={setNewsImageUrl}
+            />
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Source / Author</Text>
+            <TextInput
+              style={[styles.modalInput, { color: theme.text, backgroundColor: theme.surfaceSoft }]}
+              placeholder="e.g. KNUST Counseling Center"
+              placeholderTextColor={theme.textSecondary}
+              value={newsSource}
+              onChangeText={setNewsSource}
+            />
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Summary</Text>
+            <TextInput
+              style={[styles.modalInput, { color: theme.text, backgroundColor: theme.surfaceSoft }]}
+              placeholder="Short summary preview..."
+              placeholderTextColor={theme.textSecondary}
+              value={newsSummary}
+              onChangeText={setNewsSummary}
+            />
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Full Article Content *</Text>
+            <TextInput
+              style={[
+                styles.modalInput,
+                { color: theme.text, backgroundColor: theme.surfaceSoft, minHeight: 120, textAlignVertical: 'top' },
+              ]}
+              placeholder="Write the article details here..."
+              placeholderTextColor={theme.textSecondary}
+              value={newsContent}
+              onChangeText={setNewsContent}
+              multiline
+            />
+
+            <Pressable
+              onPress={() => setNewsIsPinned(!newsIsPinned)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: Spacing.two }}>
+              <MaterialCommunityIcons
+                name={newsIsPinned ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                size={22}
+                color={theme.primary}
+              />
+              <Text style={{ color: theme.text, fontWeight: FontWeight.semibold }}>Pin Article to Top</Text>
+            </Pressable>
+
+            <Button
+              label={newsSubmitting ? 'Publishing...' : 'Publish Article'}
+              variant="primary"
+              onPress={handlePublishNews}
+              disabled={newsSubmitting || !newsTitle.trim() || !newsContent.trim()}
+              style={{ marginTop: Spacing.three }}
+            />
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── Send Broadcast Modal ── */}
+      <Modal
+        visible={sendBroadcastModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setSendBroadcastModalVisible(false)}>
+        <View style={[styles.modalScreen, { backgroundColor: theme.background }]}>
+          <ScrollView contentContainerStyle={{ padding: Spacing.four, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.three }}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Send App Broadcast</Text>
+              <Pressable onPress={() => setSendBroadcastModalVisible(false)}>
+                <MaterialCommunityIcons name="close" size={24} color={theme.text} />
+              </Pressable>
+            </View>
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Broadcast Title *</Text>
+            <TextInput
+              style={[styles.modalInput, { color: theme.text, backgroundColor: theme.surfaceSoft }]}
+              placeholder="e.g. System Maintenance Notice"
+              placeholderTextColor={theme.textSecondary}
+              value={broadcastTitle}
+              onChangeText={setBroadcastTitle}
+            />
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Message Body *</Text>
+            <TextInput
+              style={[
+                styles.modalInput,
+                { color: theme.text, backgroundColor: theme.surfaceSoft, minHeight: 100, textAlignVertical: 'top' },
+              ]}
+              placeholder="Message sent to all active students and counselors..."
+              placeholderTextColor={theme.textSecondary}
+              value={broadcastBody}
+              onChangeText={setBroadcastBody}
+              multiline
+            />
+
+            <Text style={[styles.newsFieldLabel, { color: theme.text }]}>Target Link / Route (Optional)</Text>
+            <TextInput
+              style={[styles.modalInput, { color: theme.text, backgroundColor: theme.surfaceSoft }]}
+              placeholder="e.g. /booking or /social-feed"
+              placeholderTextColor={theme.textSecondary}
+              value={broadcastLink}
+              onChangeText={setBroadcastLink}
+            />
+
+            <Button
+              label={broadcastSubmitting ? 'Sending...' : 'Send Broadcast to All Users'}
+              variant="primary"
+              onPress={handleSendBroadcast}
+              disabled={broadcastSubmitting || !broadcastTitle.trim() || !broadcastBody.trim()}
+              style={{ marginTop: Spacing.four }}
+            />
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -1126,5 +1549,39 @@ const styles = StyleSheet.create({
   fullImage: {
     width: '90%',
     height: '80%',
+  },
+
+  /* News Admin Styles */
+  heroCategoryTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroCategoryText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.caption - 1,
+    fontWeight: FontWeight.bold,
+  },
+  newsAdminTitle: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.one,
+  },
+  newsFieldLabel: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.two,
+    marginBottom: Spacing.one,
+  },
+  modalInput: {
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    fontSize: FontSize.body - 1,
+  },
+  modalScreen: {
+    flex: 1,
   },
 });

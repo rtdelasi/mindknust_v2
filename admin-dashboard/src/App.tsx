@@ -22,7 +22,7 @@ import {
   ShieldCheck,
   Eye,
   Send,
-  Bell
+  Newspaper
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -43,6 +43,20 @@ interface Profile {
   name: string;
   email: string;
   role: string;
+  avatar_url?: string;
+  created_at?: string;
+}
+
+interface NewsArticle {
+  id: string;
+  title: string;
+  summary: string;
+  content: string;
+  image_url?: string | null;
+  category: 'Campus News' | 'Mental Health' | 'Self-Care' | 'Academic Stress';
+  source: string;
+  is_pinned?: boolean;
+  read_time?: string;
   created_at: string;
 }
 
@@ -107,7 +121,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'moderation' | 'flagged' | 'counselors' | 'notifications'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'moderation' | 'flagged' | 'counselors' | 'notifications' | 'news'>('overview');
 
   // Database States
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -117,7 +131,18 @@ export default function App() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [flaggedContent, setFlaggedContent] = useState<FlaggedContent[]>([]);
   const [counselorApps, setCounselorApps] = useState<any[]>([]);
+  const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // News Publishing Form State
+  const [newsTitle, setNewsTitle] = useState('');
+  const [newsSummary, setNewsSummary] = useState('');
+  const [newsContent, setNewsContent] = useState('');
+  const [newsImageUrl, setNewsImageUrl] = useState('');
+  const [newsCategory, setNewsCategory] = useState<'Campus News' | 'Mental Health' | 'Self-Care' | 'Academic Stress'>('Campus News');
+  const [newsSource, setNewsSource] = useState('KNUST Wellness');
+  const [newsIsPinned, setNewsIsPinned] = useState(false);
+  const [newsSubmitting, setNewsSubmitting] = useState(false);
   const [loadError, setLoadError] = useState('');
 
   // Flagged Content sub-filter
@@ -168,6 +193,7 @@ export default function App() {
         notifRes,
         flagRes,
         cAppRes,
+        newsRes,
       ] = await Promise.all([
         supabase.from('profiles').select('*').order('created_at', { ascending: false }),
         supabase
@@ -183,7 +209,7 @@ export default function App() {
           counselor_profile:counselor_id(name)
         `)
           .order('appointment_date', { ascending: false }),
-        supabase.from('notifications').select('*').order('created_at', { ascending: false }),
+        supabase.from('notifications').select('*').is('user_id', null).order('created_at', { ascending: false }),
         supabase
           .from('posts')
           .select('*, profiles:user_id(name, role)')
@@ -196,6 +222,7 @@ export default function App() {
           profile:profiles!user_id(name, email, avatar_url)
         `)
           .order('created_at', { ascending: false }),
+        supabase.from('news_articles').select('*').order('is_pinned', { ascending: false }).order('created_at', { ascending: false }),
       ]);
 
       setProfiles(profRes.data || []);
@@ -205,6 +232,7 @@ export default function App() {
       setAnnouncements(notifRes.data || []);
       setFlaggedContent((flagRes.data || []) as FlaggedContent[]);
       setCounselorApps(cAppRes.data || []);
+      setNewsArticles(newsRes.data || []);
 
       // supabase-js resolves with an `error` field rather than throwing, so a
       // try/catch alone would report success on a total connection failure.
@@ -291,7 +319,53 @@ export default function App() {
     }
   };
 
-  const handleNotifyCounselorsForOutreach = async (post: SupabasePost) => {
+  const handlePublishNewsArticle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newsTitle.trim() || !newsContent.trim()) {
+      alert('Please enter a title and full article content.');
+      return;
+    }
+    setNewsSubmitting(true);
+    try {
+      const { error } = await supabase.from('news_articles').insert({
+        title: newsTitle.trim(),
+        summary: newsSummary.trim() || newsTitle.trim(),
+        content: newsContent.trim(),
+        image_url: newsImageUrl.trim() || 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?q=80&w=1000&auto=format&fit=crop',
+        category: newsCategory,
+        source: newsSource.trim() || 'KNUST Wellness',
+        is_pinned: newsIsPinned,
+        read_time: '3 min read',
+      });
+
+      if (!error) {
+        setNewsTitle('');
+        setNewsSummary('');
+        setNewsContent('');
+        setNewsImageUrl('');
+        setNewsIsPinned(false);
+        loadData();
+      } else {
+        alert('Failed to publish article: ' + error.message);
+      }
+    } catch (err) {
+      alert('Error publishing article.');
+    } finally {
+      setNewsSubmitting(false);
+    }
+  };
+
+  const handleDeleteNewsArticle = async (id: string) => {
+    if (!window.confirm('Delete this campus news article?')) return;
+    try {
+      await supabase.from('news_articles').delete().eq('id', id);
+      loadData();
+    } catch (err) {
+      console.error('Error deleting article:', err);
+    }
+  };
+
+  const handleNotifyCounselorsForOutreach = async (post: Post) => {
     if (!supabase) return;
     const studentName = post.profiles?.name || 'Student Member';
     const studentUserId = post.user_id;
@@ -601,6 +675,18 @@ export default function App() {
             <Megaphone className="w-4 h-4" />
             Broadcast Alerts
           </button>
+
+          <button
+            onClick={() => setActiveTab('news')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+              activeTab === 'news'
+                ? 'bg-brand-600 text-white shadow-lg shadow-brand-600/10'
+                : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+            }`}
+          >
+            <Newspaper className="w-4 h-4" />
+            Campus News & Insights
+          </button>
         </nav>
 
         <div className="p-4 border-t border-slate-800">
@@ -620,7 +706,15 @@ export default function App() {
         <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-8">
           <div className="flex items-center gap-3">
             <h1 className="font-bold text-lg text-slate-100 capitalize">
-              {activeTab === 'counselors' ? 'Appointments & Slots' : activeTab === 'notifications' ? 'Broadcast Alerts' : activeTab === 'flagged' ? 'Flagged Content Review' : activeTab}
+              {activeTab === 'counselors'
+                ? 'Appointments & Slots'
+                : activeTab === 'notifications'
+                ? 'Broadcast Alerts'
+                : activeTab === 'flagged'
+                ? 'Flagged Content Review'
+                : activeTab === 'news'
+                ? 'Campus News & Insights Manager'
+                : activeTab}
             </h1>
           </div>
           <div className="flex items-center gap-4">
@@ -1400,6 +1494,162 @@ export default function App() {
                       {announcements.length === 0 && (
                         <div className="text-center py-6 text-slate-500 text-xs italic">
                           No previous app-wide announcements broadcasted.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 5: CAMPUS NEWS & INSIGHTS */}
+              {activeTab === 'news' && (
+                <div className="space-y-6">
+                  <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
+                    <h4 className="font-bold text-slate-200 mb-4 flex items-center gap-2">
+                      <Newspaper className="w-4 h-4 text-brand-500" />
+                      Publish Campus News & Wellness Insight
+                    </h4>
+                    <form onSubmit={handlePublishNewsArticle} className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                            Article Title *
+                          </label>
+                          <input
+                            type="text"
+                            value={newsTitle}
+                            onChange={(e) => setNewsTitle(e.target.value)}
+                            placeholder="e.g. KNUST Wellness Center Open House"
+                            className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                            Category
+                          </label>
+                          <select
+                            value={newsCategory}
+                            onChange={(e: any) => setNewsCategory(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                          >
+                            <option value="Campus News">Campus News</option>
+                            <option value="Mental Health">Mental Health</option>
+                            <option value="Self-Care">Self-Care</option>
+                            <option value="Academic Stress">Academic Stress</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                            Cover Image URL
+                          </label>
+                          <input
+                            type="text"
+                            value={newsImageUrl}
+                            onChange={(e) => setNewsImageUrl(e.target.value)}
+                            placeholder="https://images.unsplash.com/..."
+                            className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                            Source / Author
+                          </label>
+                          <input
+                            type="text"
+                            value={newsSource}
+                            onChange={(e) => setNewsSource(e.target.value)}
+                            placeholder="e.g. KNUST Counseling Center"
+                            className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                          Short Summary
+                        </label>
+                        <input
+                          type="text"
+                          value={newsSummary}
+                          onChange={(e) => setNewsSummary(e.target.value)}
+                          placeholder="Brief preview snippet..."
+                          className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                          Full Article Content *
+                        </label>
+                        <textarea
+                          value={newsContent}
+                          onChange={(e) => setNewsContent(e.target.value)}
+                          placeholder="Write full article details..."
+                          rows={5}
+                          className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors resize-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="webPin"
+                          checked={newsIsPinned}
+                          onChange={(e) => setNewsIsPinned(e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-brand-600"
+                        />
+                        <label htmlFor="webPin" className="text-sm text-slate-300 font-medium">
+                          Pin Article to Top Spotlight Hero
+                        </label>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={newsSubmitting || !newsTitle.trim() || !newsContent.trim()}
+                        className="bg-brand-600 hover:bg-brand-500 text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-lg shadow-brand-600/10 disabled:opacity-50"
+                      >
+                        {newsSubmitting ? 'Publishing Article...' : 'Publish Campus Article'}
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Published News Articles List */}
+                  <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
+                    <h4 className="font-bold text-slate-200 mb-4">Published Campus Articles</h4>
+                    <div className="space-y-4">
+                      {newsArticles.map((article) => (
+                        <div key={article.id} className="border-b border-slate-800/50 pb-4 last:border-b-0 last:pb-0 flex items-start justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="bg-brand-500/10 text-brand-400 text-xs font-semibold px-2 py-0.5 rounded-full border border-brand-500/20">
+                                {article.category}
+                              </span>
+                              {article.is_pinned && (
+                                <span className="bg-amber-500/10 text-amber-400 text-xs font-semibold px-2 py-0.5 rounded-full border border-amber-500/20">
+                                  Pinned
+                                </span>
+                              )}
+                              <span className="text-xs text-slate-500">{new Date(article.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <h5 className="font-bold text-slate-200 text-base">{article.title}</h5>
+                            <p className="text-slate-400 text-xs line-clamp-2">{article.summary}</p>
+                            <span className="text-xs text-slate-500 font-medium">Source: {article.source}</span>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteNewsArticle(article.id)}
+                            className="text-slate-500 hover:text-rose-400 p-2 transition-colors"
+                            title="Delete article"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      {newsArticles.length === 0 && (
+                        <div className="text-center py-6 text-slate-500 text-xs italic">
+                          No campus news articles published yet.
                         </div>
                       )}
                     </div>

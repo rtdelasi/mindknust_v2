@@ -186,6 +186,24 @@ create table if not exists public.calls (
 -- Disable RLS for sandbox dev (consistent with other tables)
 alter table if exists public.calls disable row level security;
 
+-- 12b. Create News & Wellness Articles Table
+create table if not exists public.news_articles (
+  id uuid default gen_random_uuid() primary key,
+  title text not null,
+  summary text not null,
+  content text not null,
+  image_url text,
+  category text not null default 'Campus News',
+  source text not null default 'KNUST Wellness',
+  source_url text,
+  is_pinned boolean default false not null,
+  read_time text default '3 min read',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table if exists public.news_articles disable row level security;
+grant all on public.news_articles to anon, authenticated, postgres, service_role;
+
 -- 13. Anonymity System Migration
 -- Permanent anonymous ID per student (generated once at signup)
 alter table if exists public.profiles add column if not exists anonymous_id text unique;

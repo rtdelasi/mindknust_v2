@@ -90,7 +90,23 @@ function RootLayoutContent() {
   // Pulse animation state for the ringing icon
   const [ringPulse, setRingPulse] = useState(1);
 
-  const currentUserId = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
+  const defaultUid = auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
+  const [activeUserId, setActiveUserId] = useState<string>(defaultUid);
+
+  useEffect(() => {
+    if (auth) {
+      const unsub = auth.onAuthStateChanged((user) => {
+        if (user?.uid) {
+          setActiveUserId(user.uid);
+        } else {
+          setActiveUserId(role === 'counselor' ? 'kwame-boateng' : 'student-user');
+        }
+      });
+      return () => unsub();
+    }
+  }, [role]);
+
+  const currentUserId = activeUserId;
 
   // Ring pulse animation
   useEffect(() => {
@@ -105,13 +121,24 @@ function RootLayoutContent() {
   useEffect(() => {
     if (!currentUserId) return;
 
-    const unsub = subscribeToIncomingCalls(currentUserId, (call) => {
-      console.log('[Realtime Receiver] Incoming call:', call.id);
-      setIncomingCall(call);
+    const unsubs: (() => void)[] = [];
+    const idsToSubscribe = new Set([
+      currentUserId,
+      role === 'counselor' ? 'kwame-boateng' : 'student-user',
+    ]);
+
+    idsToSubscribe.forEach((uid) => {
+      const unsub = subscribeToIncomingCalls(uid, (call) => {
+        console.log('[Realtime Receiver] Incoming call for', uid, ':', call.id);
+        setIncomingCall(call);
+      });
+      unsubs.push(unsub);
     });
 
-    return unsub;
-  }, [currentUserId]);
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+    };
+  }, [currentUserId, role]);
 
   // Fetch caller profile when incoming call arrives
   useEffect(() => {
@@ -224,6 +251,12 @@ function RootLayoutContent() {
     return () => { active = false; };
   }, [incomingCall]);
 
+  const isAnonDisplay = incomingCall?.is_anonymous_display === true;
+  const callerName = isAnonDisplay
+    ? callerProfile?.anonymous_id || 'Unknown caller'
+    : callerProfile?.name || (profileFailed ? 'Caller unavailable' : 'Unknown caller');
+  const hasPhoto = !isAnonDisplay && !!callerProfile?.avatar_url;
+
   const handleAcceptCall = useCallback(async () => {
     if (!incomingCall || !supabase) return;
     const saved = incomingCall;
@@ -232,16 +265,21 @@ function RootLayoutContent() {
     // Update DB status
     await updateCallStatus(saved.id, 'accepted');
 
-    // Open Jitsi
-    const videoMuted = saved.call_type === 'voice';
-    const jitsiUrl = `https://meet.jit.si/${saved.room_id}#config.startWithVideoMuted=${videoMuted}&config.prejoinPageEnabled=false`;
-    WebBrowser.openBrowserAsync(jitsiUrl, {
-      presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-    }).catch((err) => {
-      console.warn('[Receiver] Jitsi open error:', err);
-      Alert.alert('Error', 'Could not open the call room.');
+    // Route directly to in-app call room
+    router.push({
+      pathname: '/video-call',
+      params: {
+        counselorName: callerName,
+        callerNameParam: callerName,
+        avatarUrl: callerProfile?.avatar_url || '',
+        callType: saved.call_type || 'video',
+        counselorId: saved.caller_id,
+        roomId: saved.room_id,
+        callId: saved.id,
+        isIncomingAccepted: 'true',
+      },
     });
-  }, [incomingCall]);
+  }, [incomingCall, callerName, callerProfile, router]);
 
   const handleDeclineCall = useCallback(() => {
     if (!incomingCall || !supabase) return;
@@ -310,12 +348,6 @@ function RootLayoutContent() {
       supabase!.removeChannel(channel);
     };
   }, [currentUserId]);
-
-  const isAnonDisplay = incomingCall?.is_anonymous_display === true;
-  const callerName = isAnonDisplay
-    ? callerProfile?.anonymous_id || 'Unknown caller'
-    : callerProfile?.name || (profileFailed ? 'Caller unavailable' : 'Unknown caller');
-  const hasPhoto = !isAnonDisplay && !!callerProfile?.avatar_url;
 
   return (
     <PresenceProvider userId={currentUserId}>
