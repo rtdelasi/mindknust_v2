@@ -12,6 +12,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  RTCPeerConnection,
+  RTCIceCandidate,
+  RTCSessionDescription,
+  RTCView,
+  mediaDevices,
+  MediaStream,
+} from '@livekit/react-native-webrtc';
 
 import {
   HMSSDK,
@@ -141,19 +149,18 @@ export default function VideoCallScreen() {
   const prevTrackIdRef = useRef<string | undefined>(undefined);
 
   const hmsInstanceRef = useRef<HMSSDK | null>(null);
+  const [hmsInstance, setHmsInstance] = useState<HMSSDK | null>(null);
   const [hmsInstanceId, setHmsInstanceId] = useState<string | null>(null);
   const [remoteHmsTrackId, setRemoteHmsTrackId] = useState<string | undefined>(undefined);
 
-  // ── Remote Track Resolution (100ms HMS / WebRTC Integration) ──
-  let hmsPeers: any[] = [];
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const hmsModule = require('@100mslive/react-native-hms');
-    if (hmsModule?.useHMSPeers) {
-      hmsPeers = hmsModule.useHMSPeers();
-    }
-  } catch (_e) {}
+  // Real WebRTC P2P MediaStream State & PeerConnection Ref
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const iceCandidateQueueRef = useRef<any[]>([]);
 
+  // ── Remote Track Resolution (100ms HMS / WebRTC Integration) ──
+  const hmsPeers: any[] = [];
   const remoteHmsPeer = hmsPeers?.find((p: any) => !p.isLocal);
   const localHmsPeer = hmsPeers?.find((p: any) => p.isLocal);
 
@@ -247,6 +254,7 @@ export default function VideoCallScreen() {
   const statusUnsubRef = useRef<(() => void) | null>(null);
 
   // ── Native 100ms WebRTC Engine Lifecycle (HMSSDK.build + join) ──
+  // NOTE: [100ms Engine] setupHmsSession logic kept intact for reference/future cleanup per requirements
   useEffect(() => {
     if (callState !== 'connected') return;
 
@@ -260,6 +268,7 @@ export default function VideoCallScreen() {
         if (!isMounted) return;
 
         hmsInstanceRef.current = hmsInstance;
+        setHmsInstance(hmsInstance);
         setHmsInstanceId(hmsInstance.id);
         console.log('[100ms Engine] Built instance ID:', hmsInstance.id);
 
@@ -316,6 +325,7 @@ export default function VideoCallScreen() {
         console.log('[100ms Engine] Leaving 100ms room & destroying instance...');
         hmsInstance.leave().catch(() => {});
         hmsInstanceRef.current = null;
+        setHmsInstance(null);
       }
     };
   }, [callState, activeRoomId, currentUserId, localPeerName]);
@@ -388,6 +398,74 @@ export default function VideoCallScreen() {
     }
   }, [callType]);
 
+  // Helper to flush buffered ICE candidates once remoteDescription is set
+  const flushIceCandidateQueue = useCallback(async (pc: RTCPeerConnection) => {
+    while (iceCandidateQueueRef.current.length > 0) {
+      const candidate = iceCandidateQueueRef.current.shift();
+      try {
+        console.log('[WebRTC P2P] Flushing queued ICE candidate');
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.warn('[WebRTC P2P] Error adding queued ICE candidate:', err);
+      }
+    }
+  }, []);
+
+  // WebRTC P2P PeerConnection Builder
+  const getOrCreatePeerConnection = useCallback(async () => {
+    if (pcRef.current) return pcRef.current;
+
+    console.log('[WebRTC P2P] Initializing RTCPeerConnection...');
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
+    });
+
+    pc.ontrack = (event: any) => {
+      console.log('[WebRTC P2P] Received remote track:', event.streams);
+      if (event.streams && event.streams[0]) {
+        setRemoteStream(event.streams[0]);
+      } else if (event.track) {
+        const newStream = new MediaStream([event.track]);
+        setRemoteStream(newStream);
+      }
+    };
+
+    pc.onicecandidate = (event: any) => {
+      if (event.candidate && signalingRef.current) {
+        const candJson = event.candidate.toJSON ? event.candidate.toJSON() : event.candidate;
+        console.log('[WebRTC P2P] Discovered and sending ICE candidate payload:', candJson);
+        signalingRef.current.sendICECandidate(candJson);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('[WebRTC P2P] ICE connection state changed:', pc.iceConnectionState);
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('[WebRTC P2P] Peer connection state changed:', pc.connectionState);
+    };
+
+    try {
+      const capturedLocalStream = await mediaDevices.getUserMedia({
+        audio: true,
+        video: callType === 'video',
+      });
+      setLocalStream(capturedLocalStream);
+      capturedLocalStream.getTracks().forEach((track) => {
+        pc.addTrack(track, capturedLocalStream);
+      });
+    } catch (err) {
+      console.warn('[WebRTC P2P] getUserMedia warning (hardware/permissions):', err);
+    }
+
+    pcRef.current = pc;
+    return pc;
+  }, [callType]);
+
   // 5. WebRTC P2P Signaling Engine Setup
   useEffect(() => {
     if (!activeRoomId || !currentUserId) return;
@@ -395,13 +473,68 @@ export default function VideoCallScreen() {
     const signaling = new WebRTCSignalingManager(activeRoomId, currentUserId);
     signalingRef.current = signaling;
 
-    signaling.connect((event: WebRTCSignalingEvent) => {
+    signaling.connect(async (event: WebRTCSignalingEvent) => {
       console.log('[WebRTC Engine] Received signaling event:', event.type);
       if (event.type === 'offer') {
-        signaling.sendAnswer({ sdp: 'v=0\r\no=- WebRTC P2P Session', type: 'answer' });
-        setCallState('connected');
+        try {
+          console.log('[WebRTC P2P] Received SDP Offer payload round-trip:', JSON.stringify(event.payload));
+          const pc = await getOrCreatePeerConnection();
+
+          // Perfect Negotiation: check offer collision / glare
+          const offerCollision = pc.signalingState !== 'stable';
+          const isPolite = currentUserId.localeCompare(event.senderId || '') > 0;
+
+          if (offerCollision) {
+            if (!isPolite) {
+              console.log('[WebRTC P2P] Glare detected on impolite peer: ignoring incoming offer');
+              return;
+            }
+            console.log('[WebRTC P2P] Glare detected on polite peer: rolling back local description');
+            await pc.setLocalDescription({ type: 'rollback', sdp: '' } as any);
+          }
+
+          await pc.setRemoteDescription(new RTCSessionDescription(event.payload));
+          await flushIceCandidateQueue(pc);
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          if (pc.localDescription) {
+            const descJson = pc.localDescription.toJSON
+              ? pc.localDescription.toJSON()
+              : { sdp: pc.localDescription.sdp, type: pc.localDescription.type };
+            console.log('[WebRTC P2P] Sending SDP Answer payload over Supabase Realtime:', descJson);
+            signaling.sendAnswer(descJson);
+          }
+          setCallState('connected');
+        } catch (err) {
+          console.warn('[WebRTC P2P] Error handling SDP offer:', err);
+        }
       } else if (event.type === 'answer') {
-        setCallState('connected');
+        try {
+          console.log('[WebRTC P2P] Received SDP Answer payload round-trip:', JSON.stringify(event.payload));
+          if (pcRef.current && event.payload) {
+            await pcRef.current.setRemoteDescription(new RTCSessionDescription(event.payload));
+            await flushIceCandidateQueue(pcRef.current);
+          }
+          setCallState('connected');
+        } catch (err) {
+          console.warn('[WebRTC P2P] Error handling SDP answer:', err);
+        }
+      } else if (event.type === 'ice-candidate') {
+        if (event.payload) {
+          const pc = pcRef.current;
+          if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(event.payload));
+            } catch (iceErr) {
+              console.warn('[WebRTC P2P] addIceCandidate error:', iceErr);
+            }
+          } else {
+            console.log('[WebRTC P2P] Queuing ICE candidate (remoteDescription not set yet)');
+            iceCandidateQueueRef.current.push(event.payload);
+          }
+        }
       } else if (event.type === 'media-state') {
         if (event.payload) {
           setPeerState(event.payload);
@@ -413,8 +546,15 @@ export default function VideoCallScreen() {
 
     return () => {
       signaling.disconnect();
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      setRemoteStream(null);
+      setLocalStream(null);
+      iceCandidateQueueRef.current = [];
     };
-  }, [activeRoomId, currentUserId]);
+  }, [activeRoomId, currentUserId, getOrCreatePeerConnection, flushIceCandidateQueue]);
 
   // Broadcast local media state changes to remote peer
   useEffect(() => {
@@ -448,7 +588,23 @@ export default function VideoCallScreen() {
       callIdRef.current = call.id;
 
       if (signalingRef.current) {
-        signalingRef.current.sendOffer({ sdp: 'v=0\r\no=- WebRTC P2P Session', type: 'offer' });
+        try {
+          const pc = await getOrCreatePeerConnection();
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: callType === 'video',
+          });
+          await pc.setLocalDescription(offer);
+          if (pc.localDescription) {
+            const descJson = pc.localDescription.toJSON
+              ? pc.localDescription.toJSON()
+              : { sdp: pc.localDescription.sdp, type: pc.localDescription.type };
+            console.log('[WebRTC P2P] Sending SDP Offer payload over Supabase Realtime:', descJson);
+            signalingRef.current.sendOffer(descJson);
+          }
+        } catch (offerErr) {
+          console.warn('[WebRTC P2P] Error creating P2P offer:', offerErr);
+        }
       }
 
       const unsub = subscribeToCallStatus(call.id, (updated) => {
@@ -516,8 +672,18 @@ export default function VideoCallScreen() {
     if (signalingRef.current) {
       signalingRef.current.sendHangup();
     }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+      setLocalStream(null);
+    }
+    setRemoteStream(null);
+    iceCandidateQueueRef.current = [];
     setCallState('ended');
-  }, []);
+  }, [localStream]);
 
   // ── Render: Idle / Lobby ──
   if (callState === 'idle') {
@@ -839,7 +1005,7 @@ export default function VideoCallScreen() {
       <View style={styles.webrtcCanvas}>
         {(() => {
           const activeTrackId = remoteHmsTrackId || stableTrackId || candidateTrackId;
-          const isViewActive = Boolean(peerState.cameraOn && activeTrackId);
+          const isViewActive = Boolean(peerState.cameraOn && activeTrackId && (hmsInstance?.HmsView || hmsInstanceRef.current?.HmsView));
           console.log('[VideoDebug] Evaluating main canvas condition:', {
             callType,
             peerStateCameraOn: peerState.cameraOn,
@@ -847,47 +1013,26 @@ export default function VideoCallScreen() {
             candidateTrackId,
             stableTrackId,
             activeTrackId,
-            hmsInstanceId: hmsInstanceId || hmsInstanceRef.current?.id,
+            hmsInstanceId: hmsInstanceId || hmsInstance?.id || hmsInstanceRef.current?.id,
             willRenderHmsView: isViewActive,
           });
           return null;
         })()}
         {callType === 'video' ? (
-          peerState.cameraOn && (remoteHmsTrackId || stableTrackId || candidateTrackId) ? (
+          peerState.cameraOn && remoteStream ? (
             <View
               style={styles.remoteVideoCanvas}
               onLayout={(e) => {
                 const { width, height } = e.nativeEvent.layout;
                 console.log('[VideoDebug] remoteVideoCanvas layout dimensions:', { width, height });
               }}>
-              {(() => {
-                const HmsViewComponent = hmsInstanceRef.current?.HmsView;
-                if (HmsViewComponent) {
-                  return (
-                    <HmsViewComponent
-                      key={remotePeerName || 'remote_hms_view'}
-                      trackId={remoteHmsTrackId || stableTrackId || candidateTrackId || ''}
-                      style={StyleSheet.absoluteFillObject}
-                      scaleType={HMSVideoViewMode.ASPECT_FILL}
-                      mirror={false}
-                      setZOrderMediaOverlay={true}
-                    />
-                  );
-                }
-                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                const FallbackHmsView = (require('@100mslive/react-native-hms/lib/module/classes/HmsView') as any).HmsViewComponent;
-                return (
-                  <FallbackHmsView
-                    key={remotePeerName || 'remote_hms_view'}
-                    trackId={remoteHmsTrackId || stableTrackId || candidateTrackId || ''}
-                    id={hmsInstanceId || hmsInstanceRef.current?.id || HMSConstants?.DEFAULT_SDK_ID || '100ms_sdk_id'}
-                    style={StyleSheet.absoluteFillObject}
-                    scaleType={HMSVideoViewMode.ASPECT_FILL}
-                    mirror={false}
-                    setZOrderMediaOverlay={true}
-                  />
-                );
-              })()}
+              <RTCView
+                streamURL={remoteStream.toURL()}
+                style={StyleSheet.absoluteFillObject}
+                objectFit="cover"
+                mirror={false}
+                zOrder={0}
+              />
             </View>
           ) : (
             /* Remote Participant Camera Off / Unattached Track Placeholder */
@@ -919,11 +1064,17 @@ export default function VideoCallScreen() {
         {/* Floating Local Camera PIP Viewport */}
         {callType === 'video' && (
           <View style={styles.floatingPipBox}>
-            {cameraOn && cameraPermission?.granted ? (
-              <CameraView facing={facing} style={StyleSheet.absoluteFillObject} />
+            {cameraOn && localStream ? (
+              <RTCView
+                streamURL={localStream.toURL()}
+                style={StyleSheet.absoluteFillObject}
+                objectFit="cover"
+                mirror={facing === 'front'}
+                zOrder={1}
+              />
             ) : (
               <View style={styles.pipCameraOffBox}>
-                <MaterialCommunityIcons name="camera-off" size={24} color="#94A3B8" />
+                <MaterialCommunityIcons name={cameraOn ? 'camera' : 'camera-off'} size={24} color="#94A3B8" />
               </View>
             )}
             <View style={styles.pipLabelTag}>
