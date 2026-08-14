@@ -13,8 +13,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { HMSVideoViewMode, HMSConstants } from '@100mslive/react-native-hms';
-import { HmsViewComponent } from '@100mslive/react-native-hms/src/classes/HmsView';
+import {
+  HMSSDK,
+  HMSConfig,
+  HMSUpdateListenerActions,
+  HMSVideoViewMode,
+} from '@100mslive/react-native-hms';
+import { getHmsAuthToken } from '@/lib/hms-service';
+
+const HMSConstants = {
+  DEFAULT_SDK_ID: '12345',
+};
 
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -46,8 +55,10 @@ interface PeerMediaState {
   micOn: boolean;
   cameraOn: boolean;
   facing: 'front' | 'back';
-  trackId?: string;
+  videoTrackId?: string;
+  audioTrackId?: string;
   videoTrack?: { trackId: string };
+  audioTrack?: { trackId: string };
 }
 
 export default function VideoCallScreen() {
@@ -124,7 +135,14 @@ export default function VideoCallScreen() {
   const currentUserId =
     auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
 
-  const localTrackIdRef = useRef(`vtrack_${currentUserId}_${Date.now()}`);
+  const localVideoTrackIdRef = useRef(`vtrack_${currentUserId}`);
+  const localAudioTrackIdRef = useRef(`atrack_${currentUserId}`);
+  const [stableTrackId, setStableTrackId] = useState<string | undefined>(undefined);
+  const prevTrackIdRef = useRef<string | undefined>(undefined);
+
+  const hmsInstanceRef = useRef<HMSSDK | null>(null);
+  const [hmsInstanceId, setHmsInstanceId] = useState<string | null>(null);
+  const [remoteHmsTrackId, setRemoteHmsTrackId] = useState<string | undefined>(undefined);
 
   // ── Remote Track Resolution (100ms HMS / WebRTC Integration) ──
   let hmsPeers: any[] = [];
@@ -137,10 +155,87 @@ export default function VideoCallScreen() {
   } catch (_e) {}
 
   const remoteHmsPeer = hmsPeers?.find((p: any) => !p.isLocal);
-  const realTrackId =
+  const localHmsPeer = hmsPeers?.find((p: any) => p.isLocal);
+
+  // Log local peer's own video track state
+  useEffect(() => {
+    const localVideoTrackObj = localHmsPeer?.videoTrack;
+    const isMuteVal =
+      typeof localVideoTrackObj?.isMute === 'function'
+        ? localVideoTrackObj.isMute()
+        : localVideoTrackObj?.isMute;
+
+    console.log('[VideoDebug] Local HMS Peer track state:', {
+      localPeerId: localHmsPeer?.peerID,
+      localVideoTrackId: localVideoTrackObj?.trackId,
+      localVideoTrackIsMute: isMuteVal,
+      isLocalVideoTrackPresent: Boolean(localVideoTrackObj),
+    });
+  }, [localHmsPeer?.peerID, localHmsPeer?.videoTrack]);
+
+  // Enable remote video playback on HMS SDK remote video track if present
+  useEffect(() => {
+    if (remoteHmsPeer?.videoTrack?.setPlaybackAllowed) {
+      try {
+        console.log(
+          '[VideoDebug] Calling setPlaybackAllowed(true) for remote track:',
+          remoteHmsPeer.videoTrack.trackId
+        );
+        remoteHmsPeer.videoTrack.setPlaybackAllowed(true);
+      } catch (err) {
+        console.warn('[VideoDebug] setPlaybackAllowed error:', err);
+      }
+    }
+  }, [remoteHmsPeer?.videoTrack]);
+
+  // Log distinct audio vs video track IDs and remote video track isMute status
+  useEffect(() => {
+    const remoteVideoTrackObj = remoteHmsPeer?.videoTrack;
+    const trackIsMute =
+      typeof remoteVideoTrackObj?.isMute === 'function'
+        ? remoteVideoTrackObj.isMute()
+        : remoteVideoTrackObj?.isMute ?? (!peerState.cameraOn);
+
+    console.log('[VideoDebug] peer track types & mute status:', {
+      audioTrackId: remoteHmsPeer?.audioTrack?.trackId || peerState.audioTrackId || peerState.audioTrack?.trackId,
+      videoTrackId: remoteHmsPeer?.videoTrack?.trackId || peerState.videoTrackId || peerState.videoTrack?.trackId,
+      signalingVideoTrackId: peerState.videoTrackId,
+      remoteVideoTrackIsMute: trackIsMute,
+    });
+  }, [
+    remoteHmsPeer?.audioTrack?.trackId,
+    remoteHmsPeer?.videoTrack?.trackId,
+    remoteHmsPeer?.videoTrack,
+    peerState.audioTrackId,
+    peerState.videoTrackId,
+    peerState.audioTrack?.trackId,
+    peerState.videoTrack?.trackId,
+    peerState.cameraOn,
+  ]);
+
+  // Strictly derive candidate track ID from explicit video-typed sources ONLY (no generic trackId fallback)
+  const candidateTrackId =
     remoteHmsPeer?.videoTrack?.trackId ||
-    peerState.trackId ||
+    peerState.videoTrackId ||
     peerState.videoTrack?.trackId;
+
+  useEffect(() => {
+    if (!peerState.cameraOn) {
+      if (stableTrackId !== undefined) {
+        setStableTrackId(undefined);
+      }
+    } else if (candidateTrackId && candidateTrackId !== stableTrackId) {
+      setStableTrackId(candidateTrackId);
+    }
+  }, [candidateTrackId, peerState.cameraOn, stableTrackId]);
+
+  // Log ONLY when video trackId genuinely changes
+  useEffect(() => {
+    if (stableTrackId !== prevTrackIdRef.current) {
+      console.log('[VideoDebug] trackId CHANGED from', prevTrackIdRef.current, 'to', stableTrackId);
+      prevTrackIdRef.current = stableTrackId;
+    }
+  }, [stableTrackId]);
 
   const defaultRoomId = useRef(
     `counselcare-webrtc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -150,6 +245,100 @@ export default function VideoCallScreen() {
   const callIdRef = useRef<string | null>(passedCallId || null);
   const signalingRef = useRef<WebRTCSignalingManager | null>(null);
   const statusUnsubRef = useRef<(() => void) | null>(null);
+
+  // ── Native 100ms WebRTC Engine Lifecycle (HMSSDK.build + join) ──
+  useEffect(() => {
+    if (callState !== 'connected') return;
+
+    let isMounted = true;
+    let hmsInstance: HMSSDK | null = null;
+
+    const setupHmsSession = async () => {
+      try {
+        console.log('[100ms Engine] Building HMSSDK instance...');
+        hmsInstance = await HMSSDK.build();
+        if (!isMounted) return;
+
+        hmsInstanceRef.current = hmsInstance;
+        setHmsInstanceId(hmsInstance.id);
+        console.log('[100ms Engine] Built instance ID:', hmsInstance.id);
+
+        // 1. Listen for room join event
+        hmsInstance.addEventListener(HMSUpdateListenerActions.ON_JOIN, (data: any) => {
+          console.log('[100ms Engine] ON_JOIN: Joined 100ms room:', data?.room?.name);
+        });
+
+        // 2. Listen for peer updates
+        hmsInstance.addEventListener(HMSUpdateListenerActions.ON_PEER_UPDATE, (data: any) => {
+          console.log('[100ms Engine] ON_PEER_UPDATE:', data?.type, data?.peer?.name);
+        });
+
+        // 3. Listen for track updates (remote video publishing)
+        hmsInstance.addEventListener(HMSUpdateListenerActions.ON_TRACK_UPDATE, (data: any) => {
+          console.log(
+            '[100ms Engine] ON_TRACK_UPDATE:',
+            data?.track?.trackId,
+            data?.track?.type,
+            data?.peer?.name
+          );
+          if (data?.track?.type === 'VIDEO' && !data?.peer?.isLocal) {
+            console.log('[100ms Engine] Remote video track published:', data.track.trackId);
+            setRemoteHmsTrackId(data.track.trackId);
+            if (data.track.setPlaybackAllowed) {
+              try {
+                data.track.setPlaybackAllowed(true);
+              } catch (_err) {}
+            }
+          }
+        });
+
+        // 4. Listen for errors
+        hmsInstance.addEventListener(HMSUpdateListenerActions.ON_ERROR, (error: any) => {
+          console.error('[100ms Engine] ON_ERROR:', error);
+        });
+
+        // Fetch Auth Token & Join 100ms Room
+        const authToken = await getHmsAuthToken(hmsInstance, activeRoomId, currentUserId);
+        const config = new HMSConfig({ authToken, username: localPeerName });
+        console.log('[100ms Engine] Joining room with config username:', localPeerName);
+        await hmsInstance.join(config);
+        console.log('[100ms Engine] Join call completed');
+      } catch (err) {
+        console.warn('[100ms Engine] Initialization error:', err);
+      }
+    };
+
+    setupHmsSession();
+
+    return () => {
+      isMounted = false;
+      if (hmsInstance) {
+        console.log('[100ms Engine] Leaving 100ms room & destroying instance...');
+        hmsInstance.leave().catch(() => {});
+        hmsInstanceRef.current = null;
+      }
+    };
+  }, [callState, activeRoomId, currentUserId, localPeerName]);
+
+  // Sync local controls (mic, camera, facing) directly to 100ms native engine
+  useEffect(() => {
+    if (!hmsInstanceRef.current) return;
+    const syncControls = async () => {
+      try {
+        const localPeer = await hmsInstanceRef.current?.getLocalPeer();
+        const vTrack: any = localPeer?.localVideoTrack ? localPeer.localVideoTrack() : (localPeer as any)?.videoTrack;
+        const aTrack: any = localPeer?.localAudioTrack ? localPeer.localAudioTrack() : (localPeer as any)?.audioTrack;
+
+        if (vTrack && typeof vTrack.setMute === 'function') {
+          vTrack.setMute(!cameraOn);
+        }
+        if (aTrack && typeof aTrack.setMute === 'function') {
+          aTrack.setMute(!micOn);
+        }
+      } catch (_err) {}
+    };
+    syncControls();
+  }, [cameraOn, micOn]);
 
   // 1. Audio mode configuration for native speakerphone & microphone capture
   useEffect(() => {
@@ -234,7 +423,8 @@ export default function VideoCallScreen() {
         micOn,
         cameraOn,
         facing,
-        trackId: localTrackIdRef.current,
+        videoTrackId: localVideoTrackIdRef.current,
+        audioTrackId: localAudioTrackIdRef.current,
       });
     }
   }, [micOn, cameraOn, facing, callState]);
@@ -647,24 +837,58 @@ export default function VideoCallScreen() {
 
       {/* Main Media Canvas Viewport (Displays Remote Peer Card / Stream) */}
       <View style={styles.webrtcCanvas}>
+        {(() => {
+          const activeTrackId = remoteHmsTrackId || stableTrackId || candidateTrackId;
+          const isViewActive = Boolean(peerState.cameraOn && activeTrackId);
+          console.log('[VideoDebug] Evaluating main canvas condition:', {
+            callType,
+            peerStateCameraOn: peerState.cameraOn,
+            remoteHmsTrackId,
+            candidateTrackId,
+            stableTrackId,
+            activeTrackId,
+            hmsInstanceId: hmsInstanceId || hmsInstanceRef.current?.id,
+            willRenderHmsView: isViewActive,
+          });
+          return null;
+        })()}
         {callType === 'video' ? (
-          peerState.cameraOn && realTrackId ? (
-            (() => {
-              console.log('[VideoDebug] rendering HmsView with trackId:', realTrackId);
-              return (
-                <View style={styles.remoteVideoCanvas}>
-                  <HmsViewComponent
-                    key={realTrackId}
-                    trackId={realTrackId}
-                    id={HMSConstants?.DEFAULT_SDK_ID || '100ms_sdk_id'}
+          peerState.cameraOn && (remoteHmsTrackId || stableTrackId || candidateTrackId) ? (
+            <View
+              style={styles.remoteVideoCanvas}
+              onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                console.log('[VideoDebug] remoteVideoCanvas layout dimensions:', { width, height });
+              }}>
+              {(() => {
+                const HmsViewComponent = hmsInstanceRef.current?.HmsView;
+                if (HmsViewComponent) {
+                  return (
+                    <HmsViewComponent
+                      key={remotePeerName || 'remote_hms_view'}
+                      trackId={remoteHmsTrackId || stableTrackId || candidateTrackId || ''}
+                      style={StyleSheet.absoluteFillObject}
+                      scaleType={HMSVideoViewMode.ASPECT_FILL}
+                      mirror={false}
+                      setZOrderMediaOverlay={true}
+                    />
+                  );
+                }
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const FallbackHmsView = (require('@100mslive/react-native-hms/lib/module/classes/HmsView') as any).HmsViewComponent;
+                return (
+                  <FallbackHmsView
+                    key={remotePeerName || 'remote_hms_view'}
+                    trackId={remoteHmsTrackId || stableTrackId || candidateTrackId || ''}
+                    id={hmsInstanceId || hmsInstanceRef.current?.id || HMSConstants?.DEFAULT_SDK_ID || '100ms_sdk_id'}
                     style={StyleSheet.absoluteFillObject}
                     scaleType={HMSVideoViewMode.ASPECT_FILL}
                     mirror={false}
-                    setZOrderMediaOverlay={false}
+                    setZOrderMediaOverlay={true}
                   />
-                </View>
-              );
-            })()
+                );
+              })()}
+            </View>
           ) : (
             /* Remote Participant Camera Off / Unattached Track Placeholder */
             <View style={styles.videoOffPlaceholder}>

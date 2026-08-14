@@ -82,7 +82,13 @@ export class WebRTCSignalingManager {
   /**
    * Broadcast media state changes (e.g. mic muted, camera off).
    */
-  public sendMediaState(state: { micOn: boolean; cameraOn: boolean; facing: 'front' | 'back'; trackId?: string }): void {
+  public sendMediaState(state: {
+    micOn: boolean;
+    cameraOn: boolean;
+    facing: 'front' | 'back';
+    videoTrackId?: string;
+    audioTrackId?: string;
+  }): void {
     this.sendSignal({
       type: 'media-state',
       senderId: this.userId,
