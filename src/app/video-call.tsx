@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -403,19 +403,19 @@ export default function VideoCallScreen() {
     while (iceCandidateQueueRef.current.length > 0) {
       const candidate = iceCandidateQueueRef.current.shift();
       try {
-        console.log('[WebRTC P2P] Flushing queued ICE candidate');
+        console.log(`[${localPeerName}] [WebRTC P2P] Flushing queued ICE candidate`);
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
-        console.warn('[WebRTC P2P] Error adding queued ICE candidate:', err);
+        console.warn(`[${localPeerName}] [WebRTC P2P] Error adding queued ICE candidate:`, err);
       }
     }
-  }, []);
+  }, [localPeerName]);
 
   // WebRTC P2P PeerConnection Builder
   const getOrCreatePeerConnection = useCallback(async () => {
     if (pcRef.current) return pcRef.current;
 
-    console.log('[WebRTC P2P] Initializing RTCPeerConnection...');
+    console.log(`[${localPeerName}] [WebRTC P2P] Initializing RTCPeerConnection...`);
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -424,7 +424,7 @@ export default function VideoCallScreen() {
     });
 
     pc.ontrack = (event: any) => {
-      console.log('[WebRTC P2P] Received remote track:', event.streams);
+      console.log(`[${localPeerName}] [WebRTC P2P] Received remote track:`, event.streams);
       if (event.streams && event.streams[0]) {
         setRemoteStream(event.streams[0]);
       } else if (event.track) {
@@ -436,17 +436,17 @@ export default function VideoCallScreen() {
     pc.onicecandidate = (event: any) => {
       if (event.candidate && signalingRef.current) {
         const candJson = event.candidate.toJSON ? event.candidate.toJSON() : event.candidate;
-        console.log('[WebRTC P2P] Discovered and sending ICE candidate payload:', candJson);
+        console.log(`[${localPeerName}] [WebRTC P2P] Discovered and sending ICE candidate payload:`, candJson);
         signalingRef.current.sendICECandidate(candJson);
       }
     };
 
     pc.oniceconnectionstatechange = () => {
-      console.log('[WebRTC P2P] ICE connection state changed:', pc.iceConnectionState);
+      console.log(`[${localPeerName}] [WebRTC P2P] ICE connection state changed:`, pc.iceConnectionState);
     };
 
     pc.onconnectionstatechange = () => {
-      console.log('[WebRTC P2P] Peer connection state changed:', pc.connectionState);
+      console.log(`[${localPeerName}] [WebRTC P2P] Peer connection state changed:`, pc.connectionState);
     };
 
     try {
@@ -459,12 +459,51 @@ export default function VideoCallScreen() {
         pc.addTrack(track, capturedLocalStream);
       });
     } catch (err) {
-      console.warn('[WebRTC P2P] getUserMedia warning (hardware/permissions):', err);
+      console.warn(`[${localPeerName}] [WebRTC P2P] getUserMedia warning (hardware/permissions):`, err);
     }
 
     pcRef.current = pc;
     return pc;
-  }, [callType]);
+  }, [callType, localPeerName]);
+
+  // Deterministic Caller vs Callee Role Selection:
+  // - If accepting an incoming call overlay, local user is strictly Callee (isCaller = false).
+  // - Otherwise, if student calling counselor, or tie-break using currentUserId comparison, local user is Caller (isCaller = true).
+  const targetRemoteId = counselorId || passedRoomId || '';
+  const isCaller = useMemo(() => {
+    if (isIncomingAccepted === 'true') return false;
+    if (role === 'student') return true;
+    if (!targetRemoteId) return true;
+    return currentUserId.localeCompare(targetRemoteId) < 0;
+  }, [isIncomingAccepted, role, currentUserId, targetRemoteId]);
+
+  const callInitiated = useRef(false);
+  const offerSentRef = useRef(false);
+
+  // Helper to generate and send SDP Offer once peer-ready signal is received
+  const sendOfferToPeer = useCallback(async () => {
+    if (offerSentRef.current) return;
+    offerSentRef.current = true;
+    console.log(`[${localPeerName}] Received ready signal from callee, now sending offer.`);
+    try {
+      const pc = await getOrCreatePeerConnection();
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: callType === 'video',
+      });
+      await pc.setLocalDescription(offer);
+      if (pc.localDescription && signalingRef.current) {
+        const descJson = pc.localDescription.toJSON
+          ? pc.localDescription.toJSON()
+          : { sdp: pc.localDescription.sdp, type: pc.localDescription.type };
+        console.log(`[${localPeerName}] [WebRTC P2P] Broadcasting SDP Offer payload over WebSocket:`, descJson);
+        signalingRef.current.sendOffer(descJson);
+      }
+    } catch (offerErr) {
+      console.warn(`[${localPeerName}] [WebRTC P2P] Error creating P2P offer:`, offerErr);
+      offerSentRef.current = false;
+    }
+  }, [getOrCreatePeerConnection, callType, localPeerName]);
 
   // 5. WebRTC P2P Signaling Engine Setup
   useEffect(() => {
@@ -474,10 +513,10 @@ export default function VideoCallScreen() {
     signalingRef.current = signaling;
 
     signaling.connect(async (event: WebRTCSignalingEvent) => {
-      console.log('[WebRTC Engine] Received signaling event:', event.type);
+      console.log(`[${localPeerName}] [WebRTC Engine] Received signaling event:`, event.type);
       if (event.type === 'offer') {
         try {
-          console.log('[WebRTC P2P] Received SDP Offer payload round-trip:', JSON.stringify(event.payload));
+          console.log(`[${localPeerName}] [WebRTC P2P] Received SDP Offer payload round-trip:`, JSON.stringify(event.payload));
           const pc = await getOrCreatePeerConnection();
 
           // Perfect Negotiation: check offer collision / glare
@@ -486,10 +525,10 @@ export default function VideoCallScreen() {
 
           if (offerCollision) {
             if (!isPolite) {
-              console.log('[WebRTC P2P] Glare detected on impolite peer: ignoring incoming offer');
+              console.log(`[${localPeerName}] [WebRTC P2P] Glare detected on impolite peer: ignoring incoming offer`);
               return;
             }
-            console.log('[WebRTC P2P] Glare detected on polite peer: rolling back local description');
+            console.log(`[${localPeerName}] [WebRTC P2P] Glare detected on polite peer: rolling back local description`);
             await pc.setLocalDescription({ type: 'rollback', sdp: '' } as any);
           }
 
@@ -503,23 +542,23 @@ export default function VideoCallScreen() {
             const descJson = pc.localDescription.toJSON
               ? pc.localDescription.toJSON()
               : { sdp: pc.localDescription.sdp, type: pc.localDescription.type };
-            console.log('[WebRTC P2P] Sending SDP Answer payload over Supabase Realtime:', descJson);
+            console.log(`[${localPeerName}] [WebRTC P2P] Sending SDP Answer payload over Supabase Realtime:`, descJson);
             signaling.sendAnswer(descJson);
           }
           setCallState('connected');
         } catch (err) {
-          console.warn('[WebRTC P2P] Error handling SDP offer:', err);
+          console.warn(`[${localPeerName}] [WebRTC P2P] Error handling SDP offer:`, err);
         }
       } else if (event.type === 'answer') {
         try {
-          console.log('[WebRTC P2P] Received SDP Answer payload round-trip:', JSON.stringify(event.payload));
+          console.log(`[${localPeerName}] [WebRTC P2P] Received SDP Answer payload round-trip:`, JSON.stringify(event.payload));
           if (pcRef.current && event.payload) {
             await pcRef.current.setRemoteDescription(new RTCSessionDescription(event.payload));
             await flushIceCandidateQueue(pcRef.current);
           }
           setCallState('connected');
         } catch (err) {
-          console.warn('[WebRTC P2P] Error handling SDP answer:', err);
+          console.warn(`[${localPeerName}] [WebRTC P2P] Error handling SDP answer:`, err);
         }
       } else if (event.type === 'ice-candidate') {
         if (event.payload) {
@@ -528,12 +567,17 @@ export default function VideoCallScreen() {
             try {
               await pc.addIceCandidate(new RTCIceCandidate(event.payload));
             } catch (iceErr) {
-              console.warn('[WebRTC P2P] addIceCandidate error:', iceErr);
+              console.warn(`[${localPeerName}] [WebRTC P2P] addIceCandidate error:`, iceErr);
             }
           } else {
-            console.log('[WebRTC P2P] Queuing ICE candidate (remoteDescription not set yet)');
+            console.log(`[${localPeerName}] [WebRTC P2P] Queuing ICE candidate (remoteDescription not set yet)`);
             iceCandidateQueueRef.current.push(event.payload);
           }
+        }
+      } else if (event.type === 'peer-ready') {
+        console.log(`[${localPeerName}] Received peer-ready signal from [${event.senderId}]`);
+        if (isCaller) {
+          sendOfferToPeer();
         }
       } else if (event.type === 'media-state') {
         if (event.payload) {
@@ -553,8 +597,9 @@ export default function VideoCallScreen() {
       setRemoteStream(null);
       setLocalStream(null);
       iceCandidateQueueRef.current = [];
+      offerSentRef.current = false;
     };
-  }, [activeRoomId, currentUserId, getOrCreatePeerConnection, flushIceCandidateQueue]);
+  }, [activeRoomId, currentUserId, getOrCreatePeerConnection, flushIceCandidateQueue, isCaller, sendOfferToPeer, localPeerName]);
 
   // Broadcast local media state changes to remote peer
   useEffect(() => {
@@ -569,43 +614,21 @@ export default function VideoCallScreen() {
     }
   }, [micOn, cameraOn, facing, callState]);
 
-  // 6. Create call in DB + subscribe to status changes
-  const callInitiated = useRef(false);
-
+  // 6. Create call in DB + subscribe to status changes (CALLER ONLY)
   useEffect(() => {
-    if (callState !== 'ringing' || !supabase || !counselorId || callInitiated.current) return;
+    if (callState !== 'ringing' || !isCaller || !supabase || !counselorId || callInitiated.current) return;
     callInitiated.current = true;
 
     const startCall = async () => {
-      console.log('[VideoCall] Creating call in DB...');
+      console.log(`[${localPeerName}] [VideoCall] Creating call in DB...`);
       const call = await createCall(currentUserId, counselorId, callType as 'voice' | 'video', activeRoomId);
       if (!call) {
-        console.warn('[VideoCall] Failed to create call');
+        console.warn(`[${localPeerName}] [VideoCall] Failed to create call in DB`);
         setCallState('idle');
         callInitiated.current = false;
         return;
       }
       callIdRef.current = call.id;
-
-      if (signalingRef.current) {
-        try {
-          const pc = await getOrCreatePeerConnection();
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: callType === 'video',
-          });
-          await pc.setLocalDescription(offer);
-          if (pc.localDescription) {
-            const descJson = pc.localDescription.toJSON
-              ? pc.localDescription.toJSON()
-              : { sdp: pc.localDescription.sdp, type: pc.localDescription.type };
-            console.log('[WebRTC P2P] Sending SDP Offer payload over Supabase Realtime:', descJson);
-            signalingRef.current.sendOffer(descJson);
-          }
-        } catch (offerErr) {
-          console.warn('[WebRTC P2P] Error creating P2P offer:', offerErr);
-        }
-      }
 
       const unsub = subscribeToCallStatus(call.id, (updated) => {
         if (updated.status === 'accepted') {
@@ -621,7 +644,19 @@ export default function VideoCallScreen() {
     };
 
     startCall();
-  }, [callState, counselorId, currentUserId, callType, activeRoomId]);
+  }, [callState, counselorId, currentUserId, callType, activeRoomId, isCaller, localPeerName]);
+
+  // 7. Handshake Timeout Monitor (12s limit for peer-ready signal)
+  useEffect(() => {
+    if (isCaller && (callState === 'ringing' || callState === 'connected') && !offerSentRef.current) {
+      const handshakeTimeout = setTimeout(() => {
+        if (!offerSentRef.current) {
+          console.warn(`[${localPeerName}] Handshake timeout: No peer-ready signal received after 12s. Callee app may not be connected yet.`);
+        }
+      }, 12000);
+      return () => clearTimeout(handshakeTimeout);
+    }
+  }, [isCaller, callState, localPeerName]);
 
   // If incoming call accepted, subscribe to call status
   useEffect(() => {
@@ -1004,17 +1039,13 @@ export default function VideoCallScreen() {
       {/* Main Media Canvas Viewport (Displays Remote Peer Card / Stream) */}
       <View style={styles.webrtcCanvas}>
         {(() => {
-          const activeTrackId = remoteHmsTrackId || stableTrackId || candidateTrackId;
-          const isViewActive = Boolean(peerState.cameraOn && activeTrackId && (hmsInstance?.HmsView || hmsInstanceRef.current?.HmsView));
-          console.log('[VideoDebug] Evaluating main canvas condition:', {
+          console.log(`[${localPeerName}] [VideoDebug] Remote media stream state:`, {
             callType,
             peerStateCameraOn: peerState.cameraOn,
-            remoteHmsTrackId,
-            candidateTrackId,
-            stableTrackId,
-            activeTrackId,
-            hmsInstanceId: hmsInstanceId || hmsInstance?.id || hmsInstanceRef.current?.id,
-            willRenderHmsView: isViewActive,
+            hasRemoteStream: Boolean(remoteStream),
+            remoteStreamId: remoteStream?.id,
+            activeVideoTracks: remoteStream?.getVideoTracks().length ?? 0,
+            activeAudioTracks: remoteStream?.getAudioTracks().length ?? 0,
           });
           return null;
         })()}

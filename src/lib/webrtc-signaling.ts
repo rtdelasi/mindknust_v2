@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 
 export interface WebRTCSignalingEvent {
-  type: 'offer' | 'answer' | 'ice-candidate' | 'media-state' | 'hangup';
+  type: 'offer' | 'answer' | 'ice-candidate' | 'media-state' | 'hangup' | 'peer-ready';
   senderId: string;
   payload: any;
 }
@@ -17,6 +17,8 @@ export class WebRTCSignalingManager {
   private roomId: string;
   private userId: string;
   private callback: WebRTCSignalingCallback | null = null;
+  private isSubscribed: boolean = false;
+  private messageQueue: WebRTCSignalingEvent[] = [];
 
   constructor(roomId: string, userId: string) {
     this.roomId = roomId;
@@ -36,14 +38,35 @@ export class WebRTCSignalingManager {
     this.channel
       .on('broadcast', { event: 'webrtc_signal' }, (data: { payload: WebRTCSignalingEvent }) => {
         const signal = data.payload;
+        if (signal) {
+          console.log(`[${this.userId}] [WebRTCSignaling] Received signal [${signal.type}] from [${signal.senderId}]`);
+        }
         // Ignore signals originating from self
         if (signal && signal.senderId !== this.userId && this.callback) {
           this.callback(signal);
         }
       })
       .subscribe((status: string) => {
-        console.log(`[WebRTCSignaling] Channel ${channelName} status:`, status);
+        console.log(`[${this.userId}] [WebRTCSignaling] Channel ${channelName} status:`, status);
+        if (status === 'SUBSCRIBED') {
+          this.isSubscribed = true;
+          this.flushQueue();
+          this.sendPeerReady();
+        } else {
+          this.isSubscribed = false;
+        }
       });
+  }
+
+  /**
+   * Broadcast peer ready signal indicating channel is active and listening over WebSockets.
+   */
+  public sendPeerReady(): void {
+    this.sendSignal({
+      type: 'peer-ready',
+      senderId: this.userId,
+      payload: {},
+    });
   }
 
   /**
@@ -108,12 +131,32 @@ export class WebRTCSignalingManager {
   }
 
   private sendSignal(event: WebRTCSignalingEvent): void {
-    if (this.channel) {
+    if (!this.channel) return;
+
+    if (this.isSubscribed) {
+      console.log(`[${this.userId}] [WebRTCSignaling] Sending signal [${event.type}] via WebSocket broadcast`);
       this.channel.send({
         type: 'broadcast',
         event: 'webrtc_signal',
         payload: event,
       });
+    } else {
+      console.log(`[${this.userId}] [WebRTCSignaling] Channel not SUBSCRIBED yet. Queueing signal [${event.type}]`);
+      this.messageQueue.push(event);
+    }
+  }
+
+  private flushQueue(): void {
+    while (this.messageQueue.length > 0 && this.channel && this.isSubscribed) {
+      const event = this.messageQueue.shift();
+      if (event) {
+        console.log(`[${this.userId}] [WebRTCSignaling] Flushing queued signal [${event.type}] via WebSocket broadcast`);
+        this.channel.send({
+          type: 'broadcast',
+          event: 'webrtc_signal',
+          payload: event,
+        });
+      }
     }
   }
 
@@ -125,6 +168,8 @@ export class WebRTCSignalingManager {
       supabase.removeChannel(this.channel);
       this.channel = null;
     }
+    this.isSubscribed = false;
+    this.messageQueue = [];
     this.callback = null;
   }
 }
