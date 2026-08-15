@@ -473,12 +473,16 @@ export default function VideoCallScreen() {
   const isCaller = useMemo(() => {
     if (isIncomingAccepted === 'true') return false;
     if (role === 'student') return true;
+    if (role === 'counselor') return false;
     if (!targetRemoteId) return true;
     return currentUserId.localeCompare(targetRemoteId) < 0;
   }, [isIncomingAccepted, role, currentUserId, targetRemoteId]);
 
   const callInitiated = useRef(false);
   const offerSentRef = useRef(false);
+  const peerReadyReceivedRef = useRef(false);
+  const peerReadyAckSentRef = useRef(false);
+  const isCallerRef = useRef(isCaller);
 
   // Helper to generate and send SDP Offer once peer-ready signal is received
   const sendOfferToPeer = useCallback(async () => {
@@ -505,7 +509,16 @@ export default function VideoCallScreen() {
     }
   }, [getOrCreatePeerConnection, callType, localPeerName]);
 
-  // 5. WebRTC P2P Signaling Engine Setup
+  // Keep isCallerRef in sync & auto-trigger offer if peerReady arrived before role resolution
+  useEffect(() => {
+    isCallerRef.current = isCaller;
+    if (isCaller && peerReadyReceivedRef.current && !offerSentRef.current) {
+      console.log(`[${localPeerName}] Role resolved to Caller & peer-ready already received. Sending offer now.`);
+      sendOfferToPeer();
+    }
+  }, [isCaller, sendOfferToPeer, localPeerName]);
+
+  // 5. WebRTC P2P Signaling Engine Setup (Stable Lifecycle)
   useEffect(() => {
     if (!activeRoomId || !currentUserId) return;
 
@@ -576,7 +589,16 @@ export default function VideoCallScreen() {
         }
       } else if (event.type === 'peer-ready') {
         console.log(`[${localPeerName}] Received peer-ready signal from [${event.senderId}]`);
-        if (isCaller) {
+        peerReadyReceivedRef.current = true;
+
+        // Self-Healing ACK: Re-broadcast peer-ready once if we haven't sent an ACK yet
+        if (!peerReadyAckSentRef.current && signalingRef.current) {
+          peerReadyAckSentRef.current = true;
+          console.log(`[${localPeerName}] Sending peer-ready ACK back to [${event.senderId}]`);
+          signalingRef.current.sendPeerReady();
+        }
+
+        if (isCallerRef.current) {
           sendOfferToPeer();
         }
       } else if (event.type === 'media-state') {
@@ -598,8 +620,10 @@ export default function VideoCallScreen() {
       setLocalStream(null);
       iceCandidateQueueRef.current = [];
       offerSentRef.current = false;
+      peerReadyReceivedRef.current = false;
+      peerReadyAckSentRef.current = false;
     };
-  }, [activeRoomId, currentUserId, getOrCreatePeerConnection, flushIceCandidateQueue, isCaller, sendOfferToPeer, localPeerName]);
+  }, [activeRoomId, currentUserId, getOrCreatePeerConnection, flushIceCandidateQueue, sendOfferToPeer, localPeerName]);
 
   // Broadcast local media state changes to remote peer
   useEffect(() => {
