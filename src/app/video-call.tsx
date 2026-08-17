@@ -255,8 +255,8 @@ export default function VideoCallScreen() {
   const signalingRef = useRef<WebRTCSignalingManager | null>(null);
   const statusUnsubRef = useRef<(() => void) | null>(null);
 
-  // ── Native 100ms WebRTC Engine Lifecycle (HMSSDK.build + join) ──
-  // NOTE: [100ms Engine] setupHmsSession logic kept intact for reference/future cleanup per requirements
+  // ── Native 100ms WebRTC Engine Lifecycle (Disabled - using pure WebRTC P2P) ──
+  /*
   useEffect(() => {
     if (callState !== 'connected') return;
 
@@ -351,6 +351,7 @@ export default function VideoCallScreen() {
     };
     syncControls();
   }, [cameraOn, micOn]);
+  */
 
   // 1. Audio mode configuration for native speakerphone & microphone capture
   useEffect(() => {
