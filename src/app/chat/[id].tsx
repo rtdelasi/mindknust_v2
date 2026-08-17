@@ -374,7 +374,7 @@ export default function ChatRoomScreen() {
         <View style={styles.headerRight}>
           <Pressable
             style={[styles.callButton, { backgroundColor: theme.primarySoft }]}
-            onPress={() => router.push({ pathname: '/video-call', params: { counselorName: recipientName, counselorId: recipientId, callType: 'video' } })}>
+            onPress={() => router.push({ pathname: '/video-call', params: { counselorName: recipientName, counselorId: recipientId, callType: 'video', isIncomingAccepted: 'false' } })}>
             <MaterialCommunityIcons name="video" size={20} color={theme.primary} />
           </Pressable>
           <Pressable style={styles.menuButton} onPress={() => setMenuVisible(true)}>

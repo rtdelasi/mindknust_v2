@@ -234,6 +234,8 @@ export default function CounselorSessionsScreen() {
                               avatarUrl: studentAvatar || '',
                               callType: 'video',
                               counselorId: item.student_id,
+                              isIncomingAccepted: 'false',
+                              isJoiningSession: 'true',
                             },
                           })
                         }

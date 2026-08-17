@@ -303,6 +303,7 @@ export default function CounselorDetailScreen() {
                     counselorName: name,
                     counselorId: counselor.id,
                     callType: 'voice',
+                    isIncomingAccepted: 'false',
                   },
                 })
               }
@@ -328,6 +329,7 @@ export default function CounselorDetailScreen() {
                     counselorName: name,
                     counselorId: counselor.id,
                     callType: 'video',
+                    isIncomingAccepted: 'false',
                   },
                 })
               }

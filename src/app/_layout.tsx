@@ -129,6 +129,11 @@ function RootLayoutContent() {
 
     idsToSubscribe.forEach((uid) => {
       const unsub = subscribeToIncomingCalls(uid, (call) => {
+        // Ignore self-created call rows (where local user is caller)
+        if (call.caller_id === currentUserId || call.caller_id === uid) {
+          console.log('[Realtime Receiver] Ignoring self-created call for', uid, ':', call.id);
+          return;
+        }
         console.log('[Realtime Receiver] Incoming call for', uid, ':', call.id);
         setIncomingCall(call);
       });

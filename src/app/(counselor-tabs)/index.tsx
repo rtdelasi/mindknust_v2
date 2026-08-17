@@ -397,6 +397,7 @@ export default function CounselorDashboardScreen() {
                                 agenda.student_profile?.name || 'Student',
                               counselorId: agenda.student_id,
                               callType: 'video',
+                              isIncomingAccepted: 'false',
                             },
                           })
                         }

@@ -84,6 +84,7 @@ export default function VideoCallScreen() {
     roomId: passedRoomId,
     callId: passedCallId,
     isIncomingAccepted = 'false',
+    isJoiningSession = 'false',
   } = useLocalSearchParams<{
     counselorName?: string;
     callerNameParam?: string;
@@ -93,6 +94,7 @@ export default function VideoCallScreen() {
     roomId?: string;
     callId?: string;
     isIncomingAccepted?: string;
+    isJoiningSession?: string;
   }>();
 
   const isStudent = role === 'student';
@@ -469,20 +471,22 @@ export default function VideoCallScreen() {
   // Deterministic Caller vs Callee Role Selection:
   // - If accepting an incoming call overlay, local user is strictly Callee (isCaller = false).
   // - Otherwise, if student calling counselor, or tie-break using currentUserId comparison, local user is Caller (isCaller = true).
-  const targetRemoteId = counselorId || passedRoomId || '';
   const isCaller = useMemo(() => {
     if (isIncomingAccepted === 'true') return false;
-    if (role === 'student') return true;
-    if (role === 'counselor') return false;
-    if (!targetRemoteId) return true;
-    return currentUserId.localeCompare(targetRemoteId) < 0;
-  }, [isIncomingAccepted, role, currentUserId, targetRemoteId]);
+    if (isJoiningSession === 'true') {
+      if (!role) return false; // wait for role to resolve before deciding
+      return role === 'student';
+    }
+    // Proactive/direct call: whoever navigated here to initiate the call is always the caller
+    return true;
+  }, [isIncomingAccepted, isJoiningSession, role]);
 
   const callInitiated = useRef(false);
   const offerSentRef = useRef(false);
   const peerReadyReceivedRef = useRef(false);
   const peerReadyAckSentRef = useRef(false);
   const isCallerRef = useRef(isCaller);
+  isCallerRef.current = isCaller;
 
   // Helper to generate and send SDP Offer once peer-ready signal is received
   const sendOfferToPeer = useCallback(async () => {
@@ -509,14 +513,17 @@ export default function VideoCallScreen() {
     }
   }, [getOrCreatePeerConnection, callType, localPeerName]);
 
+  const sendOfferToPeerRef = useRef(sendOfferToPeer);
+  sendOfferToPeerRef.current = sendOfferToPeer;
+
   // Keep isCallerRef in sync & auto-trigger offer if peerReady arrived before role resolution
   useEffect(() => {
     isCallerRef.current = isCaller;
     if (isCaller && peerReadyReceivedRef.current && !offerSentRef.current) {
       console.log(`[${localPeerName}] Role resolved to Caller & peer-ready already received. Sending offer now.`);
-      sendOfferToPeer();
+      sendOfferToPeerRef.current();
     }
-  }, [isCaller, sendOfferToPeer, localPeerName]);
+  }, [isCaller, localPeerName]);
 
   // 5. WebRTC P2P Signaling Engine Setup (Stable Lifecycle)
   useEffect(() => {
@@ -588,7 +595,7 @@ export default function VideoCallScreen() {
           }
         }
       } else if (event.type === 'peer-ready') {
-        console.log(`[${localPeerName}] Received peer-ready signal from [${event.senderId}]`);
+        console.log(`[${localPeerName}] Received peer-ready signal from [${event.senderId}] (isCaller=${isCallerRef.current})`);
         peerReadyReceivedRef.current = true;
 
         // Self-Healing ACK: Re-broadcast peer-ready once if we haven't sent an ACK yet
@@ -599,7 +606,8 @@ export default function VideoCallScreen() {
         }
 
         if (isCallerRef.current) {
-          sendOfferToPeer();
+          console.log(`[${localPeerName}] Local peer is Caller, calling sendOfferToPeer()`);
+          sendOfferToPeerRef.current();
         }
       } else if (event.type === 'media-state') {
         if (event.payload) {
@@ -638,9 +646,9 @@ export default function VideoCallScreen() {
     }
   }, [micOn, cameraOn, facing, callState]);
 
-  // 6. Create call in DB + subscribe to status changes (CALLER ONLY)
+  // 6. Create call in DB + subscribe to status changes (CALLER ONLY - AFTER ROLE RESOLVES)
   useEffect(() => {
-    if (callState !== 'ringing' || !isCaller || !supabase || !counselorId || callInitiated.current) return;
+    if (!role || callState !== 'ringing' || !isCaller || !supabase || !counselorId || callInitiated.current) return;
     callInitiated.current = true;
 
     const startCall = async () => {
@@ -668,7 +676,7 @@ export default function VideoCallScreen() {
     };
 
     startCall();
-  }, [callState, counselorId, currentUserId, callType, activeRoomId, isCaller, localPeerName]);
+  }, [callState, counselorId, currentUserId, callType, activeRoomId, isCaller, role, localPeerName]);
 
   // 7. Handshake Timeout Monitor (12s limit for peer-ready signal)
   useEffect(() => {
