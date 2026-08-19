@@ -287,17 +287,22 @@ export async function hfDetectCrisis(
     ];
     const raw = await hfPost(HF_CRISIS_MODEL, {
       inputs: text,
-      parameters: { candidate_labels: candidateLabels },
+      parameters: { candidate_labels: candidateLabels, multi_label: true },
     });
 
     if (!raw) return null;
 
     let crisisScore = 0;
+    let normalScore = 0;
     if (Array.isArray(raw)) {
       // Format: list of { label, score }
       for (const item of raw) {
-        if (item && (item.label === 'suicide or self harm' || item.label === 'expressing a desire to die or stop living')) {
-          crisisScore += item.score || 0;
+        if (item) {
+          if (item.label === 'suicide or self harm' || item.label === 'expressing a desire to die or stop living') {
+            crisisScore += item.score || 0;
+          } else if (item.label === 'normal content') {
+            normalScore = item.score || 0;
+          }
         }
       }
     } else if (typeof raw === 'object') {
@@ -307,6 +312,8 @@ export async function hfDetectCrisis(
         result.labels.forEach((label, idx) => {
           if (label === 'suicide or self harm' || label === 'expressing a desire to die or stop living') {
             crisisScore += result.scores?.[idx] || 0;
+          } else if (label === 'normal content') {
+            normalScore = result.scores?.[idx] || 0;
           }
         });
       } else {
@@ -317,7 +324,7 @@ export async function hfDetectCrisis(
     }
 
     return {
-      isCrisis: crisisScore > 0.35, // threshold for self-harm / suicidal ideation labels
+      isCrisis: crisisScore > 0.65 && (crisisScore - normalScore) >= 0.15,
       score: Math.min(1, parseFloat(crisisScore.toFixed(2))),
     };
   } catch (err) {
