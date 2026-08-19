@@ -286,34 +286,52 @@ export default function MySessionsScreen() {
                 </View>
               </View>
 
-              <View style={styles.upcomingFooter}>
+              <View style={styles.upcomingFooterColumn}>
                 <View style={styles.timeRow}>
                   <MaterialCommunityIcons name="clock-outline" size={16} color={theme.textInverse} />
                   <Text style={[styles.upcomingTime, { color: theme.textInverse }]}>
                     {nextSession.time_slot} ({nextSession.status.toUpperCase()})
                   </Text>
                 </View>
-                <Pressable
-                  onPress={() =>
-                    router.push({
-                      pathname: '/video-call',
-                      params: {
-                        counselorName: nextSession.counselor_profile?.name || 'Counselor',
-                        counselorId: nextSession.counselor_id,
-                        callType: 'video',
-                        isIncomingAccepted: 'false',
-                        isJoiningSession: 'true',
-                      },
-                    })
-                  }
-                  style={({ pressed }) => [
-                    styles.joinButton,
-                    { backgroundColor: theme.textInverse },
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.joinButtonText, { color: theme.primary }]}>Join call</Text>
-                </Pressable>
+                <View style={styles.upcomingFooterBtnRow}>
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: '/booking/[counselor]',
+                        params: { counselor: nextSession.counselor_id, rescheduleId: nextSession.id },
+                      })
+                    }
+                    style={({ pressed }) => [
+                      styles.upcomingRescheduleButton,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={{ color: theme.textInverse, fontSize: FontSize.body - 1, fontWeight: 'bold' }}>
+                      Reschedule
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: '/video-call',
+                        params: {
+                          counselorName: nextSession.counselor_profile?.name || 'Counselor',
+                          counselorId: nextSession.counselor_id,
+                          callType: 'video',
+                          isIncomingAccepted: 'false',
+                          isJoiningSession: 'true',
+                        },
+                      })
+                    }
+                    style={({ pressed }) => [
+                      styles.upcomingJoinButton,
+                      { backgroundColor: theme.textInverse },
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={[styles.joinButtonText, { color: theme.primary }]}>Join call</Text>
+                  </Pressable>
+                </View>
               </View>
             </Card>
           ) : (
@@ -694,6 +712,15 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     marginTop: Spacing.one,
   },
+  upcomingFooterColumn: {
+    gap: Spacing.three,
+    marginTop: Spacing.two,
+  },
+  upcomingFooterBtnRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    width: '100%',
+  },
   timeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -708,6 +735,29 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     paddingHorizontal: 18,
     paddingVertical: 8,
+  },
+  rescheduleButton: {
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  upcomingJoinButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  upcomingRescheduleButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   joinButtonText: {
     fontSize: FontSize.body - 1,

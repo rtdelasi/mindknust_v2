@@ -720,7 +720,12 @@ export default function HomeScreen() {
                 <View style={styles.upcomingActions}>
                   <Pressable
                     style={styles.upcomingActionBtn}
-                    onPress={() => router.push('/(tabs)/sessions')}>
+                    onPress={() =>
+                      router.push({
+                        pathname: '/booking/[counselor]',
+                        params: { counselor: nextSession.counselor_id, rescheduleId: nextSession.id },
+                      })
+                    }>
                     <Text style={styles.upcomingActionText}>Reschedule</Text>
                   </Pressable>
                   <View style={styles.upcomingActionDivider} />

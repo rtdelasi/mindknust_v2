@@ -25,6 +25,7 @@ import {
   fetchCounselors,
   fetchAvailabilitySlots,
   createAppointment,
+  rescheduleAppointment,
   SupabaseSlot,
   SupabaseCounselor,
 } from '@/lib/supabase-db';
@@ -33,8 +34,9 @@ export default function BookingScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ counselor?: string }>();
+  const params = useLocalSearchParams<{ counselor?: string; rescheduleId?: string }>();
   const counselor = params.counselor ?? 'Counselor';
+  const rescheduleId = params.rescheduleId;
   const { role, anonymousId, userName } = useMockAuth();
 
   const [loading, setLoading] = useState(true);
@@ -123,19 +125,36 @@ export default function BookingScreen() {
     const formattedDisplayDate = selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
     try {
-      await createAppointment(studentId, cId, formattedDate, selectedSlotText, selectedTopic, anonDisplay);
-      Alert.alert(
-        'Booking Confirmed',
-        `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} has been scheduled.`,
-        [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
-      );
+      if (rescheduleId) {
+        await rescheduleAppointment(rescheduleId, studentId, cId, formattedDate, selectedSlotText);
+        Alert.alert(
+          'Appointment Rescheduled',
+          `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} has been rescheduled to ${formattedDisplayDate} at ${selectedSlotText}.`,
+          [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
+        );
+      } else {
+        await createAppointment(studentId, cId, formattedDate, selectedSlotText, selectedTopic, anonDisplay);
+        Alert.alert(
+          'Booking Confirmed',
+          `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} has been scheduled.`,
+          [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
+        );
+      }
     } catch (err: any) {
-      console.warn('DB booking failed, returning mock confirmation:', err);
-      Alert.alert(
-        'Booking Confirmed',
-        `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic}).`,
-        [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
-      );
+      console.warn('DB action failed, returning mock confirmation:', err);
+      if (rescheduleId) {
+        Alert.alert(
+          'Appointment Rescheduled',
+          `Rescheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText}.`,
+          [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
+        );
+      } else {
+        Alert.alert(
+          'Booking Confirmed',
+          `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic}).`,
+          [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
+        );
+      }
     } finally {
       setSubmitting(false);
     }
@@ -163,10 +182,16 @@ export default function BookingScreen() {
         showsVerticalScrollIndicator={false}>
         <View style={styles.container}>
           <View style={styles.titleBlock}>
-            <Text style={[styles.eyebrow, { color: theme.primary }]}>Session booking</Text>
-            <Text style={[styles.title, { color: theme.text }]}>Book a counselor</Text>
+            <Text style={[styles.eyebrow, { color: theme.primary }]}>
+              {rescheduleId ? 'Session rescheduling' : 'Session booking'}
+            </Text>
+            <Text style={[styles.title, { color: theme.text }]}>
+              {rescheduleId ? 'Reschedule session' : 'Book a counselor'}
+            </Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-              Choose a date and available time slot to lock in your next support session.
+              {rescheduleId
+                ? 'Choose a new date and available time slot to reschedule your session.'
+                : 'Choose a date and available time slot to lock in your next support session.'}
             </Text>
           </View>
 
@@ -280,7 +305,7 @@ export default function BookingScreen() {
           ) : null}
 
           <Button
-            label={submitting ? 'Booking...' : 'Confirm booking'}
+            label={submitting ? (rescheduleId ? 'Rescheduling...' : 'Booking...') : (rescheduleId ? 'Confirm Rescheduling' : 'Confirm booking')}
             disabled={submitting || filteredSlots.length === 0 || !selectedSlotText}
             onPress={handleConfirmBooking}
           />

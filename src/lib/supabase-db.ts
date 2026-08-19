@@ -805,6 +805,22 @@ async function saveLocalAppointment(appt: SupabaseAppointment): Promise<void> {
   }
 }
 
+async function updateLocalAppointment(appt: SupabaseAppointment): Promise<void> {
+  try {
+    const studentExisting = await getLocalAppointments(appt.student_id);
+    const studentUpdated = studentExisting.map((a) => (a.id === appt.id ? appt : a));
+    await AsyncStorage.setItem(`local_appts_${appt.student_id}`, JSON.stringify(studentUpdated));
+
+    if (appt.counselor_id !== appt.student_id) {
+      const counselorExisting = await getLocalAppointments(appt.counselor_id);
+      const counselorUpdated = counselorExisting.map((a) => (a.id === appt.id ? appt : a));
+      await AsyncStorage.setItem(`local_appts_${appt.counselor_id}`, JSON.stringify(counselorUpdated));
+    }
+  } catch {
+    // Ignore write error
+  }
+}
+
 export async function fetchAppointments(
   userId: string,
   role: 'student' | 'counselor'
@@ -933,6 +949,43 @@ export async function updateAppointmentStatus(
 
   // Notify the student about the status change (fire-and-forget)
   notifyAppointmentUpdate(appointmentId, status).catch(() => {});
+
+  return true;
+}
+
+export async function rescheduleAppointment(
+  appointmentId: string,
+  studentId: string,
+  counselorId: string,
+  newDate: string,
+  newTimeSlot: string
+): Promise<boolean> {
+  if (!hasSupabaseConfig || !supabase) {
+    const studentExisting = await getLocalAppointments(studentId);
+    const appt = studentExisting.find((a) => a.id === appointmentId);
+    if (appt) {
+      appt.appointment_date = newDate;
+      appt.time_slot = newTimeSlot;
+      appt.status = 'pending';
+      await updateLocalAppointment(appt);
+      return true;
+    }
+    return false;
+  }
+
+  const { error } = await supabase
+    .from('appointments')
+    .update({
+      appointment_date: newDate,
+      time_slot: newTimeSlot,
+      status: 'pending', // Reset status to pending so counselor can approve again
+    })
+    .eq('id', appointmentId);
+
+  if (error) {
+    console.error('Error rescheduling appointment:', error);
+    throw error;
+  }
 
   return true;
 }
