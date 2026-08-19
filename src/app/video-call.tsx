@@ -161,6 +161,17 @@ export default function VideoCallScreen() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const iceCandidateQueueRef = useRef<any[]>([]);
 
+  // Switch camera on active WebRTC localStream
+  const flipCamera = useCallback(() => {
+    if (localStream) {
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack && typeof (videoTrack as any)._switchCamera === 'function') {
+        (videoTrack as any)._switchCamera();
+      }
+    }
+    setFacing((f) => (f === 'front' ? 'back' : 'front'));
+  }, [localStream]);
+
   // ── Remote Track Resolution (100ms HMS / WebRTC Integration) ──
   const hmsPeers: any[] = [];
   const remoteHmsPeer = hmsPeers?.find((p: any) => !p.isLocal);
@@ -1182,7 +1193,7 @@ export default function VideoCallScreen() {
 
         {callType === 'video' && cameraOn && (
           <Pressable
-            onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))}
+            onPress={flipCamera}
             style={[styles.webrtcControlBtn, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
             <MaterialCommunityIcons name="camera-flip" size={22} color="#FFFFFF" />
             <Text style={styles.webrtcControlLabel}>Flip Camera</Text>
