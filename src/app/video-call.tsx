@@ -1082,36 +1082,17 @@ export default function VideoCallScreen() {
   // ── Render: WebRTC P2P Connected Call View ──
   return (
     <View style={[styles.screen, { backgroundColor: '#0B0F19' }]}>
-      {/* On-Screen DEV Debug Overlay */}
-      {__DEV__ && (
-        <View style={[styles.devDebugOverlay, { top: insets.top + 4 }]}>
-          <Text style={styles.devDebugText}>
-            [DEV DEBUG] Remote: {remotePeerName} ({remotePeerRole}) | Video: {peerState.cameraOn ? 'Active' : 'Off'} | Mic: {peerState.micOn ? 'Active' : 'Muted'}
-          </Text>
-          <Text style={styles.devDebugText}>
-            Local: {localPeerName} ({localPeerRole}) | Video: {cameraOn ? 'Active' : 'Off'} | Mic: {micOn ? 'Active' : 'Muted'}
-          </Text>
-        </View>
-      )}
-
       {/* Top WebRTC Header */}
       <View
         style={[
           styles.webrtcHeader,
-          { paddingTop: insets.top + (__DEV__ ? 42 : 8), backgroundColor: 'rgba(11, 15, 25, 0.9)' },
+          { paddingTop: insets.top + 8, backgroundColor: 'rgba(11, 15, 25, 0.9)' },
         ]}>
         <View style={styles.webrtcHeaderLeft}>
           <Avatar name={remotePeerName} size="sm" source={remoteAvatarSource} />
           <View>
             <Text style={styles.webrtcHeaderName}>{remotePeerName}</Text>
             <Text style={styles.webrtcHeaderTimer}>{formatTimer(timeElapsed)}</Text>
-          </View>
-        </View>
-
-        <View style={styles.webrtcHeaderRight}>
-          <View style={styles.secureBadge}>
-            <MaterialCommunityIcons name="lock-check-outline" size={14} color="#10B981" />
-            <Text style={styles.secureBadgeText}>WebRTC P2P</Text>
           </View>
         </View>
       </View>
