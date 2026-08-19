@@ -987,6 +987,9 @@ export async function rescheduleAppointment(
     throw error;
   }
 
+  // Notify the counselor about the reschedule (fire-and-forget)
+  notifyAppointmentRescheduled(appointmentId).catch(() => {});
+
   return true;
 }
 
@@ -1489,6 +1492,40 @@ export async function notifyAppointmentUpdate(
     await createNotification(recipientId, title, body, link);
   } catch (err) {
     console.warn('Failed to create appointment notification:', err);
+  }
+}
+
+/**
+ * Insert a notification when a student reschedules an appointment.
+ * Notifies the counselor about the new date and time.
+ */
+export async function notifyAppointmentRescheduled(appointmentId: string): Promise<void> {
+  if (!hasSupabaseConfig || !supabase) return;
+
+  try {
+    const { data: appt } = await supabase
+      .from('appointments')
+      .select('student_id, counselor_id, topic, appointment_date, time_slot, student_profile:profiles!appointments_student_id_fkey(name)')
+      .eq('id', appointmentId)
+      .maybeSingle();
+
+    if (!appt) return;
+
+    const recipientId = appt.counselor_id;
+    const studentName = (appt.student_profile as any)?.name || 'A student';
+    const topic = appt.topic || 'Counseling session';
+    const dateStr = new Date(appt.appointment_date).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+
+    const title = 'Session Rescheduled';
+    const body = `${studentName} has rescheduled their ${topic} session to ${dateStr} at ${appt.time_slot}.`;
+    const link = '/(counselor-tabs)/sessions';
+
+    await createNotification(recipientId, title, body, link);
+  } catch (err) {
+    console.warn('Failed to create reschedule notification:', err);
   }
 }
 

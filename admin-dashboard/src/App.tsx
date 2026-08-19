@@ -143,6 +143,7 @@ export default function App() {
   const [newsSource, setNewsSource] = useState('KNUST Wellness');
   const [newsIsPinned, setNewsIsPinned] = useState(false);
   const [newsSubmitting, setNewsSubmitting] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [loadError, setLoadError] = useState('');
 
   // Flagged Content sub-filter
@@ -316,6 +317,36 @@ export default function App() {
       setFlaggedContent(prev => prev.filter(p => p.id !== postId));
     } catch (err: any) {
       alert('Delete failed: ' + err.message);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    try {
+      const fileExt = file.name.split('.').pop() || 'jpg';
+      const fileName = `news_${Date.now()}.${fileExt}`;
+      const filePath = `news-articles/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('social-media')
+        .upload(filePath, file, {
+          upsert: true,
+          contentType: file.type,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('social-media').getPublicUrl(filePath);
+      if (data?.publicUrl) {
+        setNewsImageUrl(data.publicUrl);
+      }
+    } catch (err: any) {
+      alert('Image upload failed: ' + err.message);
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -1543,15 +1574,32 @@ export default function App() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                            Cover Image URL
+                            Cover Image
                           </label>
-                          <input
-                            type="text"
-                            value={newsImageUrl}
-                            onChange={(e) => setNewsImageUrl(e.target.value)}
-                            placeholder="https://images.unsplash.com/..."
-                            className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors"
-                          />
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={newsImageUrl}
+                              onChange={(e) => setNewsImageUrl(e.target.value)}
+                              placeholder="Image URL or choose file below..."
+                              className="flex-1 bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                            />
+                            <div className="relative">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleImageUpload}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                disabled={uploadingImage}
+                              />
+                              <button
+                                type="button"
+                                className="h-full bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-4 py-2.5 rounded-xl transition-all flex items-center justify-center whitespace-nowrap active:scale-95"
+                              >
+                                {uploadingImage ? 'Uploading...' : 'Upload Image'}
+                              </button>
+                            </div>
+                          </div>
                         </div>
                         <div>
                           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
