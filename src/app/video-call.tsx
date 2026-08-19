@@ -162,15 +162,49 @@ export default function VideoCallScreen() {
   const iceCandidateQueueRef = useRef<any[]>([]);
 
   // Switch camera on active WebRTC localStream
-  const flipCamera = useCallback(() => {
-    if (localStream) {
+  const flipCamera = useCallback(async () => {
+    if (!localStream) return;
+    try {
       const videoTrack = localStream.getVideoTracks()[0];
-      if (videoTrack && typeof (videoTrack as any)._switchCamera === 'function') {
-        (videoTrack as any)._switchCamera();
+      if (!videoTrack) return;
+
+      const nextFacing = facing === 'front' ? 'back' : 'front';
+      const nextFacingMode = nextFacing === 'front' ? 'user' : 'environment';
+
+      // 1. Get new stream with target camera facing constraint
+      const newStream = await mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: nextFacingMode },
+      });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) return;
+
+      // 2. Replace track on RTCPeerConnection sender to update remote peer
+      if (pcRef.current) {
+        const senders = pcRef.current.getSenders();
+        const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+        if (videoSender) {
+          await videoSender.replaceTrack(newVideoTrack);
+        }
       }
+
+      // 3. Stop old local video track to release resources
+      videoTrack.stop();
+
+      // 4. Update local stream reference to update local video preview
+      const audioTrack = localStream.getAudioTracks()[0];
+      const newLocalStream = new MediaStream();
+      if (audioTrack) {
+        newLocalStream.addTrack(audioTrack);
+      }
+      newLocalStream.addTrack(newVideoTrack);
+
+      setLocalStream(newLocalStream);
+      setFacing(nextFacing);
+    } catch (err) {
+      console.warn('[VideoCall] Failed to flip camera:', err);
     }
-    setFacing((f) => (f === 'front' ? 'back' : 'front'));
-  }, [localStream]);
+  }, [localStream, facing]);
 
   // ── Remote Track Resolution (100ms HMS / WebRTC Integration) ──
   const hmsPeers: any[] = [];
@@ -466,7 +500,9 @@ export default function VideoCallScreen() {
     try {
       const capturedLocalStream = await mediaDevices.getUserMedia({
         audio: true,
-        video: callType === 'video',
+        video: callType === 'video' ? {
+          facingMode: 'user',
+        } : false,
       });
       setLocalStream(capturedLocalStream);
       capturedLocalStream.getTracks().forEach((track) => {
@@ -1161,49 +1197,57 @@ export default function VideoCallScreen() {
 
       {/* Bottom Media Control Action Bar */}
       <View style={[styles.webrtcControlsBar, { paddingBottom: insets.bottom + 16 }]}>
-        <Pressable
-          onPress={() => setMicOn(!micOn)}
-          style={[
-            styles.webrtcControlBtn,
-            { backgroundColor: micOn ? 'rgba(255,255,255,0.15)' : theme.error },
-          ]}>
-          <MaterialCommunityIcons
-            name={micOn ? 'microphone' : 'microphone-off'}
-            size={22}
-            color="#FFFFFF"
-          />
-          <Text style={styles.webrtcControlLabel}>{micOn ? 'Mute' : 'Muted'}</Text>
-        </Pressable>
-
-        {callType === 'video' && (
+        <View style={styles.webrtcControlBtnContainer}>
           <Pressable
-            onPress={() => setCameraOn(!cameraOn)}
+            onPress={() => setMicOn(!micOn)}
             style={[
               styles.webrtcControlBtn,
-              { backgroundColor: cameraOn ? 'rgba(255,255,255,0.15)' : theme.error },
+              { backgroundColor: micOn ? 'rgba(255,255,255,0.15)' : theme.error },
             ]}>
             <MaterialCommunityIcons
-              name={cameraOn ? 'camera' : 'camera-off'}
+              name={micOn ? 'microphone' : 'microphone-off'}
               size={22}
               color="#FFFFFF"
             />
-            <Text style={styles.webrtcControlLabel}>{cameraOn ? 'Camera On' : 'Camera Off'}</Text>
           </Pressable>
+          <Text style={styles.webrtcControlLabel}>{micOn ? 'Mute' : 'Muted'}</Text>
+        </View>
+
+        {callType === 'video' && (
+          <View style={styles.webrtcControlBtnContainer}>
+            <Pressable
+              onPress={() => setCameraOn(!cameraOn)}
+              style={[
+                styles.webrtcControlBtn,
+                { backgroundColor: cameraOn ? 'rgba(255,255,255,0.15)' : theme.error },
+              ]}>
+              <MaterialCommunityIcons
+                name={cameraOn ? 'camera' : 'camera-off'}
+                size={22}
+                color="#FFFFFF"
+              />
+            </Pressable>
+            <Text style={styles.webrtcControlLabel}>{cameraOn ? 'Camera On' : 'Camera Off'}</Text>
+          </View>
         )}
 
         {callType === 'video' && cameraOn && (
-          <Pressable
-            onPress={flipCamera}
-            style={[styles.webrtcControlBtn, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
-            <MaterialCommunityIcons name="camera-flip" size={22} color="#FFFFFF" />
+          <View style={styles.webrtcControlBtnContainer}>
+            <Pressable
+              onPress={flipCamera}
+              style={[styles.webrtcControlBtn, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
+              <MaterialCommunityIcons name="camera-flip" size={22} color="#FFFFFF" />
+            </Pressable>
             <Text style={styles.webrtcControlLabel}>Flip Camera</Text>
-          </Pressable>
+          </View>
         )}
 
-        <Pressable onPress={handleEndCall} style={[styles.webrtcControlBtn, styles.webrtcEndCallBtn]}>
-          <MaterialCommunityIcons name="phone-hangup" size={26} color="#FFFFFF" />
+        <View style={styles.webrtcControlBtnContainer}>
+          <Pressable onPress={handleEndCall} style={[styles.webrtcControlBtn, styles.webrtcEndCallBtn]}>
+            <MaterialCommunityIcons name="phone-hangup" size={26} color="#FFFFFF" />
+          </Pressable>
           <Text style={styles.webrtcControlLabel}>End Call</Text>
-        </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -1556,18 +1600,24 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
+  webrtcControlBtnContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 76,
+  },
   webrtcControlBtn: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    gap: 4,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
   },
   webrtcControlLabel: {
     color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '600',
+    marginTop: 8,
+    textAlign: 'center',
   },
   webrtcEndCallBtn: {
     backgroundColor: '#EF4444',
