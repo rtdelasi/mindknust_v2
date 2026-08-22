@@ -175,6 +175,7 @@ create table if not exists public.calls (
   call_type text not null check (call_type in ('voice', 'video')),
   status text not null check (status in ('ringing', 'accepted', 'declined', 'missed', 'ended')) default 'ringing',
   room_id text not null,
+  appointment_id uuid references public.appointments(id) on delete set null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   answered_at timestamp with time zone,
   ended_at timestamp with time zone

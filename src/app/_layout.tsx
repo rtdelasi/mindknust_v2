@@ -26,6 +26,7 @@ import {
   fetchProfileById,
   SupabaseCall,
   SupabaseProfile,
+  subscribeToCallStatus,
 } from '@/lib/supabase-db';
 
 export const unstable_settings = {
@@ -203,6 +204,18 @@ function RootLayoutContent() {
       setIncomingCall(null);
     }, 30000);
     return () => clearTimeout(timeout);
+  }, [incomingCall]);
+
+  // Dismiss incoming call if caller cancels or call is answered elsewhere (status changes to ended, missed, or accepted)
+  useEffect(() => {
+    if (!incomingCall || !supabase) return;
+    const unsub = subscribeToCallStatus(incomingCall.id, (updated) => {
+      if (updated.status === 'ended' || updated.status === 'missed' || updated.status === 'accepted') {
+        console.log('[Layout] Incoming call dismissed because status changed to:', updated.status);
+        setIncomingCall(null);
+      }
+    });
+    return () => unsub();
   }, [incomingCall]);
 
   // Ringtone

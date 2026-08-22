@@ -29,6 +29,7 @@ import {
   SupabaseSlot,
   SupabaseCounselor,
 } from '@/lib/supabase-db';
+import { parseCounselorNote, serializeAppointmentTopic } from '@/lib/counselor-utils';
 
 export default function BookingScreen() {
   const theme = useTheme();
@@ -47,6 +48,8 @@ export default function BookingScreen() {
   const [selectedTopic, setSelectedTopic] = useState('Academic stress');
   const [submitting, setSubmitting] = useState(false);
   const [anonDisplay, setAnonDisplay] = useState(false);
+  const [sessionType, setSessionType] = useState<'online' | 'in-person'>('online');
+  const [counselorFormats, setCounselorFormats] = useState({ online: true, inPerson: false });
 
   const selectedDayName = selectedDate.toLocaleDateString('en-US', { weekday: 'long' });
   const filteredSlots = slots.filter(
@@ -82,14 +85,28 @@ export default function BookingScreen() {
         setCounselorData(match);
         const avSlots = await fetchAvailabilitySlots(match.id);
         setSlots(avSlots);
+        
+        // Parse formats
+        const { formats } = parseCounselorNote(match.note || '');
+        setCounselorFormats(formats);
+        if (formats.online) {
+          setSessionType('online');
+        } else if (formats.inPerson) {
+          setSessionType('in-person');
+        }
       } else {
         // Fallback mockup
+        const fallbackNote = 'Online session - 30 minutes';
+        const { formats } = parseCounselorNote(fallbackNote);
+        setCounselorFormats(formats);
+        setSessionType('online');
+        
         setCounselorData({
           id: counselor,
           specialties: ['Anxiety', 'Academic stress', 'Relationships'],
           rating: 4.9,
           review_count: 0,
-          note: 'Online session - 30 minutes',
+          note: fallbackNote,
           bio: 'Licensed KNUST student counselor providing support.',
           profile: {
             id: counselor,
@@ -133,10 +150,11 @@ export default function BookingScreen() {
           [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
         );
       } else {
-        await createAppointment(studentId, cId, formattedDate, selectedSlotText, selectedTopic, anonDisplay);
+        const topicWithFormat = serializeAppointmentTopic(selectedTopic, sessionType);
+        await createAppointment(studentId, cId, formattedDate, selectedSlotText, topicWithFormat, anonDisplay);
         Alert.alert(
           'Booking Confirmed',
-          `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} has been scheduled.`,
+          `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${sessionType === 'in-person' ? 'In-Person' : 'Online'}) has been scheduled.`,
           [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
         );
       }
@@ -151,7 +169,7 @@ export default function BookingScreen() {
       } else {
         Alert.alert(
           'Booking Confirmed',
-          `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic}).`,
+          `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic} - ${sessionType === 'in-person' ? 'In-Person' : 'Online'}).`,
           [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
         );
       }
@@ -209,6 +227,75 @@ export default function BookingScreen() {
                 <Tag key={spec} label={spec} active={selectedTopic === spec} onPress={() => setSelectedTopic(spec)} />
               ))}
             </View>
+          </Card>
+
+          {/* Format Selector block */}
+          <Card variant="surface" padding="four">
+            <SectionHeader title="Session Format" />
+            {counselorFormats.online && counselorFormats.inPerson ? (
+              <View style={styles.formatSelectorRow}>
+                <Pressable
+                  onPress={() => setSessionType('online')}
+                  style={[
+                    styles.formatOption,
+                    { borderColor: theme.border, backgroundColor: theme.surfaceSoft },
+                    sessionType === 'online' && { backgroundColor: theme.primary, borderColor: theme.primary },
+                  ]}>
+                  <MaterialCommunityIcons
+                    name="video-outline"
+                    size={20}
+                    color={sessionType === 'online' ? '#FFFFFF' : theme.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.formatOptionText,
+                      { color: theme.textSecondary },
+                      sessionType === 'online' && { color: '#FFFFFF', fontWeight: FontWeight.bold },
+                    ]}>
+                    Online
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setSessionType('in-person')}
+                  style={[
+                    styles.formatOption,
+                    { borderColor: theme.border, backgroundColor: theme.surfaceSoft },
+                    sessionType === 'in-person' && { backgroundColor: theme.primary, borderColor: theme.primary },
+                  ]}>
+                  <MaterialCommunityIcons
+                    name="map-marker-outline"
+                    size={20}
+                    color={sessionType === 'in-person' ? '#FFFFFF' : theme.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.formatOptionText,
+                      { color: theme.textSecondary },
+                      sessionType === 'in-person' && { color: '#FFFFFF', fontWeight: FontWeight.bold },
+                    ]}>
+                    In-Person
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={[styles.singleFormatBadge, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
+                <MaterialCommunityIcons
+                  name={counselorFormats.inPerson ? 'map-marker-outline' : 'video-outline'}
+                  size={22}
+                  color={theme.primary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.singleFormatTitle, { color: theme.text }]}>
+                    {counselorFormats.inPerson ? 'In-Person Session Only' : 'Online Session Only'}
+                  </Text>
+                  <Text style={[styles.singleFormatDesc, { color: theme.textSecondary }]}>
+                    {counselorFormats.inPerson
+                      ? 'This counselor only accommodates in-person meetings on campus.'
+                      : 'This counselor only accommodates online conference calls.'}
+                  </Text>
+                </View>
+              </View>
+            )}
           </Card>
 
           {/* Date Selector block */}
@@ -440,5 +527,42 @@ const styles = StyleSheet.create({
     fontSize: FontSize.small,
     lineHeight: 16,
     marginTop: 2,
+  },
+  formatSelectorRow: {
+    flexDirection: 'row',
+    gap: Spacing.three,
+    marginTop: Spacing.two,
+  },
+  formatOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.three,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+  },
+  formatOptionText: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.semibold,
+  },
+  singleFormatBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginTop: Spacing.two,
+  },
+  singleFormatTitle: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.bold,
+  },
+  singleFormatDesc: {
+    fontSize: FontSize.caption,
+    marginTop: 2,
+    lineHeight: 16,
   },
 });

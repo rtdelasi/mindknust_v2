@@ -33,6 +33,7 @@ import {
   submitCounselorReview,
   SupabaseAppointment,
 } from '@/lib/supabase-db';
+import { parseAppointmentTopic } from '@/lib/counselor-utils';
 
 export default function RateSessionScreen() {
   const theme = useTheme();
@@ -184,7 +185,7 @@ export default function RateSessionScreen() {
                 <Text style={[styles.counselorName, { color: theme.text }]}>{counselorName}</Text>
                 <Text style={[styles.sessionDate, { color: theme.textSecondary }]}>{dateStr}</Text>
                 <Text style={[styles.sessionTopic, { color: theme.textSecondary }]}>
-                  {appointment.topic || 'General Counseling'}
+                  {parseAppointmentTopic(appointment.topic).cleanTopic || 'General Counseling'} ({parseAppointmentTopic(appointment.topic).sessionType === 'in-person' ? 'In-Person' : 'Online'})
                 </Text>
               </View>
             </View>

@@ -50,6 +50,7 @@ import {
   insertMoodLog,
   SupabaseAppointment,
 } from '@/lib/supabase-db';
+import { parseAppointmentTopic } from '@/lib/counselor-utils';
 
 const NEWS_CATEGORIES = [
   'All',
@@ -664,31 +665,51 @@ export default function HomeScreen() {
                       {nextSession.counselor_profile?.name || 'Counselor'}
                     </Text>
                     <Text style={styles.upcomingSpecialty}>
-                      {nextSession.topic || 'Mental Wellbeing Consultation'}
+                      {parseAppointmentTopic(nextSession.topic).cleanTopic || 'Mental Wellbeing Consultation'}
                     </Text>
                   </View>
-                  <Pressable
-                    onPress={() =>
-                      router.push({
-                        pathname: '/video-call',
-                        params: {
-                          counselorName:
-                            nextSession.counselor_profile?.name || 'Counselor',
-                          counselorId: nextSession.counselor_id,
-                          callType: 'video',
-                        },
-                      })
-                    }
-                    style={styles.videoCallBtn}>
-                    <MaterialCommunityIcons
-                      name="video"
-                      size={20}
-                      color="#FFFFFF"
-                    />
-                  </Pressable>
+                  {parseAppointmentTopic(nextSession.topic).sessionType === 'online' ? (
+                    <Pressable
+                      onPress={() =>
+                        router.push({
+                          pathname: '/video-call',
+                          params: {
+                            counselorName:
+                              nextSession.counselor_profile?.name || 'Counselor',
+                            counselorId: nextSession.counselor_id,
+                            callType: 'video',
+                          },
+                        })
+                      }
+                      style={styles.videoCallBtn}>
+                      <MaterialCommunityIcons
+                        name="video"
+                        size={20}
+                        color="#FFFFFF"
+                      />
+                    </Pressable>
+                  ) : (
+                    <View style={[styles.videoCallBtn, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                      <MaterialCommunityIcons
+                        name="map-marker"
+                        size={20}
+                        color="#FFFFFF"
+                      />
+                    </View>
+                  )}
                 </View>
 
                 <View style={styles.upcomingDetailsRow}>
+                  <View style={styles.upcomingDetailItem}>
+                    <MaterialCommunityIcons
+                      name={parseAppointmentTopic(nextSession.topic).sessionType === 'in-person' ? 'map-marker-outline' : 'video-outline'}
+                      size={14}
+                      color="rgba(255,255,255,0.8)"
+                    />
+                    <Text style={styles.upcomingDetailText}>
+                      {parseAppointmentTopic(nextSession.topic).sessionType === 'in-person' ? 'In-Person' : 'Online Call'}
+                    </Text>
+                  </View>
                   <View style={styles.upcomingDetailItem}>
                     <MaterialCommunityIcons
                       name="calendar-outline"

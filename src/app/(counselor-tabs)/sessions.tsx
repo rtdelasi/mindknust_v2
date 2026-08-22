@@ -23,6 +23,7 @@ import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { fetchAppointments, updateAppointmentStatus, SupabaseAppointment } from '@/lib/supabase-db';
 import { safeStorage } from '@/lib/safe-storage';
+import { parseAppointmentTopic } from '@/lib/counselor-utils';
 
 type TabState = 'upcoming' | 'pending' | 'past';
 
@@ -180,6 +181,8 @@ export default function CounselorSessionsScreen() {
             const sName = formatStudentName(rawName);
             const studentAvatar = item.student_profile?.avatar_url;
 
+            const { cleanTopic, sessionType } = parseAppointmentTopic(item.topic);
+
             return (
               <Card variant="surface" padding="three" style={styles.apptCard}>
                 <View style={styles.cardTop}>
@@ -191,12 +194,12 @@ export default function CounselorSessionsScreen() {
                   <View style={styles.studentInfo}>
                     <Text style={[styles.studentName, { color: theme.text }]}>{sName}</Text>
                     <Text style={[styles.topicText, { color: theme.textSecondary }]}>
-                      Concern: {item.topic || 'General Wellbeing Check'}
+                      Concern: {cleanTopic || 'General Wellbeing Check'}
                     </Text>
                     <View style={styles.dateTimeRow}>
                       <MaterialCommunityIcons name="calendar" size={14} color={theme.primary} />
                       <Text style={[styles.dateText, { color: theme.textSecondary }]}>
-                        {item.appointment_date} • {item.time_slot}
+                        {item.appointment_date} • {item.time_slot} • {sessionType === 'in-person' ? 'In-Person' : 'Online'}
                       </Text>
                     </View>
                   </View>

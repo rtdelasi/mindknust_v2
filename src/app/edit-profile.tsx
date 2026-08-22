@@ -10,6 +10,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -27,6 +28,7 @@ import { useMockAuth } from '@/lib/mock-auth-store';
 import { upsertProfile, updateCounselorMetadata, fetchCounselors } from '@/lib/supabase-db';
 import { hasSupabaseConfig, supabase } from '@/lib/supabase';
 import { uploadFileFromUri } from '@/lib/supabase-storage';
+import { parseCounselorNote, serializeCounselorNote } from '@/lib/counselor-utils';
 
 export default function EditProfileScreen() {
   const theme = useTheme();
@@ -44,6 +46,8 @@ export default function EditProfileScreen() {
   const [specialties, setSpecialties] = useState('');
   const [note, setNote] = useState('');
   const [bio, setBio] = useState('');
+  const [onlineChecked, setOnlineChecked] = useState(true);
+  const [inPersonChecked, setInPersonChecked] = useState(false);
 
   const isCounselor = role === 'counselor';
 
@@ -76,11 +80,16 @@ export default function EditProfileScreen() {
           const currentCounselor = counselorsList.find(c => c.id === activeUserUid);
           if (currentCounselor) {
             setSpecialties(currentCounselor.specialties.join(', '));
-            setNote(currentCounselor.note || '');
+            const { formats, cleanNote } = parseCounselorNote(currentCounselor.note || '');
+            setOnlineChecked(formats.online);
+            setInPersonChecked(formats.inPerson);
+            setNote(cleanNote || '');
             setBio(currentCounselor.bio || '');
           } else {
             // Fallback placeholders for offline/sandbox testing
             setSpecialties('Burnout, Confidence, Personal Growth');
+            setOnlineChecked(true);
+            setInPersonChecked(true);
             setNote('Burnout, confidence, and personal growth');
             setBio('Clinical wellness coach specializing in personal growth systems, student motivation, confidence building, and emotional wellbeing.');
           }
@@ -183,11 +192,20 @@ export default function EditProfileScreen() {
 
         // 4. Sync counselor metadata properties
         if (isCounselor) {
+          if (!onlineChecked && !inPersonChecked) {
+            Alert.alert('Validation Error', 'Please select at least one supported session format (Online or In-Person).');
+            setLoading(false);
+            return;
+          }
           const specialtiesArray = specialties
             .split(',')
             .map((s) => s.trim())
             .filter((s) => s.length > 0);
-          await updateCounselorMetadata(activeUserUid, specialtiesArray, note.trim(), bio.trim());
+          const serializedNote = serializeCounselorNote(
+            { online: onlineChecked, inPerson: inPersonChecked },
+            note.trim()
+          );
+          await updateCounselorMetadata(activeUserUid, specialtiesArray, serializedNote, bio.trim());
         }
       }
 
@@ -285,6 +303,30 @@ export default function EditProfileScreen() {
                       placeholderTextColor={theme.textSecondary}
                       style={[styles.textInput, { color: theme.text }]}
                     />
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Supported Session Formats</Text>
+                  <View style={styles.formatAccommodationsContainer}>
+                    <View style={styles.switchRow}>
+                      <Text style={[styles.switchLabel, { color: theme.text }]}>Online (Video/Voice Call)</Text>
+                      <Switch
+                        value={onlineChecked}
+                        onValueChange={setOnlineChecked}
+                        trackColor={{ false: theme.surfaceSoft, true: `${theme.primary}40` }}
+                        thumbColor={onlineChecked ? theme.primary : '#f4f3f4'}
+                      />
+                    </View>
+                    <View style={styles.switchRow}>
+                      <Text style={[styles.switchLabel, { color: theme.text }]}>In-Person (On-Campus Meeting)</Text>
+                      <Switch
+                        value={inPersonChecked}
+                        onValueChange={setInPersonChecked}
+                        trackColor={{ false: theme.surfaceSoft, true: `${theme.primary}40` }}
+                        thumbColor={inPersonChecked ? theme.primary : '#f4f3f4'}
+                      />
+                    </View>
                   </View>
                 </View>
 
@@ -426,5 +468,19 @@ const styles = StyleSheet.create({
   },
   counselorFields: {
     gap: Spacing.four,
+  },
+  formatAccommodationsContainer: {
+    gap: Spacing.two,
+    paddingTop: Spacing.one,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.one,
+  },
+  switchLabel: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.medium,
   },
 });

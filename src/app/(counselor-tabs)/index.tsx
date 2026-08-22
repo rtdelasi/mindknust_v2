@@ -34,6 +34,7 @@ import {
   updateAppointmentStatus,
   SupabaseAppointment,
 } from '@/lib/supabase-db';
+import { parseAppointmentTopic } from '@/lib/counselor-utils';
 
 export default function CounselorDashboardScreen() {
   const theme = useTheme();
@@ -342,7 +343,7 @@ export default function CounselorDashboardScreen() {
                             { backgroundColor: theme.surfaceSoft },
                           ]}>
                           <MaterialCommunityIcons
-                            name="video-outline"
+                            name={parseAppointmentTopic(agenda.topic).sessionType === 'in-person' ? 'map-marker-outline' : 'video-outline'}
                             size={12}
                             color={theme.primary}
                           />
@@ -351,7 +352,7 @@ export default function CounselorDashboardScreen() {
                               styles.typeText,
                               { color: theme.primary },
                             ]}>
-                            Video Call
+                            {parseAppointmentTopic(agenda.topic).sessionType === 'in-person' ? 'In-Person' : 'Video Call'}
                           </Text>
                         </View>
                       </View>
@@ -380,29 +381,38 @@ export default function CounselorDashboardScreen() {
                             { color: theme.textSecondary },
                           ]}
                           numberOfLines={2}>
-                          {agenda.topic || 'General Wellbeing'}
+                          {parseAppointmentTopic(agenda.topic).cleanTopic || 'General Wellbeing'}
                         </Text>
                       </View>
 
                       {/* Full-width start session button */}
-                      <Button
-                        label="Start Session"
-                        variant="primary"
-                        icon="video"
-                        onPress={() =>
-                          router.push({
-                            pathname: '/video-call',
-                            params: {
-                              counselorName:
-                                agenda.student_profile?.name || 'Student',
-                              counselorId: agenda.student_id,
-                              callType: 'video',
-                              isIncomingAccepted: 'false',
-                            },
-                          })
-                        }
-                        style={styles.fullWidthBtn}
-                      />
+                      {parseAppointmentTopic(agenda.topic).sessionType === 'online' ? (
+                        <Button
+                          label="Start Session"
+                          variant="primary"
+                          icon="video"
+                          onPress={() =>
+                            router.push({
+                              pathname: '/video-call',
+                              params: {
+                                counselorName:
+                                  agenda.student_profile?.name || 'Student',
+                                counselorId: agenda.student_id,
+                                callType: 'video',
+                                isIncomingAccepted: 'false',
+                              },
+                            })
+                          }
+                          style={styles.fullWidthBtn}
+                        />
+                      ) : (
+                        <View style={[styles.inPersonInfoContainer, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
+                          <MaterialCommunityIcons name="map-marker" size={16} color={theme.primary} />
+                          <Text style={[styles.inPersonInfoText, { color: theme.text }]}>
+                            In-Person Session on Campus
+                          </Text>
+                        </View>
+                      )}
                     </Card>
                   ))
                 ) : (
@@ -476,7 +486,7 @@ export default function CounselorDashboardScreen() {
                                 styles.requestIssue,
                                 { color: theme.textSecondary },
                               ]}>
-                              Concern: {req.topic || 'Mental Support'}
+                              Concern: {parseAppointmentTopic(req.topic).cleanTopic || 'Mental Support'} ({parseAppointmentTopic(req.topic).sessionType === 'in-person' ? 'In-Person' : 'Online'})
                             </Text>
                             <View style={styles.slotDetails}>
                               <MaterialCommunityIcons
@@ -1001,5 +1011,19 @@ const styles = StyleSheet.create({
   },
   nextStepsSubtext: {
     fontSize: FontSize.small,
+  },
+  inPersonInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.three,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginTop: Spacing.two,
+  },
+  inPersonInfoText: {
+    fontSize: FontSize.caption + 1,
+    fontWeight: FontWeight.semibold,
   },
 });

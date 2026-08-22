@@ -36,7 +36,7 @@ import {
   SupabaseMoodLog,
 } from '@/lib/supabase-db';
 
-import { getCounselorPhoto, formatCounselorRating } from '@/lib/counselor-utils';
+import { getCounselorPhoto, formatCounselorRating, parseAppointmentTopic } from '@/lib/counselor-utils';
 import { getDisplayIdentity } from '@/lib/display-identity';
 export { getCounselorPhoto };
 
@@ -276,12 +276,14 @@ export default function MySessionsScreen() {
 
               <View style={[styles.focusConcernCard, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
                 <View style={[styles.videoIconCircle, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-                  <MaterialCommunityIcons name="video" size={20} color={theme.textInverse} />
+                  <MaterialCommunityIcons name={parseAppointmentTopic(nextSession.topic).sessionType === 'in-person' ? 'map-marker' : 'video'} size={20} color={theme.textInverse} />
                 </View>
                 <View style={styles.focusTextContainer}>
-                  <Text style={[styles.focusLabel, { color: theme.textInverse, opacity: 0.7 }]}>FOCUS CONCERN</Text>
+                  <Text style={[styles.focusLabel, { color: theme.textInverse, opacity: 0.7 }]}>
+                    FOCUS CONCERN ({parseAppointmentTopic(nextSession.topic).sessionType === 'in-person' ? 'IN-PERSON' : 'ONLINE'})
+                  </Text>
                   <Text style={[styles.focusTopic, { color: theme.textInverse }]} numberOfLines={2}>
-                    {nextSession.topic || 'Academic Stress Management'}
+                    {parseAppointmentTopic(nextSession.topic).cleanTopic || 'Academic Stress Management'}
                   </Text>
                 </View>
               </View>
@@ -422,10 +424,10 @@ export default function MySessionsScreen() {
                         <View style={[styles.timelineContent, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
                           <View style={{ flex: 1, paddingRight: 8 }}>
                             <Text style={[styles.timelineTitle, { color: theme.text }]} numberOfLines={1}>
-                              {session.topic || 'General session'}
+                              {parseAppointmentTopic(session.topic).cleanTopic || 'General session'}
                             </Text>
                             <Text style={[styles.timelineMeta, { color: theme.textSecondary }]}>
-                              {counselorName.split(' ')[0]} · {new Date(session.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              {counselorName.split(' ')[0]} · {new Date(session.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {parseAppointmentTopic(session.topic).sessionType === 'in-person' ? 'In-Person' : 'Online'}
                             </Text>
                           </View>
                           {reviewedApptIds.has(session.id) ? (

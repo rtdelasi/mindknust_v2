@@ -128,6 +128,7 @@ export default function VideoCallScreen() {
       ? 'ringing'
       : 'idle'
   );
+  const [hasConnected, setHasConnected] = useState(isIncomingAccepted === 'true');
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [cameraOn, setCameraOn] = useState(callType === 'video');
   const [micOn, setMicOn] = useState(true);
@@ -418,6 +419,13 @@ export default function VideoCallScreen() {
       timer = setInterval(() => setTimeElapsed((p) => p + 1), 1000);
     }
     return () => clearInterval(timer);
+  }, [callState]);
+
+  // 2b. Track if the call has ever successfully connected
+  useEffect(() => {
+    if (callState === 'connected') {
+      setHasConnected(true);
+    }
   }, [callState]);
 
   // 3. Pulse animation for voice calls
@@ -782,7 +790,7 @@ export default function VideoCallScreen() {
   const handleEndCall = useCallback(async () => {
     const id = callIdRef.current;
     if (id) {
-      await updateCallStatus(id, 'ended');
+      await updateCallStatus(id, hasConnected ? 'ended' : 'missed');
     }
     if (signalingRef.current) {
       signalingRef.current.sendHangup();
@@ -798,7 +806,7 @@ export default function VideoCallScreen() {
     setRemoteStream(null);
     iceCandidateQueueRef.current = [];
     setCallState('ended');
-  }, [localStream]);
+  }, [localStream, hasConnected]);
 
   // ── Render: Idle / Lobby ──
   if (callState === 'idle') {
@@ -997,6 +1005,44 @@ export default function VideoCallScreen() {
 
   // ── Render: Ended / Summary ──
   if (callState === 'ended') {
+    if (!hasConnected) {
+      return (
+        <View
+          style={[
+            styles.screen,
+            {
+              backgroundColor: theme.background,
+              paddingHorizontal: Spacing.four,
+              justifyContent: 'center',
+              alignItems: 'center',
+            },
+          ]}>
+          <Card variant="raised" padding="four" style={styles.endedCard}>
+            <View style={[styles.endedIconBox, { backgroundColor: theme.warningSoft }]}>
+              <MaterialCommunityIcons name="phone-missed" size={44} color={theme.warning} />
+            </View>
+            <Text style={[styles.endedTitle, { color: theme.text }]}>Call Cancelled</Text>
+            <Text style={[styles.endedDesc, { color: theme.textSecondary }]}>
+              The call was cancelled before it could connect.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: Spacing.two, width: '100%' }}>
+              <Button label="Go Back" variant="secondary" onPress={() => router.back()} style={{ flex: 1 }} />
+              <Button
+                label="Retry"
+                variant="primary"
+                onPress={() => {
+                  setCallState('idle');
+                  setTimeElapsed(0);
+                  callInitiated.current = false;
+                }}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </Card>
+        </View>
+      );
+    }
+
     return (
       <View
         style={[

@@ -42,3 +42,92 @@ export const formatCounselorRating = (
     countPostfix: `(${count})`,
   };
 };
+
+export interface CounselorFormats {
+  online: boolean;
+  inPerson: boolean;
+}
+
+/**
+ * Parses a counselor's note field to check for format accommodations.
+ * If note is prefixed with `[formats:...]`, extracts that metadata.
+ * Otherwise, defaults to online only or online/in-person based on keywords.
+ */
+export function parseCounselorNote(note: string | null | undefined): {
+  formats: CounselorFormats;
+  cleanNote: string;
+} {
+  if (!note) {
+    return {
+      formats: { online: true, inPerson: false },
+      cleanNote: '',
+    };
+  }
+
+  const match = note.match(/^\[formats:([a-zA-Z0-9\-_,]+)\]\s*(.*)$/i);
+  if (match) {
+    const formatsStr = match[1] || '';
+    const cleanNote = match[2] || '';
+    return {
+      formats: {
+        online: formatsStr.includes('online'),
+        inPerson: formatsStr.includes('in-person'),
+      },
+      cleanNote,
+    };
+  }
+
+  // Fallback heuristic for mock/pre-existing data
+  const lower = note.toLowerCase();
+  const isOnline = lower.includes('online') || lower.includes('hybrid') || lower.includes('peer') || lower.includes('wellness') || lower.includes('support') || lower.includes('clinical');
+  const isInPerson = lower.includes('hybrid') || lower.includes('in-person') || lower.includes('campus');
+
+  return {
+    formats: {
+      online: isOnline || !isInPerson,
+      inPerson: isInPerson,
+    },
+    cleanNote: note,
+  };
+}
+
+/**
+ * Serializes format preferences and raw note into a single string.
+ */
+export function serializeCounselorNote(formats: CounselorFormats, cleanNote: string): string {
+  const formatList: string[] = [];
+  if (formats.online) formatList.push('online');
+  if (formats.inPerson) formatList.push('in-person');
+  return `[formats:${formatList.join(',')}] ${cleanNote}`;
+}
+
+/**
+ * Parses an appointment's topic field to extract the topic and choice of session format.
+ */
+export function parseAppointmentTopic(topic: string | null | undefined): {
+  cleanTopic: string;
+  sessionType: 'online' | 'in-person';
+} {
+  if (!topic) {
+    return { cleanTopic: 'General Support', sessionType: 'online' };
+  }
+  const parts = topic.split(' | ');
+  if (parts.length > 1) {
+    const format = parts[1].trim().toLowerCase();
+    return {
+      cleanTopic: parts[0].trim(),
+      sessionType: format === 'in-person' ? 'in-person' : 'online',
+    };
+  }
+  return {
+    cleanTopic: topic,
+    sessionType: 'online',
+  };
+}
+
+/**
+ * Serializes topic and session format into a single string.
+ */
+export function serializeAppointmentTopic(topic: string, sessionType: 'online' | 'in-person'): string {
+  return `${topic} | ${sessionType === 'in-person' ? 'In-person' : 'Online'}`;
+}
