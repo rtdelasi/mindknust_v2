@@ -1,5 +1,5 @@
 import { DefaultTheme, DarkTheme, ThemeProvider as NavThemeProvider } from '@react-navigation/native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, usePathname } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
@@ -80,6 +80,7 @@ function RootLayoutWithTheme() {
 function RootLayoutContent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const pathname = usePathname();
   const { role } = useMockAuth();
   const theme = useTheme();
   const [activeAlert, setActiveAlert] = useState<{ title: string; body: string; link?: string | null } | null>(null);
@@ -133,6 +134,11 @@ function RootLayoutContent() {
         // Ignore self-created call rows (where local user is caller)
         if (call.caller_id === currentUserId || call.caller_id === uid) {
           console.log('[Realtime Receiver] Ignoring self-created call for', uid, ':', call.id);
+          return;
+        }
+        // Ignore incoming calls if we are already on the video-call screen
+        if (pathname === '/video-call') {
+          console.log('[Realtime Receiver] Ignoring incoming call because user is already in a call:', call.id);
           return;
         }
         console.log('[Realtime Receiver] Incoming call for', uid, ':', call.id);

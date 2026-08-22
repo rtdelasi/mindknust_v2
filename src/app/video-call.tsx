@@ -298,7 +298,7 @@ export default function VideoCallScreen() {
     `counselcare-webrtc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   ).current;
 
-  const activeRoomId = passedRoomId || defaultRoomId;
+  const activeRoomId = passedRoomId || (appointmentId ? `counselcare-webrtc-appt-${appointmentId}` : defaultRoomId);
   const callIdRef = useRef<string | null>(passedCallId || null);
   const signalingRef = useRef<WebRTCSignalingManager | null>(null);
   const statusUnsubRef = useRef<(() => void) | null>(null);
@@ -531,13 +531,9 @@ export default function VideoCallScreen() {
   // - Otherwise, if student calling counselor, or tie-break using currentUserId comparison, local user is Caller (isCaller = true).
   const isCaller = useMemo(() => {
     if (isIncomingAccepted === 'true') return false;
-    if (isJoiningSession === 'true') {
-      if (!role) return false; // wait for role to resolve before deciding
-      return role === 'student';
-    }
-    // Proactive/direct call: whoever navigated here to initiate the call is always the caller
+    // Proactive call: whoever navigated here to initiate the call is always the caller
     return true;
-  }, [isIncomingAccepted, isJoiningSession, role]);
+  }, [isIncomingAccepted]);
 
   const callInitiated = useRef(false);
   const offerSentRef = useRef(false);
