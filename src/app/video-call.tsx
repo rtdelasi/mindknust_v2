@@ -85,6 +85,7 @@ export default function VideoCallScreen() {
     callId: passedCallId,
     isIncomingAccepted = 'false',
     isJoiningSession = 'false',
+    appointmentId = '',
   } = useLocalSearchParams<{
     counselorName?: string;
     callerNameParam?: string;
@@ -95,6 +96,7 @@ export default function VideoCallScreen() {
     callId?: string;
     isIncomingAccepted?: string;
     isJoiningSession?: string;
+    appointmentId?: string;
   }>();
 
   const isStudent = role === 'student';
@@ -709,7 +711,13 @@ export default function VideoCallScreen() {
 
     const startCall = async () => {
       console.log(`[${localPeerName}] [VideoCall] Creating call in DB...`);
-      const call = await createCall(currentUserId, counselorId, callType as 'voice' | 'video', activeRoomId);
+      const call = await createCall(
+        currentUserId,
+        counselorId,
+        callType as 'voice' | 'video',
+        activeRoomId,
+        appointmentId || undefined
+      );
       if (!call) {
         console.warn(`[${localPeerName}] [VideoCall] Failed to create call in DB`);
         setCallState('idle');

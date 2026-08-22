@@ -322,6 +322,7 @@ export default function MySessionsScreen() {
                           callType: 'video',
                           isIncomingAccepted: 'false',
                           isJoiningSession: 'true',
+                          appointmentId: nextSession.id,
                         },
                       })
                     }

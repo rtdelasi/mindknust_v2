@@ -678,6 +678,9 @@ export default function HomeScreen() {
                               nextSession.counselor_profile?.name || 'Counselor',
                             counselorId: nextSession.counselor_id,
                             callType: 'video',
+                            isIncomingAccepted: 'false',
+                            isJoiningSession: 'true',
+                            appointmentId: nextSession.id,
                           },
                         })
                       }

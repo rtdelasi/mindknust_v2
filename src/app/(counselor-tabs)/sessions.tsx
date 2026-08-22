@@ -239,6 +239,7 @@ export default function CounselorSessionsScreen() {
                               counselorId: item.student_id,
                               isIncomingAccepted: 'false',
                               isJoiningSession: 'true',
+                              appointmentId: item.id,
                             },
                           })
                         }

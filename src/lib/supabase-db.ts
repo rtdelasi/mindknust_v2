@@ -1945,6 +1945,7 @@ export interface SupabaseCall {
   call_type: 'voice' | 'video';
   status: 'ringing' | 'accepted' | 'declined' | 'missed' | 'ended';
   room_id: string;
+  appointment_id?: string | null;
   created_at: string;
   answered_at: string | null;
   ended_at: string | null;
@@ -1958,6 +1959,7 @@ export async function createCall(
   calleeId: string,
   callType: 'voice' | 'video',
   roomId: string,
+  appointmentId?: string,
 ): Promise<SupabaseCall | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
@@ -1968,6 +1970,7 @@ export async function createCall(
       call_type: callType,
       room_id: roomId,
       status: 'ringing',
+      appointment_id: appointmentId || null,
     })
     .select(`
       *,

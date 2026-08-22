@@ -400,6 +400,8 @@ export default function CounselorDashboardScreen() {
                                 counselorId: agenda.student_id,
                                 callType: 'video',
                                 isIncomingAccepted: 'false',
+                                isJoiningSession: 'true',
+                                appointmentId: agenda.id,
                               },
                             })
                           }
