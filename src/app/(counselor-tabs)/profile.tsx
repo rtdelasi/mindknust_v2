@@ -22,6 +22,7 @@ import { auth } from '@/lib/firebase';
 import {
   fetchCounselorDetail,
   fetchCounselorReviews,
+  fetchAppointments,
   SupabaseCounselor,
   SupabaseReview,
 } from '@/lib/supabase-db';
@@ -40,6 +41,8 @@ export default function CounselorProfileScreen() {
 
   const [counselorData, setCounselorData] = useState<SupabaseCounselor | null>(null);
   const [reviews, setReviews] = useState<SupabaseReview[]>([]);
+  const [completedHours, setCompletedHours] = useState<number>(48);
+  const [rosterCount, setRosterCount] = useState<number>(14);
 
   const loadFeedbackData = async () => {
     try {
@@ -49,8 +52,27 @@ export default function CounselorProfileScreen() {
         const revList = await fetchCounselorReviews(detail.id);
         setReviews(revList);
       }
+
+      // Dynamically load active roster size and completed log hours
+      const appts = await fetchAppointments(currentUserId, 'counselor');
+      const completed = appts.filter((a) => a.status === 'completed');
+
+      // Compute total completed hours (following hours-report.tsx mapping logic)
+      const totalMinutes = completed.reduce((sum, a, index) => {
+        const duration = index % 2 === 0 ? 60 : 45;
+        return sum + duration;
+      }, 0);
+      setCompletedHours(Math.round((totalMinutes / 60) * 10) / 10);
+
+      // Compute active student roster count (following roster.tsx grouping logic)
+      const uniqueStudents = new Set(
+        appts
+          .filter((a) => a.student_id && a.student_profile)
+          .map((a) => a.student_id)
+      );
+      setRosterCount(uniqueStudents.size);
     } catch (err) {
-      console.warn('[Counselor Profile] Error loading reviews:', err);
+      console.warn('[Counselor Profile] Error loading metrics/reviews:', err);
     }
   };
 
@@ -123,14 +145,18 @@ export default function CounselorProfileScreen() {
           <View style={styles.statsGrid}>
             <StatWidget
               icon="clock-outline"
-              label="Hours logs"
-              value="48 completed"
+              iconColor={theme.info}
+              iconBgColor={theme.infoSoft}
+              label="Hours Logged"
+              value={`${completedHours} hr${completedHours === 1 ? '' : 's'} completed`}
               onPress={() => router.push('/counselor/hours-report')}
             />
             <StatWidget
-              icon="account-supervisor-circle"
-              label="Active roster"
-              value="14 students"
+              icon="account-group"
+              iconColor={theme.success}
+              iconBgColor={theme.successSoft}
+              label="Active Roster"
+              value={`${rosterCount} student${rosterCount === 1 ? '' : 's'}`}
               onPress={() => router.push('/counselor/roster')}
             />
           </View>
@@ -342,11 +368,15 @@ function CounselorIdentityCard({
 /* Custom icon-led tappable stat widget */
 function StatWidget({
   icon,
+  iconColor,
+  iconBgColor,
   label,
   value,
   onPress,
 }: {
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  iconColor: string;
+  iconBgColor: string;
   label: string;
   value: string;
   onPress: () => void;
@@ -359,20 +389,22 @@ function StatWidget({
       style={({ pressed }) => [
         styles.statCard,
         {
-          backgroundColor: theme.surfaceRaised,
-          borderColor: theme.border,
-          opacity: pressed ? 0.85 : 1,
+          backgroundColor: pressed ? theme.surfaceSoft : theme.surfaceRaised,
+          borderColor: pressed ? theme.primary : theme.border,
+          transform: [{ scale: pressed ? 0.98 : 1 }],
         },
         isDark ? Shadows.dark.card : Shadows.light.card,
       ]}>
-      <View style={[styles.statIconBox, { backgroundColor: theme.primarySoft }]}>
-        <MaterialCommunityIcons name={icon} size={20} color={theme.primary} />
+      <View style={[styles.statIconBox, { backgroundColor: iconBgColor }]}>
+        <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
       </View>
       <View style={styles.statMeta}>
-        <Text style={[styles.statLabel, { color: theme.textSecondary }]}>{label}</Text>
-        <Text style={[styles.statValue, { color: theme.text }]}>{value}</Text>
+        <Text numberOfLines={1} style={[styles.statLabel, { color: theme.textSecondary }]}>{label}</Text>
+        <Text numberOfLines={1} style={[styles.statValue, { color: theme.text }]}>{value}</Text>
       </View>
-      <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textSecondary} style={styles.statArrow} />
+      <View style={[styles.statArrowContainer, { backgroundColor: theme.surfaceSoft }]}>
+        <MaterialCommunityIcons name="chevron-right" size={16} color={theme.textSecondary} />
+      </View>
     </Pressable>
   );
 }
@@ -571,11 +603,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
   statsGrid: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: Spacing.three,
   },
   statCard: {
-    flex: 1,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     padding: Spacing.three,
@@ -596,12 +628,20 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statLabel: {
-    fontSize: FontSize.caption,
-    fontWeight: FontWeight.medium,
-  },
-  statValue: {
     fontSize: FontSize.caption + 1,
     fontWeight: FontWeight.bold,
+  },
+  statValue: {
+    fontSize: FontSize.body - 1,
+    fontWeight: FontWeight.medium,
+  },
+  statArrowContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: Spacing.two,
   },
   statArrow: {
     marginLeft: 2,

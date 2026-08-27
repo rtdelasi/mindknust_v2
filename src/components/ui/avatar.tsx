@@ -1,4 +1,5 @@
 import { ImageSourcePropType, StyleSheet, Text, View, Image } from 'react-native';
+import { useState } from 'react';
 
 import { FontSize, FontWeight, Size } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -23,9 +24,24 @@ export function Avatar({ name, source, size = 'md' }: AvatarProps) {
   const theme = useTheme();
   const dimension = avatarSizes[size];
   const initials = getInitials(name);
+  const [imageError, setImageError] = useState(false);
 
-  if (source) {
-    return <Image source={source} style={[styles.image, { width: dimension, height: dimension, borderRadius: dimension / 2, backgroundColor: theme.surfaceSoft }]} />;
+  if (source && !imageError) {
+    return (
+      <Image
+        source={source}
+        onError={() => setImageError(true)}
+        style={[
+          styles.image,
+          {
+            width: dimension,
+            height: dimension,
+            borderRadius: dimension / 2,
+            backgroundColor: theme.surfaceSoft,
+          },
+        ]}
+      />
+    );
   }
 
   return (

@@ -20,7 +20,6 @@ import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { fetchAppointments } from '@/lib/supabase-db';
-import { getCounselorPhoto } from '../(tabs)/sessions';
 
 interface HoursLog {
   id: string;
@@ -100,23 +99,28 @@ export default function HoursReportScreen() {
           <ActivityIndicator size="large" color={theme.primary} />
         </View>
       ) : (
-        <View style={{ flex: 1 }}>
-          {/* Hero stats widget */}
-          <Card variant="raised" padding="four" style={[styles.heroCard, { backgroundColor: theme.primary, margin: Spacing.four }]}>
+        <View style={{ flex: 1, gap: Spacing.four, paddingTop: Spacing.four }}>
+          {/* Total card */}
+          <Card
+            variant="raised"
+            padding="four"
+            style={[styles.heroCard, { backgroundColor: theme.primary, marginHorizontal: Spacing.four }]}>
             <View style={styles.heroRow}>
               <View style={styles.heroDetails}>
-                <Text style={styles.heroLabel}>TOTAL CLINICAL HOURS</Text>
-                <Text style={styles.heroValue}>{totalHours} Hours</Text>
-                <Text style={styles.heroSubText}>Verified for KNUST Counseling Board</Text>
+                <Text style={styles.heroLabel}>LOGGED CLINICAL HOURS</Text>
+                <Text style={styles.heroValue}>{totalHours} hrs</Text>
               </View>
               <View style={styles.heroIconBox}>
-                <MaterialCommunityIcons name="file-certificate-outline" size={48} color="#FFFFFF" />
+                <MaterialCommunityIcons name="calendar-check" size={32} color="#FFFFFF" />
               </View>
             </View>
+            <Text style={[styles.heroSubText, { marginBottom: Spacing.four }]}>
+              Official compliance hours registered with university counseling coordinator.
+            </Text>
             <Button
-              label="Export PDF Compliance Report"
+              label="Export Signed Log Sheet"
               variant="secondary"
-              icon="export"
+              icon="email-outline"
               onPress={handleExport}
               style={styles.exportBtn}
             />
@@ -133,12 +137,16 @@ export default function HoursReportScreen() {
             contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 64 }]}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => {
-              const cPhoto = getCounselorPhoto(item.studentName, item.avatar_url);
+              const hasAvatar = Boolean(item.avatar_url);
 
               return (
                 <Card variant="surface" padding="three" style={styles.logCard}>
                   <View style={styles.logLeft}>
-                    <Avatar name={item.studentName} size="md" source={{ uri: cPhoto }} />
+                    <Avatar
+                      name={item.studentName}
+                      size="md"
+                      source={hasAvatar ? { uri: item.avatar_url } : undefined}
+                    />
                     <View style={styles.logDetails}>
                       <Text style={[styles.studentName, { color: theme.text }]}>{item.studentName}</Text>
                       <Text style={[styles.logType, { color: theme.primary }]}>{item.type}</Text>

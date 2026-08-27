@@ -72,7 +72,7 @@ export function Button({
           styles.base,
           {
             backgroundColor: isPrimary ? theme.primary : theme.surfaceSoft,
-            minHeight: Size.buttonHeight,
+            minHeight: (style as any)?.height || (style as any)?.minHeight || Size.buttonHeight,
             borderRadius: BorderRadius.xl,
             ...(!isPrimary ? shadow.small : shadow.medium),
             opacity: disabled ? 0.56 : 1,
@@ -86,6 +86,7 @@ export function Button({
           />
         ) : null}
         <Text
+          numberOfLines={1}
           style={[
             styles.label,
             {
@@ -107,7 +108,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.four,
+    paddingHorizontal: Spacing.three,
+    width: '100%',
   },
   label: {
     letterSpacing: 0.1,

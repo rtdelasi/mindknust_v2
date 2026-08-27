@@ -20,7 +20,6 @@ import { useTheme } from '@/hooks/use-theme';
 import { auth } from '@/lib/firebase';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { fetchAppointments, SupabaseAppointment } from '@/lib/supabase-db';
-import { getCounselorPhoto } from '../(tabs)/sessions';
 
 interface RosterStudent {
   id: string;
@@ -121,12 +120,16 @@ export default function StudentRosterScreen() {
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 64 }]}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
-            const cPhoto = getCounselorPhoto(item.name, item.avatar_url);
+            const hasAvatar = Boolean(item.avatar_url);
 
             return (
               <Card variant="surface" padding="three" style={styles.rosterCard}>
                 <View style={styles.row}>
-                  <Avatar name={item.name} size="md" source={{ uri: cPhoto }} />
+                  <Avatar
+                    name={item.name}
+                    size="md"
+                    source={hasAvatar ? { uri: item.avatar_url } : undefined}
+                  />
                   <View style={styles.studentMeta}>
                     <Text style={[styles.studentName, { color: theme.text }]}>{item.name}</Text>
                     <Text style={[styles.sessionStat, { color: theme.textSecondary }]}>
@@ -244,14 +247,14 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     gap: Spacing.two,
     borderTopWidth: 1,
     paddingTop: Spacing.two + 2,
+    width: '100%',
   },
   actionBtn: {
+    flex: 1,
     height: 36,
-    paddingHorizontal: Spacing.three,
   },
   emptyView: {
     alignItems: 'center',
