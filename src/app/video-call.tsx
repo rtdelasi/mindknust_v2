@@ -552,7 +552,7 @@ export default function VideoCallScreen() {
 
   // Time window gating verification on mount
   useEffect(() => {
-    if (!appointmentId || !isCaller) return;
+    if (!appointmentId) return;
 
     let isMounted = true;
     const verifyWindow = async () => {

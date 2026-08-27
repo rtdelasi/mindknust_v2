@@ -83,6 +83,18 @@ export function canJoinScheduledSession(appointment: any): JoinWindowCheck {
     return { allowed: false, reason: 'No appointment record provided.' };
   }
 
+  // Gating status check: block if the session is completed, missed, declined, or cancelled
+  if (['completed', 'missed', 'declined', 'cancelled'].includes(appointment.status)) {
+    return {
+      allowed: false,
+      reason: appointment.status === 'completed'
+        ? 'This session has already been completed.'
+        : appointment.status === 'missed'
+        ? 'This session was marked as missed.'
+        : `This session is ${appointment.status}.`,
+    };
+  }
+
   let start: Date;
   let end: Date | null = null;
 

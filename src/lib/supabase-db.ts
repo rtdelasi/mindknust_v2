@@ -2204,6 +2204,53 @@ export async function recordAppointmentJoin(
   }
 }
 
+export async function sendSessionEndedWarningNotification(appt: SupabaseAppointment): Promise<void> {
+  if (!supabase) return;
+  try {
+    const link = `/sessions?warn_appt_id=${appt.id}`;
+    
+    // 1. Notify Student
+    const { data: studentExisting, error: sError } = await supabase
+      .from('notifications')
+      .select('id')
+      .eq('user_id', appt.student_id)
+      .eq('link', link);
+      
+    if (!sError && (!studentExisting || studentExisting.length === 0)) {
+      console.log(`[DB Warning Notif] Dispatching session ended warning notification to student ${appt.student_id}`);
+      await supabase
+        .from('notifications')
+        .insert({
+          user_id: appt.student_id,
+          title: 'Session Time Ended',
+          body: `Your scheduled session on ${appt.appointment_date} has ended. You have 24 hours to complete it, or it will be marked as missed.`,
+          link: link,
+        });
+    }
+
+    // 2. Notify Counselor
+    const { data: counselorExisting, error: cError } = await supabase
+      .from('notifications')
+      .select('id')
+      .eq('user_id', appt.counselor_id)
+      .eq('link', link);
+      
+    if (!cError && (!counselorExisting || counselorExisting.length === 0)) {
+      console.log(`[DB Warning Notif] Dispatching session ended warning notification to counselor ${appt.counselor_id}`);
+      await supabase
+        .from('notifications')
+        .insert({
+          user_id: appt.counselor_id,
+          title: 'Session Time Ended',
+          body: `Your scheduled session on ${appt.appointment_date} has ended. Please complete the session and fill clinical notes within 24 hours, or it will be marked as missed.`,
+          link: link,
+        });
+    }
+  } catch (err: any) {
+    console.warn('[DB Warning Notif] Error sending session ended warning notifications:', err.message);
+  }
+}
+
 export async function processMissedAppointments(appointments: SupabaseAppointment[]): Promise<SupabaseAppointment[]> {
   if (!supabase) return appointments;
 
@@ -2215,8 +2262,9 @@ export async function processMissedAppointments(appointments: SupabaseAppointmen
     
     if (appt.status === 'pending' || appt.status === 'accepted') {
       try {
-        const { start } = parseAppointmentDateTime(appt.appointment_date, appt.time_slot);
+        const { start, end } = parseAppointmentDateTime(appt.appointment_date, appt.time_slot);
         const startMs = start.getTime();
+        const endMs = end ? end.getTime() : startMs + 30 * 60 * 1000;
         
         // Auto-transition to missed 1 day (24 hours) after scheduled session time
         if (now > startMs + 24 * 60 * 60 * 1000) {
@@ -2234,7 +2282,20 @@ export async function processMissedAppointments(appointments: SupabaseAppointmen
             };
           } else {
             console.warn(`[DB check-on-read] Failed to update status to missed for ${appt.id}:`, error.message);
+            // Database schema drift fallback: if database check constraint blocks 'missed', map it in memory.
+            if (error.code === '23514' || (error.message && error.message.includes('check constraint'))) {
+              console.log(`[DB check-on-read] Database constraint blocks 'missed' status. Mapping as 'missed' in memory.`);
+              updatedAppointments[i] = {
+                ...appt,
+                status: 'missed'
+              };
+            }
           }
+        } else if (now > endMs) {
+          // Scheduled session has ended, and is within the 24 hours grace window. Notify both parties.
+          sendSessionEndedWarningNotification(appt).catch((e) => {
+            console.warn(`[DB check-on-read] Failed to dispatch warnings for ended session ${appt.id}:`, e.message);
+          });
         }
       } catch (err: any) {
         console.warn(`[DB check-on-read] Error processing missed check for appointment ${appt.id}:`, err.message);
