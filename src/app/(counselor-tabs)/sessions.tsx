@@ -24,6 +24,7 @@ import { useMockAuth } from '@/lib/mock-auth-store';
 import { fetchAppointments, updateAppointmentStatus, SupabaseAppointment } from '@/lib/supabase-db';
 import { safeStorage } from '@/lib/safe-storage';
 import { parseAppointmentTopic } from '@/lib/counselor-utils';
+import { canJoinScheduledSession } from '@/lib/appointment-utils';
 
 type TabState = 'upcoming' | 'pending' | 'past';
 
@@ -119,7 +120,7 @@ export default function CounselorSessionsScreen() {
   // Filter lists based on status categories
   const upcomingList = appointments.filter((a) => a.status === 'accepted');
   const pendingList = appointments.filter((a) => a.status === 'pending');
-  const pastList = appointments.filter((a) => ['completed', 'declined', 'cancelled'].includes(a.status));
+  const pastList = appointments.filter((a) => ['completed', 'declined', 'cancelled', 'missed'].includes(a.status));
 
   const getActiveList = () => {
     switch (activeTab) {
@@ -229,7 +230,12 @@ export default function CounselorSessionsScreen() {
                         variant="primary"
                         icon="video"
                         style={styles.actionBtn}
-                        onPress={() =>
+                        onPress={() => {
+                          const check = canJoinScheduledSession(item);
+                          if (!check.allowed) {
+                            Alert.alert('Call Blocked', check.reason || 'Cannot join call at this time.');
+                            return;
+                          }
                           router.push({
                             pathname: '/video-call',
                             params: {
@@ -241,8 +247,8 @@ export default function CounselorSessionsScreen() {
                               isJoiningSession: 'true',
                               appointmentId: item.id,
                             },
-                          })
-                        }
+                          });
+                        }}
                       />
                       <Button
                         label="Complete Session"

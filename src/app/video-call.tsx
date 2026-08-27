@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   View,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -50,7 +51,10 @@ import {
   createCall,
   subscribeToCallStatus,
   updateCallStatus,
+  fetchAppointmentById,
+  recordAppointmentJoin,
 } from '@/lib/supabase-db';
+import { canJoinScheduledSession } from '@/lib/appointment-utils';
 import {
   WebRTCSignalingManager,
   WebRTCSignalingEvent,
@@ -131,6 +135,8 @@ export default function VideoCallScreen() {
       : 'idle'
   );
   const [hasConnected, setHasConnected] = useState(isIncomingAccepted === 'true');
+  const [checkingWindow, setCheckingWindow] = useState(false);
+  const [windowError, setWindowError] = useState<string | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [cameraOn, setCameraOn] = useState(callType === 'video');
   const [micOn, setMicOn] = useState(true);
@@ -149,6 +155,8 @@ export default function VideoCallScreen() {
     auth?.currentUser?.uid || (role === 'counselor' ? 'kwame-boateng' : 'student-user');
 
   const localVideoTrackIdRef = useRef(`vtrack_${currentUserId}`);
+
+
   const localAudioTrackIdRef = useRef(`atrack_${currentUserId}`);
   const [stableTrackId, setStableTrackId] = useState<string | undefined>(undefined);
   const prevTrackIdRef = useRef<string | undefined>(undefined);
@@ -542,6 +550,78 @@ export default function VideoCallScreen() {
   const isCallerRef = useRef(isCaller);
   isCallerRef.current = isCaller;
 
+  // Time window gating verification on mount
+  useEffect(() => {
+    if (!appointmentId || !isCaller) return;
+
+    let isMounted = true;
+    const verifyWindow = async () => {
+      setCheckingWindow(true);
+      try {
+        console.log(`[VideoCall] Gating verification: Fetching appointment ID ${appointmentId}...`);
+        const appt = await fetchAppointmentById(appointmentId);
+        if (!isMounted) return;
+
+        if (!appt) {
+          console.warn(`[VideoCall] Failed to fetch appointment details for ID: ${appointmentId}`);
+          setWindowError('Failed to resolve appointment details.');
+          Alert.alert(
+            'Error',
+            'This scheduled session does not have a valid appointment record.',
+            [{ text: 'OK', onPress: () => router.back() }]
+          );
+          return;
+        }
+
+        const check = canJoinScheduledSession(appt);
+        if (!isMounted) return;
+
+        if (!check.allowed) {
+          console.log(`[VideoCall] Gating check failed: ${check.reason}`);
+          setWindowError(check.reason || 'Cannot join call at this time.');
+          Alert.alert(
+            'Call Blocked',
+            check.reason || 'Cannot join call at this time.',
+            [{ text: 'OK', onPress: () => router.back() }]
+          );
+          return;
+        }
+
+        console.log('[VideoCall] Gating check passed successfully.');
+      } catch (err) {
+        console.error('[VideoCall] Error during gating check verification:', err);
+        if (!isMounted) return;
+        setWindowError('Failed to verify appointment schedule.');
+        Alert.alert(
+          'Error',
+          'An error occurred while verifying the appointment schedule.',
+          [{ text: 'OK', onPress: () => router.back() }]
+        );
+      } finally {
+        if (isMounted) {
+          setCheckingWindow(false);
+        }
+      }
+    };
+
+    verifyWindow();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [appointmentId, isCaller]);
+
+  // Record join timestamp once the call connects
+  useEffect(() => {
+    if (callState === 'connected' && appointmentId) {
+      console.log(`[VideoCall] Recording join event for party: ${role}`);
+      const party = role === 'counselor' ? 'counselor' : 'student';
+      recordAppointmentJoin(appointmentId, party).catch((err) => {
+        console.warn('[VideoCall] Failed to record join timestamp:', err);
+      });
+    }
+  }, [callState, appointmentId, role]);
+
   // Helper to generate and send SDP Offer once peer-ready signal is received
   const sendOfferToPeer = useCallback(async () => {
     if (offerSentRef.current) return;
@@ -582,6 +662,10 @@ export default function VideoCallScreen() {
   // 5. WebRTC P2P Signaling Engine Setup (Stable Lifecycle)
   useEffect(() => {
     if (!activeRoomId || !currentUserId) return;
+    if (appointmentId && isCaller && (checkingWindow || windowError)) {
+      console.log('[VideoCall] Suspending WebRTC P2P signaling setup: checking time window...');
+      return;
+    }
 
     const signaling = new WebRTCSignalingManager(activeRoomId, currentUserId);
     signalingRef.current = signaling;
@@ -703,6 +787,10 @@ export default function VideoCallScreen() {
   // 6. Create call in DB + subscribe to status changes (CALLER ONLY - AFTER ROLE RESOLVES)
   useEffect(() => {
     if (!role || callState !== 'ringing' || !isCaller || !supabase || !counselorId || callInitiated.current) return;
+    if (appointmentId && (checkingWindow || windowError)) {
+      console.log('[VideoCall] Suspending DB call creation: checking time window...');
+      return;
+    }
     callInitiated.current = true;
 
     const startCall = async () => {
@@ -811,6 +899,17 @@ export default function VideoCallScreen() {
     iceCandidateQueueRef.current = [];
     setCallState('ended');
   }, [localStream, hasConnected]);
+
+  if (checkingWindow) {
+    return (
+      <View style={[styles.screen, { backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
+        <Text style={{ marginTop: 16, color: theme.textSecondary, fontSize: 16 }}>
+          Verifying session schedule...
+        </Text>
+      </View>
+    );
+  }
 
   // ── Render: Idle / Lobby ──
   if (callState === 'idle') {

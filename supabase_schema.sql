@@ -65,8 +65,10 @@ create table if not exists public.appointments (
   counselor_id text references public.profiles(id) on delete cascade not null,
   appointment_date date not null,
   time_slot text not null,
-  status text not null check (status in ('pending', 'accepted', 'declined', 'completed')) default 'pending',
+  status text not null check (status in ('pending', 'accepted', 'declined', 'completed', 'missed')) default 'pending',
   topic text,
+  student_joined_at timestamp with time zone,
+  counselor_joined_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 

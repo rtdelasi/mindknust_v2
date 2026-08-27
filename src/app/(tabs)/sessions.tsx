@@ -38,6 +38,7 @@ import {
 
 import { getCounselorPhoto, formatCounselorRating, parseAppointmentTopic } from '@/lib/counselor-utils';
 import { getDisplayIdentity } from '@/lib/display-identity';
+import { canJoinScheduledSession } from '@/lib/appointment-utils';
 export { getCounselorPhoto };
 
 export default function MySessionsScreen() {
@@ -313,7 +314,12 @@ export default function MySessionsScreen() {
                     </Text>
                   </Pressable>
                   <Pressable
-                    onPress={() =>
+                    onPress={() => {
+                      const check = canJoinScheduledSession(nextSession);
+                      if (!check.allowed) {
+                        Alert.alert('Call Blocked', check.reason || 'Cannot join call at this time.');
+                        return;
+                      }
                       router.push({
                         pathname: '/video-call',
                         params: {
@@ -324,8 +330,8 @@ export default function MySessionsScreen() {
                           isJoiningSession: 'true',
                           appointmentId: nextSession.id,
                         },
-                      })
-                    }
+                      });
+                    }}
                     style={({ pressed }) => [
                       styles.upcomingJoinButton,
                       { backgroundColor: theme.textInverse },
@@ -456,7 +462,7 @@ export default function MySessionsScreen() {
             {recentMoods.length > 0 && (
               <View style={[styles.progressSubSection, { backgroundColor: theme.surface }]}>
                 <Text style={[styles.progressSubTitle, { color: theme.text }]}>Mood this week</Text>
-                <View style={styles.moodTrendRow}>
+                <View style={moodTrendRowStyles.moodTrendRow}>
                   {recentMoods.map((log) => {
                     const date = new Date(log.created_at);
                     const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short' });
@@ -486,6 +492,15 @@ export default function MySessionsScreen() {
     </View>
   );
 }
+
+// Added to separate stylesheet variables referencing other styles inline
+const moodTrendRowStyles = StyleSheet.create({
+  moodTrendRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    justifyContent: 'space-between',
+  },
+});
 
 const styles = StyleSheet.create({
   screen: {
@@ -835,11 +850,6 @@ const styles = StyleSheet.create({
   },
   timelineMeta: {
     fontSize: FontSize.small,
-  },
-  moodTrendRow: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    justifyContent: 'space-between',
   },
   moodTrendItem: {
     alignItems: 'center',

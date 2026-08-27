@@ -51,6 +51,7 @@ import {
   SupabaseAppointment,
 } from '@/lib/supabase-db';
 import { parseAppointmentTopic } from '@/lib/counselor-utils';
+import { canJoinScheduledSession } from '@/lib/appointment-utils';
 
 const NEWS_CATEGORIES = [
   'All',
@@ -670,7 +671,12 @@ export default function HomeScreen() {
                   </View>
                   {parseAppointmentTopic(nextSession.topic).sessionType === 'online' ? (
                     <Pressable
-                      onPress={() =>
+                      onPress={() => {
+                        const check = canJoinScheduledSession(nextSession);
+                        if (!check.allowed) {
+                          Alert.alert('Call Blocked', check.reason || 'Cannot join call at this time.');
+                          return;
+                        }
                         router.push({
                           pathname: '/video-call',
                           params: {
@@ -682,8 +688,8 @@ export default function HomeScreen() {
                             isJoiningSession: 'true',
                             appointmentId: nextSession.id,
                           },
-                        })
-                      }
+                        });
+                      }}
                       style={styles.videoCallBtn}>
                       <MaterialCommunityIcons
                         name="video"

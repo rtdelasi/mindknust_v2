@@ -35,6 +35,7 @@ import {
   SupabaseAppointment,
 } from '@/lib/supabase-db';
 import { parseAppointmentTopic } from '@/lib/counselor-utils';
+import { canJoinScheduledSession } from '@/lib/appointment-utils';
 
 export default function CounselorDashboardScreen() {
   const theme = useTheme();
@@ -391,7 +392,12 @@ export default function CounselorDashboardScreen() {
                           label="Start Session"
                           variant="primary"
                           icon="video"
-                          onPress={() =>
+                          onPress={() => {
+                            const check = canJoinScheduledSession(agenda);
+                            if (!check.allowed) {
+                              Alert.alert('Call Blocked', check.reason || 'Cannot join call at this time.');
+                              return;
+                            }
                             router.push({
                               pathname: '/video-call',
                               params: {
@@ -403,8 +409,8 @@ export default function CounselorDashboardScreen() {
                                 isJoiningSession: 'true',
                                 appointmentId: agenda.id,
                               },
-                            })
-                          }
+                            });
+                          }}
                           style={styles.fullWidthBtn}
                         />
                       ) : (

@@ -2,6 +2,7 @@ import { supabase, hasSupabaseConfig } from './supabase';
 import { analyzeSentiment, moderateContent } from './sentiment';
 import type { SentimentResult } from './sentiment';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { parseAppointmentDateTime } from './appointment-utils';
 
 export interface SupabaseProfile {
   id: string;
@@ -75,9 +76,11 @@ export interface SupabaseAppointment {
   counselor_id: string;
   appointment_date: string;
   time_slot: string;
-  status: 'pending' | 'accepted' | 'declined' | 'completed';
+  status: 'pending' | 'accepted' | 'declined' | 'completed' | 'missed';
   topic: string;
   is_anonymous_display: boolean;
+  student_joined_at?: string | null;
+  counselor_joined_at?: string | null;
   student_profile?: SupabaseProfile;
   counselor_profile?: SupabaseProfile;
 }
@@ -834,6 +837,7 @@ export async function fetchAppointments(
       .from('appointments')
       .select(`
         id, student_id, counselor_id, appointment_date, time_slot, status, topic,
+        student_joined_at, counselor_joined_at,
         student_profile:profiles!appointments_student_id_fkey(id, name, email, avatar_url),
         counselor_profile:profiles!appointments_counselor_id_fkey(id, name, email, avatar_url)
       `)
@@ -846,7 +850,9 @@ export async function fetchAppointments(
     }
 
     const remote = (data || []) as unknown as SupabaseAppointment[];
-    const combined = [...remote];
+    const processedRemote = await processMissedAppointments(remote);
+
+    const combined = [...processedRemote];
     for (const la of localAppts) {
       if (!combined.some((a) => a.id === la.id)) {
         combined.push(la);
@@ -866,6 +872,7 @@ export async function fetchAppointmentById(appointmentId: string): Promise<Supab
       .from('appointments')
       .select(`
         id, student_id, counselor_id, appointment_date, time_slot, status, topic, is_anonymous_display,
+        student_joined_at, counselor_joined_at,
         student_profile:profiles!appointments_student_id_fkey(id, name, email, avatar_url),
         counselor_profile:profiles!appointments_counselor_id_fkey(id, name, email, avatar_url)
       `)
@@ -873,7 +880,9 @@ export async function fetchAppointmentById(appointmentId: string): Promise<Supab
       .maybeSingle();
 
     if (error || !data) return null;
-    return data as unknown as SupabaseAppointment;
+    const appt = data as unknown as SupabaseAppointment;
+    const processed = await processMissedAppointments([appt]);
+    return processed[0] || null;
   } catch {
     return null;
   }
@@ -2077,4 +2086,99 @@ export function subscribeToIncomingCalls(
   return () => {
     supabase!.removeChannel(channel);
   };
+}
+
+export async function recordAppointmentJoin(
+  appointmentId: string,
+  party: 'student' | 'counselor'
+): Promise<void> {
+  if (!supabase || !appointmentId) return;
+
+  try {
+    const { data: appt, error: fetchErr } = await supabase
+      .from('appointments')
+      .select('id, student_joined_at, counselor_joined_at, status')
+      .eq('id', appointmentId)
+      .maybeSingle();
+
+    if (fetchErr || !appt) {
+      console.warn('[DB] recordAppointmentJoin failed to fetch appointment:', fetchErr?.message);
+      return;
+    }
+
+    const updateData: any = {};
+    let shouldUpdate = false;
+
+    if (party === 'student' && !appt.student_joined_at) {
+      updateData.student_joined_at = new Date().toISOString();
+      shouldUpdate = true;
+    } else if (party === 'counselor' && !appt.counselor_joined_at) {
+      updateData.counselor_joined_at = new Date().toISOString();
+      shouldUpdate = true;
+    }
+
+    if (shouldUpdate) {
+      const studentJoined = party === 'student' || !!appt.student_joined_at;
+      const counselorJoined = party === 'counselor' || !!appt.counselor_joined_at;
+
+      // Automatically resolve to completed if both parties joined
+      if (studentJoined && counselorJoined) {
+        updateData.status = 'completed';
+      }
+
+      const { error: updateErr } = await supabase
+        .from('appointments')
+        .update(updateData)
+        .eq('id', appointmentId);
+
+      if (updateErr) {
+        console.warn('[DB] recordAppointmentJoin update error:', updateErr.message);
+      } else {
+        console.log(`[DB] Successfully recorded join for ${party} on appointment ${appointmentId}`);
+      }
+    }
+  } catch (err) {
+    console.warn('[DB] recordAppointmentJoin error:', err);
+  }
+}
+
+export async function processMissedAppointments(appointments: SupabaseAppointment[]): Promise<SupabaseAppointment[]> {
+  if (!supabase) return appointments;
+
+  const now = Date.now();
+  const updatedAppointments = [...appointments];
+
+  for (let i = 0; i < updatedAppointments.length; i++) {
+    const appt = updatedAppointments[i];
+    
+    if (appt.status === 'pending' || appt.status === 'accepted') {
+      try {
+        const { start } = parseAppointmentDateTime(appt.appointment_date, appt.time_slot);
+        const startMs = start.getTime();
+        
+        // Auto-transition to missed 1 day (24 hours) after scheduled session time
+        if (now > startMs + 24 * 60 * 60 * 1000) {
+          console.log(`[DB check-on-read] Auto-transitioning appointment ${appt.id} to missed (grace period expired)`);
+          
+          const { error } = await supabase
+            .from('appointments')
+            .update({ status: 'missed' })
+            .eq('id', appt.id);
+
+          if (!error) {
+            updatedAppointments[i] = {
+              ...appt,
+              status: 'missed'
+            };
+          } else {
+            console.warn(`[DB check-on-read] Failed to update status to missed for ${appt.id}:`, error.message);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[DB check-on-read] Error processing missed check for appointment ${appt.id}:`, err.message);
+      }
+    }
+  }
+
+  return updatedAppointments;
 }
