@@ -28,8 +28,11 @@ import {
   rescheduleAppointment,
   SupabaseSlot,
   SupabaseCounselor,
+  bookSlot,
+  fetchBookedSlots,
 } from '@/lib/supabase-db';
 import { parseCounselorNote, serializeAppointmentTopic } from '@/lib/counselor-utils';
+import { supabase, hasSupabaseConfig } from '@/lib/supabase';
 
 export default function BookingScreen() {
   const theme = useTheme();
@@ -50,25 +53,43 @@ export default function BookingScreen() {
   const [anonDisplay, setAnonDisplay] = useState(false);
   const [sessionType, setSessionType] = useState<'online' | 'in-person'>('online');
   const [counselorFormats, setCounselorFormats] = useState({ online: true, inPerson: false });
+  const [bookedSlots, setBookedSlots] = useState<string[]>([]);
 
   const selectedDayName = selectedDate.toLocaleDateString('en-US', { weekday: 'long' });
   const filteredSlots = slots.filter(
-    (s) => s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase()
+    (s) =>
+      s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase() &&
+      !bookedSlots.includes(s.time_slot)
   );
+
+  const loadBookedSlots = async (cId: string, targetDate: Date) => {
+    const formattedDate = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+    try {
+      const booked = await fetchBookedSlots(cId, formattedDate);
+      setBookedSlots(booked);
+    } catch (err) {
+      console.warn('Error fetching booked slots:', err);
+    }
+  };
 
   useEffect(() => {
     const daySlots = slots.filter(
       (s) => s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase()
     );
     if (daySlots.length > 0) {
-      const isValid = daySlots.some((s) => s.time_slot === selectedSlotText);
-      if (!isValid) {
-        setSelectedSlotText(daySlots[0].time_slot);
+      const remainingSlots = daySlots.filter((s) => !bookedSlots.includes(s.time_slot));
+      if (remainingSlots.length > 0) {
+        const isValid = remainingSlots.some((s) => s.time_slot === selectedSlotText);
+        if (!isValid) {
+          setSelectedSlotText(remainingSlots[0].time_slot);
+        }
+      } else {
+        setSelectedSlotText('');
       }
     } else {
       setSelectedSlotText('');
     }
-  }, [selectedDate, slots]);
+  }, [selectedDate, slots, bookedSlots]);
 
   const formatCounselorName = (value: string) => {
     return value
@@ -85,6 +106,7 @@ export default function BookingScreen() {
         setCounselorData(match);
         const avSlots = await fetchAvailabilitySlots(match.id);
         setSlots(avSlots);
+        await loadBookedSlots(match.id, selectedDate);
         
         // Parse formats
         const { formats } = parseCounselorNote(match.note || '');
@@ -129,6 +151,44 @@ export default function BookingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [counselor]);
 
+  // Reload booked slots when selectedDate or counselor changes
+  useEffect(() => {
+    const cId = counselorData?.id || counselor;
+    if (cId) {
+      loadBookedSlots(cId, selectedDate);
+    }
+  }, [selectedDate, counselorData?.id]);
+
+  // Supabase Realtime synchronization for appointments
+  useEffect(() => {
+    if (!hasSupabaseConfig || !supabase) return;
+    const cId = counselorData?.id || counselor;
+    if (!cId) return;
+
+    console.log(`[Realtime] Subscribing to appointments for counselor ${cId}`);
+    const channel = supabase
+      .channel(`counselor-appointments-${cId}`)
+      .on(
+         'postgres_changes',
+         {
+           event: '*',
+           schema: 'public',
+           table: 'appointments',
+           filter: `counselor_id=eq.${cId}`,
+         },
+         () => {
+           console.log('[Realtime] Counselor appointments updated, reloading booked slots...');
+           loadBookedSlots(cId, selectedDate);
+         }
+      )
+      .subscribe();
+
+    return () => {
+      console.log(`[Realtime] Unsubscribing from appointments for counselor ${cId}`);
+      supabase?.removeChannel(channel);
+    };
+  }, [counselorData?.id, selectedDate]);
+
   const handleConfirmBooking = async () => {
     if (!selectedSlotText || filteredSlots.length === 0) {
       Alert.alert('Booking Error', `No available slot selected for ${selectedDayName}.`);
@@ -151,7 +211,18 @@ export default function BookingScreen() {
         );
       } else {
         const topicWithFormat = serializeAppointmentTopic(selectedTopic, sessionType);
-        await createAppointment(studentId, cId, formattedDate, selectedSlotText, topicWithFormat, anonDisplay);
+        const result = await bookSlot(studentId, cId, formattedDate, selectedSlotText, topicWithFormat, anonDisplay);
+        
+        if (!result.success) {
+          if (result.reason === 'already_booked') {
+            Alert.alert('Booking Error', 'This slot was just booked. Please pick another.');
+            await loadBookedSlots(cId, selectedDate);
+            setSubmitting(false);
+            return;
+          }
+          throw new Error(result.reason || 'Failed to book slot.');
+        }
+
         Alert.alert(
           'Booking Confirmed',
           `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${sessionType === 'in-person' ? 'In-Person' : 'Online'}) has been scheduled.`,
@@ -159,19 +230,24 @@ export default function BookingScreen() {
         );
       }
     } catch (err: any) {
-      console.warn('DB action failed, returning mock confirmation:', err);
-      if (rescheduleId) {
-        Alert.alert(
-          'Appointment Rescheduled',
-          `Rescheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText}.`,
-          [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
-        );
+      console.warn('DB action failed:', err);
+      if (err && (err.code === '23505' || err.message?.includes('duplicate key') || err.reason === 'already_booked')) {
+        Alert.alert('Booking Error', 'This slot was just booked. Please pick another.');
+        await loadBookedSlots(cId, selectedDate);
       } else {
-        Alert.alert(
-          'Booking Confirmed',
-          `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic} - ${sessionType === 'in-person' ? 'In-Person' : 'Online'}).`,
-          [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
-        );
+        if (rescheduleId) {
+          Alert.alert(
+            'Appointment Rescheduled',
+            `Rescheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText}.`,
+            [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
+          );
+        } else {
+          Alert.alert(
+            'Booking Confirmed',
+            `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic} - ${sessionType === 'in-person' ? 'In-Person' : 'Online'}).`,
+            [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
+          );
+        }
       }
     } finally {
       setSubmitting(false);

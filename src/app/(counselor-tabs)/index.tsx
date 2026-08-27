@@ -117,6 +117,34 @@ export default function CounselorDashboardScreen() {
     };
   }, [currentUserId]);
 
+  // Real-time appointments updates (such as rescheduling on the student side)
+  useEffect(() => {
+    if (!supabase || !currentUserId) return;
+    const client = supabase;
+
+    const channelName = `counselor-appointments-realtime-${currentUserId}-${Date.now()}`;
+    const channel = client
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'appointments',
+          filter: `counselor_id=eq.${currentUserId}`,
+        },
+        () => {
+          console.log('[Realtime] Counselor dashboard appointments updated, reloading list...');
+          loadAppointmentsList();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, [currentUserId]);
+
   useFocusEffect(
     useCallback(() => {
       loadAppointmentsList();
@@ -159,7 +187,31 @@ export default function CounselorDashboardScreen() {
   const pendingRequests = appointments.filter((a) => a.status === 'pending');
   const acceptedAgenda = appointments.filter((a) => a.status === 'accepted');
 
-  const firstName = userName.split(' ')[0] || 'Counselor';
+  // Parses counselor's name/title correctly and provides fallback
+  const greetingText = useMemo(() => {
+    if (!userName || userName.trim() === '') {
+      return 'Hello, Doctor.';
+    }
+    const cleanName = userName.trim();
+    const parts = cleanName.split(/\s+/);
+    
+    // Check if the name starts with Dr. or Dr (case-insensitive)
+    if (/^Dr\.?$/i.test(parts[0])) {
+      if (parts.length > 1) {
+        // e.g. "Dr. Tyla" -> "Dr. Tyla", "Dr. Kwame Boateng" -> "Dr. Boateng"
+        const lastName = parts[parts.length - 1];
+        return `Hello, Dr. ${lastName}.`;
+      }
+      return 'Hello, Doctor.';
+    }
+    
+    // If name doesn't start with Dr, but they are logged in as a counselor, address as Dr. <LastName>
+    if (parts.length > 1) {
+      return `Hello, Dr. ${parts[parts.length - 1]}.`;
+    }
+    
+    return `Hello, Dr. ${parts[0]}.`;
+  }, [userName]);
 
   // Dynamic subtitle based on real data
   const subtitleText = useMemo(() => {
@@ -222,7 +274,7 @@ export default function CounselorDashboardScreen() {
                   </Text>
                 </View>
                 <Text style={[styles.title, { color: theme.text }]}>
-                  Hello, {firstName}.
+                  {greetingText}
                 </Text>
                 <Text
                   style={[styles.subtitle, { color: theme.textSecondary }]}>
@@ -320,8 +372,9 @@ export default function CounselorDashboardScreen() {
                     <Card
                       key={agenda.id}
                       variant="raised"
-                      padding="three"
-                      style={styles.agendaCard}>
+                      padding="four"
+                      style={[styles.agendaCard, { borderLeftColor: theme.primary }]}
+                    >
                       {/* Top row: time + student + type pill */}
                       <View style={styles.agendaHeader}>
                         <View style={styles.agendaTimeRow}>
@@ -426,13 +479,16 @@ export default function CounselorDashboardScreen() {
                 ) : (
                   <View
                     style={[
-                      styles.emptyState,
-                      { backgroundColor: theme.surfaceSoft },
+                      styles.emptyStateNeutral,
+                      {
+                        backgroundColor: theme.surface,
+                        borderColor: theme.border,
+                      },
                     ]}>
                     <MaterialCommunityIcons
                       name="calendar-blank"
                       size={32}
-                      color={theme.textSecondary}
+                      color={theme.textTertiary}
                     />
                     <Text
                       style={[
@@ -553,12 +609,12 @@ export default function CounselorDashboardScreen() {
                     <View
                       style={[
                         styles.emptyIconCircle,
-                        { backgroundColor: theme.primarySoft },
+                        { backgroundColor: theme.successSoft },
                       ]}>
                       <MaterialCommunityIcons
-                        name="check-all"
+                        name="check-decagram"
                         size={28}
-                        color={theme.primary}
+                        color={theme.success}
                       />
                     </View>
                     <Text style={[styles.emptyTitle, { color: theme.text }]}>
@@ -654,17 +710,22 @@ function MetricCard({
   trend?: string;
   theme: ReturnType<typeof useTheme>;
 }) {
+  const isRating = label === 'User Rating';
+  const iconColor = isRating ? theme.amber : theme.primary;
+  const iconBgColor = isRating ? theme.amberSoft : theme.primarySoft;
+  const finalIcon = isRating ? 'star' : icon;
+
   return (
     <Card variant="surface" padding="two" style={styles.metricCard}>
       <View
         style={[
           styles.metricIconCircle,
-          { backgroundColor: theme.primarySoft },
+          { backgroundColor: iconBgColor },
         ]}>
         <MaterialCommunityIcons
-          name={icon}
+          name={finalIcon}
           size={18}
-          color={theme.primary}
+          color={iconColor}
         />
       </View>
       <View style={styles.metricTextBlock}>
@@ -676,10 +737,10 @@ function MetricCard({
             {value}
           </Text>
           {trend ? (
-            <View style={styles.trendChip}>
+            <View style={[styles.trendChip, { backgroundColor: theme.successSoft }]}>
               <MaterialCommunityIcons
                 name="arrow-up"
-                size={12}
+                size={10}
                 color={theme.success}
               />
               <Text
@@ -801,6 +862,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: Spacing.two,
     borderRadius: BorderRadius.sm,
+    alignItems: 'center',
   },
   metricIconCircle: {
     width: 36,
@@ -811,24 +873,32 @@ const styles = StyleSheet.create({
   },
   metricTextBlock: {
     gap: 2,
+    alignItems: 'center',
+    width: '100%',
   },
   metricLabel: {
     fontSize: FontSize.small - 1,
     fontWeight: FontWeight.medium,
+    textAlign: 'center',
   },
   metricValueRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 4,
   },
   metricValue: {
     fontSize: FontSize.body - 2,
     fontWeight: FontWeight.bold,
+    textAlign: 'center',
   },
   trendChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 1,
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: BorderRadius.full,
   },
   trendText: {
     fontSize: FontSize.small - 1,
@@ -852,6 +922,7 @@ const styles = StyleSheet.create({
   agendaCard: {
     borderRadius: BorderRadius.sm,
     gap: Spacing.two,
+    borderLeftWidth: 4,
   },
   agendaHeader: {
     flexDirection: 'row',
@@ -955,6 +1026,16 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.four,
     gap: Spacing.two,
     borderRadius: BorderRadius.sm,
+  },
+  emptyStateNeutral: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.five,
+    paddingHorizontal: Spacing.four,
+    gap: Spacing.two,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderStyle: 'dashed',
   },
   emptyCard: {
     alignItems: 'center',

@@ -72,6 +72,10 @@ create table if not exists public.appointments (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+create unique index if not exists appointments_counselor_date_slot_uniq_idx 
+  on public.appointments (counselor_id, appointment_date, time_slot)
+  where (status in ('pending', 'accepted', 'completed'));
+
 -- 5. Create Chats / Conversations Table
 create table if not exists public.chats (
   id uuid default gen_random_uuid() primary key,

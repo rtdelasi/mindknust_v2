@@ -833,7 +833,7 @@ export async function fetchAppointments(
 
   const field = role === 'student' ? 'student_id' : 'counselor_id';
   try {
-    const { data, error } = await supabase
+    let queryResult: any = await supabase
       .from('appointments')
       .select(`
         id, student_id, counselor_id, appointment_date, time_slot, status, topic,
@@ -843,6 +843,21 @@ export async function fetchAppointments(
       `)
       .eq(field, userId)
       .order('appointment_date', { ascending: true });
+
+    if (queryResult.error && queryResult.error.message.includes('student_joined_at')) {
+      console.warn('[Supabase Appointments] Columns student_joined_at/counselor_joined_at missing in DB. Retrying without them...');
+      queryResult = await supabase
+        .from('appointments')
+        .select(`
+          id, student_id, counselor_id, appointment_date, time_slot, status, topic,
+          student_profile:profiles!appointments_student_id_fkey(id, name, email, avatar_url),
+          counselor_profile:profiles!appointments_counselor_id_fkey(id, name, email, avatar_url)
+        `)
+        .eq(field, userId)
+        .order('appointment_date', { ascending: true });
+    }
+
+    const { data, error } = queryResult;
 
     if (error || !data) {
       console.warn('[Supabase Appointments] Error fetching appointments:', error?.message);
@@ -868,7 +883,7 @@ export async function fetchAppointmentById(appointmentId: string): Promise<Supab
   if (!hasSupabaseConfig || !supabase) return null;
 
   try {
-    const { data, error } = await supabase
+    let queryResult: any = await supabase
       .from('appointments')
       .select(`
         id, student_id, counselor_id, appointment_date, time_slot, status, topic, is_anonymous_display,
@@ -878,6 +893,21 @@ export async function fetchAppointmentById(appointmentId: string): Promise<Supab
       `)
       .eq('id', appointmentId)
       .maybeSingle();
+
+    if (queryResult.error && queryResult.error.message.includes('student_joined_at')) {
+      console.warn('[Supabase Appointments] Column student_joined_at missing in DB. Retrying without it...');
+      queryResult = await supabase
+        .from('appointments')
+        .select(`
+          id, student_id, counselor_id, appointment_date, time_slot, status, topic, is_anonymous_display,
+          student_profile:profiles!appointments_student_id_fkey(id, name, email, avatar_url),
+          counselor_profile:profiles!appointments_counselor_id_fkey(id, name, email, avatar_url)
+        `)
+        .eq('id', appointmentId)
+        .maybeSingle();
+    }
+
+    const { data, error } = queryResult;
 
     if (error || !data) return null;
     const appt = data as unknown as SupabaseAppointment;
@@ -2095,11 +2125,43 @@ export async function recordAppointmentJoin(
   if (!supabase || !appointmentId) return;
 
   try {
-    const { data: appt, error: fetchErr } = await supabase
+    let queryResult: any = await supabase
       .from('appointments')
       .select('id, student_joined_at, counselor_joined_at, status')
       .eq('id', appointmentId)
       .maybeSingle();
+
+    if (queryResult.error && queryResult.error.message.includes('student_joined_at')) {
+      console.warn('[DB] recordAppointmentJoin missing join columns in DB. Falling back to status-only flow.');
+      queryResult = await supabase
+        .from('appointments')
+        .select('id, status')
+        .eq('id', appointmentId)
+        .maybeSingle();
+
+      const { data: appt, error: fetchErr } = queryResult;
+      if (fetchErr || !appt) {
+        console.warn('[DB] recordAppointmentJoin failed to fetch appointment:', fetchErr?.message);
+        return;
+      }
+
+      // If columns don't exist, we don't try to record join times, but we can transition status to 'completed'
+      if (appt.status !== 'completed') {
+        const { error: updateErr } = await supabase
+          .from('appointments')
+          .update({ status: 'completed' })
+          .eq('id', appointmentId);
+
+        if (updateErr) {
+          console.warn('[DB] recordAppointmentJoin update error:', updateErr.message);
+        } else {
+          console.log(`[DB] Successfully completed appointment ${appointmentId} (join columns not supported by DB)`);
+        }
+      }
+      return;
+    }
+
+    const { data: appt, error: fetchErr } = queryResult;
 
     if (fetchErr || !appt) {
       console.warn('[DB] recordAppointmentJoin failed to fetch appointment:', fetchErr?.message);
@@ -2181,4 +2243,82 @@ export async function processMissedAppointments(appointments: SupabaseAppointmen
   }
 
   return updatedAppointments;
+}
+
+export async function fetchBookedSlots(counselorId: string, dateStr: string): Promise<string[]> {
+  if (!hasSupabaseConfig || !supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('time_slot')
+      .eq('counselor_id', counselorId)
+      .eq('appointment_date', dateStr)
+      .in('status', ['pending', 'accepted', 'completed']);
+
+    if (error) {
+      console.warn('[DB] fetchBookedSlots error:', error.message);
+      return [];
+    }
+    return (data || []).map((row: any) => row.time_slot);
+  } catch (err) {
+    console.warn('[DB] fetchBookedSlots exception:', err);
+    return [];
+  }
+}
+
+export async function bookSlot(
+  studentId: string,
+  counselorId: string,
+  date: string,
+  timeSlot: string,
+  topic: string,
+  isAnonymousDisplay: boolean = false
+): Promise<{ success: boolean; appointment?: SupabaseAppointment; reason?: string }> {
+  if (!hasSupabaseConfig || !supabase) {
+    const fallbackAppt: SupabaseAppointment = {
+      id: generateFallbackUUID(),
+      student_id: studentId,
+      counselor_id: counselorId,
+      appointment_date: date,
+      time_slot: timeSlot,
+      topic,
+      status: 'pending',
+      is_anonymous_display: isAnonymousDisplay,
+    };
+    await saveLocalAppointment(fallbackAppt);
+    return { success: true, appointment: fallbackAppt };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .insert({
+        student_id: studentId,
+        counselor_id: counselorId,
+        appointment_date: date,
+        time_slot: timeSlot,
+        topic,
+        is_anonymous_display: isAnonymousDisplay,
+        status: 'pending',
+      })
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[DB] bookSlot insert notice:', error.code, error.message);
+      if (error.code === '23505') {
+        return { success: false, reason: 'already_booked' };
+      }
+      return { success: false, reason: error.message };
+    }
+
+    if (!data) {
+      return { success: false, reason: 'Failed to insert appointment record.' };
+    }
+
+    return { success: true, appointment: data as unknown as SupabaseAppointment };
+  } catch (err: any) {
+    console.error('[DB] bookSlot exception:', err);
+    return { success: false, reason: err.message || 'An unexpected error occurred.' };
+  }
 }
