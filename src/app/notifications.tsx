@@ -233,8 +233,8 @@ export default function NotificationsScreen() {
     );
   }, [announcements, currentUserId]);
 
-  const handleSelectNotification = (item: Announcement) => {
-    markRead(item);
+  const handleSelectNotification = async (item: Announcement) => {
+    await markRead(item);
     if (item.link) {
       router.push(item.link as any);
     } else {
