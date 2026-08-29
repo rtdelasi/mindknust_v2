@@ -24,7 +24,6 @@ import { useMockAuth } from '@/lib/mock-auth-store';
 import {
   fetchCounselors,
   fetchAvailabilitySlots,
-  createAppointment,
   rescheduleAppointment,
   SupabaseSlot,
   SupabaseCounselor,
@@ -33,6 +32,7 @@ import {
 } from '@/lib/supabase-db';
 import { parseCounselorNote, serializeAppointmentTopic } from '@/lib/counselor-utils';
 import { supabase, hasSupabaseConfig } from '@/lib/supabase';
+import { scheduleSessionReminder } from '@/lib/notification-service';
 
 export default function BookingScreen() {
   const theme = useTheme();
@@ -70,32 +70,6 @@ export default function BookingScreen() {
     } catch (err) {
       console.warn('Error fetching booked slots:', err);
     }
-  };
-
-  useEffect(() => {
-    const daySlots = slots.filter(
-      (s) => s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase()
-    );
-    if (daySlots.length > 0) {
-      const remainingSlots = daySlots.filter((s) => !bookedSlots.includes(s.time_slot));
-      if (remainingSlots.length > 0) {
-        const isValid = remainingSlots.some((s) => s.time_slot === selectedSlotText);
-        if (!isValid) {
-          setSelectedSlotText(remainingSlots[0].time_slot);
-        }
-      } else {
-        setSelectedSlotText('');
-      }
-    } else {
-      setSelectedSlotText('');
-    }
-  }, [selectedDate, slots, bookedSlots]);
-
-  const formatCounselorName = (value: string) => {
-    return value
-      .split('-')
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
   };
 
   const loadCounselorDetails = async () => {
@@ -189,6 +163,32 @@ export default function BookingScreen() {
     };
   }, [counselorData?.id, selectedDate]);
 
+  useEffect(() => {
+    const daySlots = slots.filter(
+      (s) => s.day_of_week?.trim().toLowerCase() === selectedDayName.trim().toLowerCase()
+    );
+    if (daySlots.length > 0) {
+      const remainingSlots = daySlots.filter((s) => !bookedSlots.includes(s.time_slot));
+      if (remainingSlots.length > 0) {
+        const isValid = remainingSlots.some((s) => s.time_slot === selectedSlotText);
+        if (!isValid) {
+          setSelectedSlotText(remainingSlots[0].time_slot);
+        }
+      } else {
+        setSelectedSlotText('');
+      }
+    } else {
+      setSelectedSlotText('');
+    }
+  }, [selectedDate, slots, bookedSlots]);
+
+  const formatCounselorName = (value: string) => {
+    return value
+      .split('-')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  };
+
   const handleConfirmBooking = async () => {
     if (!selectedSlotText || filteredSlots.length === 0) {
       Alert.alert('Booking Error', `No available slot selected for ${selectedDayName}.`);
@@ -200,13 +200,23 @@ export default function BookingScreen() {
     const cId = counselorData?.id || counselor;
     const formattedDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
     const formattedDisplayDate = selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const nameVal = counselorData?.profile?.name || formatCounselorName(counselor);
 
     try {
       if (rescheduleId) {
         await rescheduleAppointment(rescheduleId, studentId, cId, formattedDate, selectedSlotText);
+        
+        // Schedule reminder for rescheduled session
+        scheduleSessionReminder(
+          rescheduleId,
+          nameVal,
+          formattedDate,
+          selectedSlotText
+        ).catch((e) => console.warn('[Booking] Reschedule notification failed:', e));
+
         Alert.alert(
           'Appointment Rescheduled',
-          `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} has been rescheduled to ${formattedDisplayDate} at ${selectedSlotText}.`,
+          `Your appointment with ${nameVal} has been rescheduled to ${formattedDisplayDate} at ${selectedSlotText}.`,
           [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
         );
       } else {
@@ -223,9 +233,19 @@ export default function BookingScreen() {
           throw new Error(result.reason || 'Failed to book slot.');
         }
 
+        // Schedule reminder for newly booked session
+        if (result.appointment?.id) {
+          scheduleSessionReminder(
+            result.appointment.id,
+            nameVal,
+            formattedDate,
+            selectedSlotText
+          ).catch((e) => console.warn('[Booking] Notification schedule failed:', e));
+        }
+
         Alert.alert(
           'Booking Confirmed',
-          `Your appointment with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${sessionType === 'in-person' ? 'In-Person' : 'Online'}) has been scheduled.`,
+          `Your appointment with ${nameVal} on ${formattedDisplayDate} at ${selectedSlotText} (${sessionType === 'in-person' ? 'In-Person' : 'Online'}) has been scheduled.`,
           [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
         );
       }
@@ -236,15 +256,23 @@ export default function BookingScreen() {
         await loadBookedSlots(cId, selectedDate);
       } else {
         if (rescheduleId) {
+          // Schedule fallback reminder
+          scheduleSessionReminder(
+            rescheduleId,
+            nameVal,
+            formattedDate,
+            selectedSlotText
+          ).catch((e) => console.warn('[Booking] Notification schedule fallback failed:', e));
+
           Alert.alert(
             'Appointment Rescheduled',
-            `Rescheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText}.`,
+            `Rescheduled with ${nameVal} on ${formattedDisplayDate} at ${selectedSlotText}.`,
             [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
           );
         } else {
           Alert.alert(
             'Booking Confirmed',
-            `Scheduled with ${counselorData?.profile?.name || formatCounselorName(counselor)} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic} - ${sessionType === 'in-person' ? 'In-Person' : 'Online'}).`,
+            `Scheduled with ${nameVal} on ${formattedDisplayDate} at ${selectedSlotText} (${selectedTopic} - ${sessionType === 'in-person' ? 'In-Person' : 'Online'}).`,
             [{ text: 'OK', onPress: () => router.push('/(tabs)/sessions') }]
           );
         }

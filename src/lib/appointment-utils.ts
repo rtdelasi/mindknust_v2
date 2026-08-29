@@ -134,11 +134,12 @@ export function canJoinScheduledSession(appointment: any): JoinWindowCheck {
   const joinWindowOpenMs = startMs - JOIN_WINDOW_EARLY_MINUTES * 60 * 1000;
 
   if (nowMs < joinWindowOpenMs) {
-    // Format the start time relative to the device local timezone for user clarity
+    // Format the start date/time relative to the device local timezone for user clarity
+    const dayString = start.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
     const timeString = start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return {
       allowed: false,
-      reason: `Your session starts at ${timeString}. You can join starting 5 minutes early.`
+      reason: `Your session starts on ${dayString}, at ${timeString}. You can join 5 minutes early.`
     };
   }
 

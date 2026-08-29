@@ -33,9 +33,11 @@ import {
   fetchAppointments,
   updateAppointmentStatus,
   SupabaseAppointment,
+  fetchCounselorDetail,
 } from '@/lib/supabase-db';
 import { parseAppointmentTopic } from '@/lib/counselor-utils';
 import { canJoinScheduledSession } from '@/lib/appointment-utils';
+import { scheduleSessionReminder, cancelSessionReminder } from '@/lib/notification-service';
 
 export default function CounselorDashboardScreen() {
   const theme = useTheme();
@@ -48,6 +50,7 @@ export default function CounselorDashboardScreen() {
   );
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [rating, setRating] = useState<number>(5.0);
 
   const currentUserId =
     auth?.currentUser?.uid ||
@@ -80,6 +83,12 @@ export default function CounselorDashboardScreen() {
     try {
       const list = await fetchAppointments(currentUserId, 'counselor');
       setAppointments(list);
+      
+      const detail = await fetchCounselorDetail(currentUserId);
+      if (detail && typeof detail.rating === 'number') {
+        setRating(detail.rating);
+      }
+      
       await fetchUnreadCount();
     } catch (err) {
       console.warn('Error loading counselor appointments:', err);
@@ -155,6 +164,18 @@ export default function CounselorDashboardScreen() {
   const handleAcceptRequest = async (id: string, name: string) => {
     try {
       await updateAppointmentStatus(id, 'accepted');
+      
+      // Schedule local notification reminder
+      const appt = appointments.find((a) => a.id === id);
+      if (appt) {
+        scheduleSessionReminder(
+          id,
+          name, // student name
+          appt.appointment_date,
+          appt.time_slot
+        ).catch((e) => console.warn('[Counselor Dashboard] Notification schedule failed:', e));
+      }
+
       Alert.alert(
         'Request Accepted',
         `Session with ${name} has been added to your schedule.`
@@ -165,6 +186,18 @@ export default function CounselorDashboardScreen() {
       setAppointments((prev) =>
         prev.map((a) => (a.id === id ? { ...a, status: 'accepted' } : a))
       );
+      
+      // Try to schedule reminder in fallback block too
+      const appt = appointments.find((a) => a.id === id);
+      if (appt) {
+        scheduleSessionReminder(
+          id,
+          name,
+          appt.appointment_date,
+          appt.time_slot
+        ).catch((e) => console.warn('[Counselor Dashboard] Notification schedule fallback failed:', e));
+      }
+
       Alert.alert('Request Accepted', `Session with ${name} added.`);
     }
   };
@@ -172,6 +205,10 @@ export default function CounselorDashboardScreen() {
   const handleDeclineRequest = async (id: string, name: string) => {
     try {
       await updateAppointmentStatus(id, 'declined');
+      
+      // Cancel reminder notification if declined
+      cancelSessionReminder(id).catch((e) => console.warn('[Counselor Dashboard] Notification cancel failed:', e));
+
       Alert.alert(
         'Request Declined',
         `Booking request from ${name} was declined.`
@@ -180,6 +217,9 @@ export default function CounselorDashboardScreen() {
     } catch (err: any) {
       console.warn('Error declining appointment:', err);
       setAppointments((prev) => prev.filter((a) => a.id !== id));
+      
+      cancelSessionReminder(id).catch((e) => console.warn('[Counselor Dashboard] Notification cancel fallback failed:', e));
+
       Alert.alert('Request Declined', `Request from ${name} declined.`);
     }
   };
@@ -330,7 +370,7 @@ export default function CounselorDashboardScreen() {
             <MetricCard
               icon="star-outline"
               label="User Rating"
-              value="4.9 / 5"
+              value={`${rating.toFixed(1)} / 5`}
               trend="+0.2"
               theme={theme}
             />

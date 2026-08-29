@@ -44,10 +44,11 @@ import {
   warmUpHF,
   MentalStateAnalysis,
 } from '@/lib/sentiment';
-import { MOODS, moodEmoji } from '@/lib/moods';
+import { MOODS, moodEmoji, moodKeyFromEmoji } from '@/lib/moods';
 import {
   fetchAppointments,
   insertMoodLog,
+  fetchMoodLogs,
   SupabaseAppointment,
 } from '@/lib/supabase-db';
 import { parseAppointmentTopic } from '@/lib/counselor-utils';
@@ -238,6 +239,7 @@ export default function HomeScreen() {
   const [appointments, setAppointments] = useState<SupabaseAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [moodLogs, setMoodLogs] = useState<any[]>([]);
 
   // ── News & Wellness Insights state ──
   const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
@@ -276,6 +278,8 @@ export default function HomeScreen() {
       setAppointments(appts);
       const news = await fetchNewsArticles(activeNewsCategory);
       setNewsArticles(news);
+      const logs = await fetchMoodLogs(currentUserId);
+      setMoodLogs(logs);
       await fetchUnreadCount();
     } catch (err) {
       console.warn('Dashboard sync error:', err);
@@ -340,6 +344,8 @@ export default function HomeScreen() {
       const result = await analyzeMood(noteText);
       const sentiment = result.sentiment;
       await insertMoodLog(currentUserId, selectedMood, noteText, sentiment);
+      const updatedLogs = await fetchMoodLogs(currentUserId);
+      setMoodLogs(updatedLogs);
       setMoodNote('');
       setSelectedMood(null);
       setIsManuallySelected(false);
@@ -639,6 +645,105 @@ export default function HomeScreen() {
               disabled={savingMood || !moodNote.trim()}
               style={styles.moodSubmitBtn}
             />
+          </Card>
+
+          {/* ── Weekly Mood Analytics Card ── */}
+          <Card variant="surface" padding="four" style={{ gap: Spacing.three, marginTop: Spacing.two }}>
+            <SectionHeader
+              title={
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+                  <MaterialCommunityIcons name="chart-bar" size={18} color={theme.primary} />
+                  <Text style={{ fontSize: FontSize.body, fontWeight: FontWeight.bold, color: theme.text }}>
+                    Weekly Mood Analytics
+                  </Text>
+                </View>
+              }
+            />
+            
+            {(() => {
+              const weeklyData = (() => {
+                const data = [];
+                const now = new Date();
+                for (let i = 6; i >= 0; i--) {
+                  const targetDate = new Date();
+                  targetDate.setDate(now.getDate() - i);
+                  const dateString = targetDate.toLocaleDateString([], { weekday: 'short' });
+                  const compareStr = targetDate.toISOString().split('T')[0];
+                  
+                  const dayLogs = moodLogs.filter((log: any) => {
+                    const logDate = new Date(log.created_at).toISOString().split('T')[0];
+                    return logDate === compareStr;
+                  });
+                  
+                  let avgScore = 0;
+                  let primaryEmoji = '🙂';
+                  
+                  if (dayLogs.length > 0) {
+                    const totalScore = dayLogs.reduce((sum: number, log: any) => {
+                      const key = moodKeyFromEmoji(log.mood) || 'okay';
+                      let score = 3;
+                      if (key === 'great') score = 5;
+                      else if (key === 'good') score = 4;
+                      else if (key === 'okay') score = 3;
+                      else if (log.mood.includes('😔') || key === 'down') score = 2;
+                      else if (log.mood.includes('😠') || key === 'angry') score = 1.5;
+                      else if (log.mood.includes('😟') || key === 'distressed') score = 1;
+                      return sum + score;
+                    }, 0);
+                    avgScore = totalScore / dayLogs.length;
+                    primaryEmoji = dayLogs[dayLogs.length - 1].mood;
+                  }
+                  
+                  data.push({
+                    dayLabel: dateString,
+                    score: avgScore,
+                    emoji: dayLogs.length > 0 ? primaryEmoji : null,
+                  });
+                }
+                return data;
+              })();
+
+              const hasLogs = weeklyData.some(d => d.score > 0);
+
+              if (!hasLogs) {
+                return (
+                  <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.four, gap: Spacing.two }}>
+                    <MaterialCommunityIcons name="clipboard-text-play-outline" size={32} color={theme.textTertiary} />
+                    <Text style={{ fontSize: FontSize.caption + 1, color: theme.textSecondary, textAlign: 'center', lineHeight: 18 }}>
+                      No mood logs recorded this week. Save your daily journal above to unlock mood insights.
+                    </Text>
+                  </View>
+                );
+              }
+
+              return (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: 140, paddingTop: Spacing.three, paddingBottom: Spacing.one }}>
+                  {weeklyData.map((d, index) => {
+                    const barHeight = d.score > 0 ? Math.max(15, (d.score / 5) * 100) : 0;
+                    
+                    const barColor = d.score >= 4 
+                      ? theme.success 
+                      : d.score >= 3 
+                        ? theme.primary 
+                        : d.score > 0 
+                          ? theme.error 
+                          : 'transparent';
+
+                    return (
+                      <View key={index} style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+                        <View style={{ height: 90, width: 14, backgroundColor: theme.surfaceSoft, borderRadius: 7, justifyContent: 'flex-end', overflow: 'hidden' }}>
+                          {d.score > 0 && (
+                            <View style={{ height: `${barHeight}%`, width: '100%', backgroundColor: barColor, borderRadius: 7 }} />
+                          )}
+                        </View>
+                        <Text style={{ fontSize: FontSize.small, color: theme.textSecondary }}>{d.emoji || '•'}</Text>
+                        <Text style={{ fontSize: 10, fontWeight: FontWeight.semibold, color: theme.textTertiary }}>{d.dayLabel}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              );
+            })()}
           </Card>
 
           {/* ── Upcoming Session (solid purple card) ── */}
