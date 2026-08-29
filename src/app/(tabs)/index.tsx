@@ -13,6 +13,8 @@ import {
   Text,
   TextInput,
   View,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -98,6 +100,33 @@ export default function HomeScreen() {
     },
     primaryState: 'normal',
   });
+  // Draggable FAB setup
+  const pan = useRef(new Animated.ValueXY()).current;
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        pan.setOffset({
+          x: (pan.x as any)._value,
+          y: (pan.y as any)._value,
+        });
+        pan.setValue({ x: 0, y: 0 });
+      },
+      onPanResponderMove: Animated.event(
+        [null, { dx: pan.x, dy: pan.y }],
+        { useNativeDriver: false }
+      ),
+      onPanResponderRelease: (e, gestureState) => {
+        pan.flattenOffset();
+        // If the swipe/drag gesture is negligible, trigger screen navigation
+        if (Math.abs(gestureState.dx) < 6 && Math.abs(gestureState.dy) < 6) {
+          router.push('/social-feed');
+        }
+      },
+    })
+  ).current;
+
   const [hasOpenedCrisisSheet, setHasOpenedCrisisSheet] = useState(false);
   const [isCrisisModalVisible, setIsCrisisModalVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<'coping' | 'helplines' | 'chat'>(
@@ -746,6 +775,64 @@ export default function HomeScreen() {
             })()}
           </Card>
 
+          {/* ── Breathe & De-stress Card (Standalone Breathing Exercise) ── */}
+          <Card variant="surface" padding="four" style={{ gap: Spacing.three, marginTop: Spacing.two }}>
+            <SectionHeader
+              title={
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+                  <MaterialCommunityIcons name="spa-outline" size={18} color={theme.primary} />
+                  <Text style={{ fontSize: FontSize.body, fontWeight: FontWeight.bold, color: theme.text }}>
+                    Breathe & De-stress
+                  </Text>
+                </View>
+              }
+            />
+            <Text style={{ fontSize: FontSize.caption + 1, color: theme.textSecondary, textAlign: 'center', lineHeight: 18 }}>
+              Take a mindful minute. Follow the 4-7-8 breathing rhythm below: Inhale (4s), Hold (7s), Exhale (8s).
+            </Text>
+            
+            <View style={styles.breathingContainer}>
+              <View
+                style={[
+                  styles.breathingCircle,
+                  {
+                    width: getCircleSize(),
+                    height: getCircleSize(),
+                    borderRadius: getCircleSize() / 2,
+                    backgroundColor: getCircleColor(),
+                  },
+                ]}>
+                {isBreathingActive ? (
+                  <View style={styles.breathingLabelWrapper}>
+                    <Text style={styles.breathingStepText}>
+                      {breathingStep === 'inhale'
+                        ? 'Inhale'
+                        : breathingStep === 'hold'
+                          ? 'Hold'
+                          : 'Exhale'}
+                    </Text>
+                    <Text style={styles.breathingTimerText}>
+                      {breathingTimer}s
+                    </Text>
+                  </View>
+                ) : (
+                  <MaterialCommunityIcons
+                    name="spa"
+                    size={36}
+                    color="#FFFFFF"
+                  />
+                )}
+              </View>
+            </View>
+            
+            <Button
+              label={isBreathingActive ? 'Stop Exercise' : 'Start Breathing Exercise'}
+              variant={isBreathingActive ? 'secondary' : 'primary'}
+              onPress={() => setIsBreathingActive(!isBreathingActive)}
+              style={styles.breathingButton}
+            />
+          </Card>
+
           {/* ── Upcoming Session (solid purple card) ── */}
           {nextSession && (
             <>
@@ -1040,14 +1127,18 @@ export default function HomeScreen() {
       {/* The floating tab bar is painted by the navigator as a later sibling of
           the screen container, so no zIndex here can lift the FAB above it —
           it has to be positioned clear of the bar instead. */}
-      <Pressable
+      <Animated.View
+        {...panResponder.panHandlers}
         style={[
           styles.fab,
-          { backgroundColor: theme.primary, bottom: floatingTabBarClearance(insets.bottom) },
-        ]}
-        onPress={() => router.push('/social-feed')}>
+          {
+            backgroundColor: theme.primary,
+            bottom: floatingTabBarClearance(insets.bottom),
+            transform: [{ translateX: pan.x }, { translateY: pan.y }],
+          },
+        ]}>
         <MaterialCommunityIcons name="earth" size={26} color="#FFFFFF" />
-      </Pressable>
+      </Animated.View>
 
       {/* ── Article Reader Modal ── */}
       <Modal

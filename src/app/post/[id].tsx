@@ -265,25 +265,29 @@ export default function PostDetailScreen() {
 
             {/* Parent Action Row */}
             <View style={[styles.actionBar, { borderTopColor: theme.border, borderBottomColor: theme.border }]}>
+              <Pressable onPress={handleToggleLike} style={styles.actionItem}>
+                <MaterialCommunityIcons
+                  name={post.has_liked ? "hand-heart" : "hand-heart-outline"}
+                  size={18}
+                  color={post.has_liked ? theme.primary : theme.textSecondary}
+                />
+                {post.likes_count > 0 && (
+                  <Text style={[styles.actionCount, { color: post.has_liked ? theme.primary : theme.textSecondary }]}>
+                    {post.likes_count}
+                  </Text>
+                )}
+              </Pressable>
+
               <View style={styles.actionItem}>
                 <MaterialCommunityIcons name="comment-outline" size={18} color={theme.textSecondary} />
                 <Text style={[styles.actionCount, { color: theme.textSecondary }]}>{post.comments_count}</Text>
               </View>
 
               <Pressable onPress={handleSharePost} style={styles.actionItem}>
-                <MaterialCommunityIcons name="share-variant-outline" size={18} color={theme.textSecondary} />
-                <Text style={[styles.actionCount, { color: theme.textSecondary }]}>{post.shares_count}</Text>
-              </Pressable>
-
-              <Pressable onPress={handleToggleLike} style={styles.actionItem}>
-                <MaterialCommunityIcons
-                  name={post.has_liked ? "heart" : "heart-outline"}
-                  size={18}
-                  color={post.has_liked ? theme.rose : theme.textSecondary}
-                />
-                <Text style={[styles.actionCount, { color: post.has_liked ? theme.rose : theme.textSecondary }]}>
-                  {post.likes_count}
-                </Text>
+                <MaterialCommunityIcons name="export-variant" size={18} color={theme.textSecondary} />
+                {post.shares_count > 0 && (
+                  <Text style={[styles.actionCount, { color: theme.textSecondary }]}>{post.shares_count}</Text>
+                )}
               </Pressable>
             </View>
           </View>

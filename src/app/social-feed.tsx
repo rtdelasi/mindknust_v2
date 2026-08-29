@@ -102,13 +102,15 @@ function LikeButton({ hasLiked, count, onPress }: { hasLiked: boolean; count: nu
       style={styles.actionItem}
     >
       <MaterialCommunityIcons
-        name={hasLiked ? "heart" : "heart-outline"}
+        name={hasLiked ? "hand-heart" : "hand-heart-outline"}
         size={20}
-        color={hasLiked ? theme.rose : theme.textSecondary}
+        color={hasLiked ? theme.primary : theme.textSecondary}
       />
-      <Text style={[styles.actionCount, { color: hasLiked ? theme.rose : theme.textSecondary }]}>
-        {count}
-      </Text>
+      {count > 0 && (
+        <Text style={[styles.actionCount, { color: hasLiked ? theme.primary : theme.textSecondary }]}>
+          {count}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -502,20 +504,20 @@ export default function SocialFeedScreen() {
 
               {/* Action Bar */}
               <View style={styles.actionBar}>
+                <LikeButton
+                  hasLiked={item.has_liked ?? false}
+                  count={item.likes_count}
+                  onPress={() => handleToggleLike(item.id)}
+                />
                 <ActionButton
                   icon="comment-outline"
                   count={item.comments_count}
                   onPress={() => router.push({ pathname: '/post/[id]', params: { id: item.id } })}
                 />
                 <ActionButton
-                  icon="share-variant-outline"
+                  icon="export-variant"
                   count={item.shares_count}
                   onPress={() => handleSharePost(item.id)}
-                />
-                <LikeButton
-                  hasLiked={item.has_liked ?? false}
-                  count={item.likes_count}
-                  onPress={() => handleToggleLike(item.id)}
                 />
               </View>
             </View>
@@ -540,7 +542,7 @@ export default function SocialFeedScreen() {
             <MaterialCommunityIcons name="chevron-left" size={Size.iconXl} color={theme.text} />
           </Pressable>
           <View>
-            <Text style={[styles.headerTitle, { color: theme.text }]}>Community</Text>
+            <Text style={[styles.headerTitle, { color: theme.text }]}>Community Space</Text>
             <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
               {posts.length === 0
                 ? 'No posts yet'

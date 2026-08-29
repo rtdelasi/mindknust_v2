@@ -371,7 +371,6 @@ export default function CounselorDashboardScreen() {
               icon="star-outline"
               label="User Rating"
               value={`${rating.toFixed(1)} / 5`}
-              trend="+0.2"
               theme={theme}
             />
           </View>
