@@ -97,7 +97,8 @@ export default function AIChatbotScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 80}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* Sticky Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.two, backgroundColor: theme.surfaceRaised, borderColor: theme.border }, isDark ? Shadows.dark.card : Shadows.light.card]}>

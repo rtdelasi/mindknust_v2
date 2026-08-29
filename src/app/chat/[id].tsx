@@ -13,8 +13,12 @@ import {
   View,
   Modal,
   Alert,
+  Linking,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Audio } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
 
 import { Avatar } from '@/components/ui/avatar';
 import { BorderRadius, FontSize, FontWeight, Shadows, Size, Spacing } from '@/constants/theme';
@@ -30,7 +34,7 @@ import {
   markChatNotificationsAsRead,
   fetchOrCreateChat,
 } from '@/lib/supabase-db';
-
+import { uploadFileFromUri } from '@/lib/supabase-storage';
 import { usePresence } from '@/contexts/presence-context';
 
 interface ChatMessage {
@@ -42,6 +46,29 @@ interface ChatMessage {
   created_at: string;
   delivered_at?: string;
   read_at?: string;
+  attachment?: {
+    isAttachment: boolean;
+    type: 'image' | 'video' | 'audio';
+    url: string;
+    text?: string;
+  };
+}
+
+function parseAttachmentMessage(text: string) {
+  if (text && text.startsWith('$$ATTACHMENT$$')) {
+    try {
+      const parsed = JSON.parse(text.substring(14));
+      return {
+        isAttachment: true,
+        type: parsed.type as 'image' | 'video' | 'audio',
+        url: parsed.url,
+        text: parsed.text || '',
+      };
+    } catch (e) {
+      console.warn('[ChatRoom] Failed to parse attachment JSON:', e);
+    }
+  }
+  return undefined;
 }
 
 export default function ChatRoomScreen() {
@@ -78,14 +105,32 @@ export default function ChatRoomScreen() {
   // Realtime States
   const [otherUserTyping, setOtherUserTyping] = useState(false);
 
-  // Options Dropdown Menu
+  // Modals / Menu visibility states
   const [menuVisible, setMenuVisible] = useState(false);
+  const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
+
+  // Voice note recording states
+  const [isRecording, setIsRecording] = useState(false);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingIntervalRef = useRef<any>(null);
+
+  // File upload indicator state
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const channelRef = useRef<any>(null);
 
   const { isUserOnline } = usePresence();
   const otherUserStatus: 'Online' | 'Offline' = isUserOnline(recipientId) ? 'Online' : 'Offline';
+
+  useEffect(() => {
+    return () => {
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const resolveNewChat = async () => {
@@ -112,16 +157,20 @@ export default function ChatRoomScreen() {
     if (!chatId) return;
     try {
       const records = await fetchMessages(chatId);
-      const mapped: ChatMessage[] = records.map((m) => ({
-        id: m.id,
-        senderId: m.sender_id,
-        senderName: m.sender_id === currentUserId ? 'You' : recipientName,
-        text: m.text,
-        timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        created_at: m.created_at,
-        delivered_at: m.delivered_at,
-        read_at: m.read_at,
-      }));
+      const mapped: ChatMessage[] = records.map((m) => {
+        const attachment = parseAttachmentMessage(m.text);
+        return {
+          id: m.id,
+          senderId: m.sender_id,
+          senderName: m.sender_id === currentUserId ? 'You' : recipientName,
+          text: attachment ? (attachment.text || '') : m.text,
+          timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          created_at: m.created_at,
+          delivered_at: m.delivered_at,
+          read_at: m.read_at,
+          attachment,
+        };
+      });
       setMessages((prev) => {
         const pending = prev.filter(
           (p) =>
@@ -169,8 +218,6 @@ export default function ChatRoomScreen() {
         (payload) => {
           const insertMsg = payload.new as SupabaseMessage;
 
-          // Side effect kept out of the state updater below: updaters must stay
-          // pure, and React may invoke them more than once per dispatch.
           if (insertMsg.sender_id !== currentUserId) {
             markMessagesAsRead(chatId, currentUserId);
           }
@@ -178,30 +225,30 @@ export default function ChatRoomScreen() {
           setMessages((prev) => {
             if (prev.some((m) => m.id === insertMsg.id)) return prev;
 
+            const attachment = parseAttachmentMessage(insertMsg.text);
             const newMapped: ChatMessage = {
               id: insertMsg.id,
               senderId: insertMsg.sender_id,
               senderName: insertMsg.sender_id === currentUserId ? 'You' : recipientName,
-              text: insertMsg.text,
+              text: attachment ? (attachment.text || '') : insertMsg.text,
               timestamp: new Date(insertMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               created_at: insertMsg.created_at,
               delivered_at: insertMsg.delivered_at,
               read_at: insertMsg.read_at,
+              attachment,
             };
 
-            // Our own message can arrive over the channel before the insert
-            // call resolves. Replace the optimistic row rather than appending a
-            // second copy of it.
             const pendingIndex = prev.findIndex(
               (m) =>
                 m.id.startsWith('temp-') &&
                 m.senderId === insertMsg.sender_id &&
                 m.text === insertMsg.text
             );
-            if (pendingIndex !== -1) {
-              const next = [...prev];
-              next[pendingIndex] = newMapped;
-              return next;
+
+            if (pendingIndex > -1) {
+              const copy = [...prev];
+              copy[pendingIndex] = newMapped;
+              return copy;
             }
 
             return [...prev, newMapped];
@@ -217,35 +264,28 @@ export default function ChatRoomScreen() {
           filter: `chat_id=eq.${chatId}`,
         },
         (payload) => {
-          const updatedMsg = payload.new as SupabaseMessage;
+          const updated = payload.new as SupabaseMessage;
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === updatedMsg.id
-                ? {
-                    ...m,
-                    delivered_at: updatedMsg.delivered_at,
-                    read_at: updatedMsg.read_at,
-                  }
-                : m
+            prev.map((msg) =>
+              msg.id === updated.id
+                ? { ...msg, read_at: updated.read_at, delivered_at: updated.delivered_at }
+                : msg
             )
           );
         }
       )
-      .on('broadcast', { event: 'typing' }, (event) => {
-        const payload = event.payload;
+      .on('broadcast', { event: 'typing' }, (response) => {
+        const payload = response.payload;
         if (payload.userId !== currentUserId) {
           setOtherUserTyping(payload.typing);
         }
       })
-      .subscribe((status, err) => {
+      .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          // Anything inserted between the initial fetch and the channel going
-          // live is not replayed, so resync once the socket is actually live.
-          loadChatThread();
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.log('[Presence] Successfully subscribed to realtime messages channel.');
+        } else if (status === 'CHANNEL_ERROR') {
           console.warn(
-            `[Chat Realtime] channel ${status} for chat ${chatId}.`,
-            err?.message ??
+            '[Presence] Realtime channel subscription failed. Messages will update only on page focus. ' +
               'If this persists, confirm public.messages is a member of the supabase_realtime publication.'
           );
         }
@@ -254,18 +294,20 @@ export default function ChatRoomScreen() {
     channelRef.current = channel;
 
     return () => {
-      if (channelRef.current) {
-        supabase!.removeChannel(channelRef.current);
+      if (channelRef.current && supabase) {
+        supabase.removeChannel(channelRef.current);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, currentUserId]);
+  }, [chatId]);
 
-  // Scroll to bottom
+  // Scroll to bottom helper
   useEffect(() => {
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 200);
+    if (messages.length > 0) {
+      setTimeout(() => {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
   }, [messages, otherUserTyping]);
 
   const handleTextChange = (val: string) => {
@@ -311,8 +353,6 @@ export default function ChatRoomScreen() {
       const sent = await submitDbMessage(chatId, currentUserId, bodyText);
       if (sent) {
         setMessages((prev) => {
-          // The realtime INSERT may have already swapped the optimistic row for
-          // the real one; in that case just drop the placeholder.
           if (prev.some((m) => m.id === sent.id)) {
             return prev.filter((m) => m.id !== mockId);
           }
@@ -334,6 +374,207 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // Draggable Recording Handlers
+  const handleStartRecording = async () => {
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Permission Denied', 'Microphone permissions are required to record voice notes.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording: newRecording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+
+      setRecording(newRecording);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.warn('Failed to start recording:', err);
+      Alert.alert('Recording Failed', 'Could not access device microphone.');
+    }
+  };
+
+  const handleStopRecording = async () => {
+    if (!recording) return;
+    try {
+      setIsRecording(false);
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      setRecording(null);
+
+      if (uri) {
+        await handleSendAttachment('audio', uri);
+      }
+    } catch (err) {
+      console.warn('Failed to stop recording:', err);
+    }
+  };
+
+  // Media Picker Attachment Handlers
+  const handleSendAttachment = async (type: 'image' | 'video' | 'audio', localUri: string) => {
+    if (!chatId) return;
+    setUploadingAttachment(true);
+    try {
+      let extension = 'jpg';
+      let contentType = 'image/jpeg';
+      
+      if (type === 'audio') {
+        extension = 'm4a';
+        contentType = 'audio/x-m4a';
+      } else if (type === 'video') {
+        extension = 'mp4';
+        contentType = 'video/mp4';
+      }
+
+      const filename = `${Date.now()}.${extension}`;
+      const path = `chat/${chatId}/${filename}`;
+
+      // Upload payload asynchronously to public Supabase bucket
+      const publicUrl = await uploadFileFromUri('post-attachments', path, localUri, contentType);
+
+      const mockId = `temp-${Date.now()}`;
+      const attachmentData = {
+        isAttachment: true,
+        type,
+        url: publicUrl,
+        text: type === 'audio' ? '🎙️ Voice Note' : type === 'video' ? '🎥 Video Attachment' : '📷 Image Attachment',
+      };
+      
+      const bodyText = `$$ATTACHMENT$$${JSON.stringify(attachmentData)}`;
+
+      const optimisticMessage: ChatMessage = {
+        id: mockId,
+        senderId: currentUserId,
+        senderName: 'You',
+        text: attachmentData.text,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        created_at: new Date().toISOString(),
+        delivered_at: undefined,
+        read_at: undefined,
+        attachment: {
+          isAttachment: true,
+          type,
+          url: publicUrl,
+          text: attachmentData.text,
+        },
+      };
+
+      setMessages((prev) => [...prev, optimisticMessage]);
+
+      const sent = await submitDbMessage(chatId, currentUserId, bodyText);
+      if (sent) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === sent.id)) {
+            return prev.filter((m) => m.id !== mockId);
+          }
+          return prev.map((m) =>
+            m.id === mockId
+              ? {
+                  ...m,
+                  id: sent.id,
+                  created_at: sent.created_at,
+                  delivered_at: sent.delivered_at,
+                  read_at: sent.read_at,
+                }
+              : m
+          );
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to upload and send attachment:', err);
+      Alert.alert('Upload Failed', 'Could not send attachment. Please verify network connectivity.');
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handlePickImage = async () => {
+    setAttachmentMenuVisible(false);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Permission Denied', 'Media library access is required to attach photos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const uri = result.assets[0].uri;
+        await handleSendAttachment('image', uri);
+      }
+    } catch (err) {
+      console.warn('Pick image failed:', err);
+    }
+  };
+
+  const handlePickVideo = async () => {
+    setAttachmentMenuVisible(false);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Permission Denied', 'Media library access is required to attach videos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const uri = result.assets[0].uri;
+        await handleSendAttachment('video', uri);
+      }
+    } catch (err) {
+      console.warn('Pick video failed:', err);
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    setAttachmentMenuVisible(false);
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Permission Denied', 'Camera access is required to take photos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const uri = result.assets[0].uri;
+        await handleSendAttachment('image', uri);
+      }
+    } catch (err) {
+      console.warn('Take photo failed:', err);
+    }
+  };
+
   const handleBlockUser = () => {
     setMenuVisible(false);
     Alert.alert('User Blocked', 'This contact has been restricted. You will not receive any messages from them.');
@@ -349,8 +590,8 @@ export default function ChatRoomScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       
       {/* Sticky Header */}
@@ -383,7 +624,7 @@ export default function ChatRoomScreen() {
         </View>
       </View>
 
-      {/* Safety / Crisis Banner (only for Student profile views) */}
+      {/* Safety / Crisis Banner */}
       {role === 'student' && (
         <Pressable
           onPress={handleCrisisHotline}
@@ -404,24 +645,22 @@ export default function ChatRoomScreen() {
           ref={scrollRef}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.messagesContainer, { paddingBottom: Spacing.four }]}
-          style={styles.messageList}>
+          style={styles.messageList}
+          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+          onLayout={() => scrollRef.current?.scrollToEnd({ animated: true })}>
           <Text style={[styles.encryptionNotice, { color: theme.textSecondary }]}>
             🔒 End-to-end encrypted consultations. Your privacy is protected.
           </Text>
 
           {messages.map((msg, index) => {
             const isOutgoing = msg.senderId === currentUserId;
-            
-            // Check message groupings to collapse spacing for consecutive messages from same user
             const previousMsg = index > 0 ? messages[index - 1] : null;
             const isConsecutive = previousMsg && previousMsg.senderId === msg.senderId;
 
-            // Date dividers grouping (Render date banner between different hours)
             const showDateDivider =
               !previousMsg ||
-              new Date(msg.created_at).getTime() - new Date(previousMsg.created_at).getTime() > 1800000; // 30 mins gap
+              new Date(msg.created_at).getTime() - new Date(previousMsg.created_at).getTime() > 1800000;
 
-            // Check if this message is the most recent in a consecutive run of outgoing messages
             const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
             const isLastInRun = !nextMsg || nextMsg.senderId !== msg.senderId;
             const showReceipt = isOutgoing && isLastInRun;
@@ -458,15 +697,29 @@ export default function ChatRoomScreen() {
                           ? [styles.outgoingBubble, { backgroundColor: theme.primary }]
                           : [styles.incomingBubble, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }],
                         isDark ? Shadows.dark.card : Shadows.light.card,
+                        msg.attachment && { paddingHorizontal: 0, paddingVertical: 0, overflow: 'hidden' }
                       ]}>
-                      <Text style={[styles.messageText, { color: isOutgoing ? theme.onPrimary : theme.text }]}>
-                        {msg.text}
-                      </Text>
+                      {msg.attachment ? (
+                        <View style={{ width: 220 }}>
+                          {msg.attachment.type === 'image' && (
+                            <ImageAttachmentView url={msg.attachment.url} />
+                          )}
+                          {msg.attachment.type === 'video' && (
+                            <VideoAttachmentView url={msg.attachment.url} />
+                          )}
+                          {msg.attachment.type === 'audio' && (
+                            <AudioAttachmentView url={msg.attachment.url} isOutgoing={isOutgoing} />
+                          )}
+                        </View>
+                      ) : (
+                        <Text style={[styles.messageText, { color: isOutgoing ? theme.onPrimary : theme.text }]}>
+                          {msg.text}
+                        </Text>
+                      )}
                     </View>
                   </View>
                 </View>
 
-                {/* Show read receipt under the most recent in a run */}
                 {showReceipt && (
                   <Text style={[styles.readReceipt, { color: theme.textSecondary }]}>
                     {msg.read_at ? 'Seen' : msg.delivered_at ? 'Delivered' : 'Sent'}
@@ -492,34 +745,57 @@ export default function ChatRoomScreen() {
         </ScrollView>
       )}
 
+      {/* Uploading Status Overlay */}
+      {uploadingAttachment && (
+        <View style={[styles.uploadBar, { backgroundColor: theme.surfaceSoft, borderTopWidth: 1, borderTopColor: theme.border }]}>
+          <ActivityIndicator size="small" color={theme.primary} />
+          <Text style={{ fontSize: 12, color: theme.textSecondary, fontWeight: 'medium' }}>
+            Uploading media attachment...
+          </Text>
+        </View>
+      )}
+
       {/* Input controls footer */}
       <View style={[styles.footerInput, { paddingBottom: Math.max(insets.bottom, Spacing.three), borderTopWidth: 1, borderTopColor: theme.border, backgroundColor: theme.surfaceRaised }]}>
         <View style={[styles.inputContainer, { backgroundColor: theme.surfaceSoft, borderColor: theme.border }]}>
+          
           <Pressable
             style={styles.mediaButton}
-            onPress={() => Alert.alert('Share Document', 'Integrations with Google DriveKNUST mailbox for clinical records sharing is locked.')}>
+            onPress={() => setAttachmentMenuVisible(true)}>
             <MaterialCommunityIcons name="paperclip" size={22} color={theme.textSecondary} />
           </Pressable>
-          <TextInput
-            placeholder="Type your message..."
-            placeholderTextColor={theme.textSecondary}
-            value={text}
-            onChangeText={handleTextChange}
-            style={[styles.textInput, { color: theme.text }]}
-          />
-          <Pressable
-            disabled={!text.trim()}
-            onPress={handleSendMessage}
-            style={[
-              styles.sendButton,
-              { backgroundColor: text.trim() ? theme.primary : `${theme.primary}33` },
-            ]}>
-            <MaterialCommunityIcons
-              name="send"
-              size={18}
-              color="#FFFFFF"
+
+          {isRecording ? (
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 4 }}>
+              <View style={[styles.recordingDot, { backgroundColor: theme.error }]} />
+              <Text style={{ fontSize: FontSize.body - 1, color: theme.error, fontWeight: 'bold' }}>
+                Recording voice note ({recordingDuration}s)...
+              </Text>
+            </View>
+          ) : (
+            <TextInput
+              placeholder="Type your message..."
+              placeholderTextColor={theme.textSecondary}
+              value={text}
+              onChangeText={handleTextChange}
+              style={[styles.textInput, { color: theme.text }]}
             />
-          </Pressable>
+          )}
+
+          {text.trim().length > 0 ? (
+            <Pressable
+              onPress={handleSendMessage}
+              style={[styles.sendButton, { backgroundColor: theme.primary }]}>
+              <MaterialCommunityIcons name="send" size={18} color="#FFFFFF" />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={isRecording ? handleStopRecording : handleStartRecording}
+              style={[styles.sendButton, { backgroundColor: isRecording ? theme.error : theme.primary }]}>
+              <MaterialCommunityIcons name={isRecording ? "stop" : "microphone"} size={18} color="#FFFFFF" />
+            </Pressable>
+          )}
+
         </View>
       </View>
 
@@ -561,7 +837,151 @@ export default function ChatRoomScreen() {
         </Pressable>
       </Modal>
 
+      {/* Attachment Selection Menu Modal */}
+      <Modal visible={attachmentMenuVisible} transparent animationType="slide">
+        <Pressable style={styles.modalOverlay} onPress={() => setAttachmentMenuVisible(false)}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surfaceRaised }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Attach Media</Text>
+            
+            <Pressable onPress={handleTakePhoto} style={styles.modalOption}>
+              <MaterialCommunityIcons name="camera" size={20} color={theme.textSecondary} />
+              <Text style={[styles.optionText, { color: theme.text }]}>Take Photo</Text>
+            </Pressable>
+
+            <Pressable onPress={handlePickImage} style={styles.modalOption}>
+              <MaterialCommunityIcons name="image" size={20} color={theme.textSecondary} />
+              <Text style={[styles.optionText, { color: theme.text }]}>Choose Photo from Gallery</Text>
+            </Pressable>
+
+            <Pressable onPress={handlePickVideo} style={styles.modalOption}>
+              <MaterialCommunityIcons name="video-outline" size={20} color={theme.textSecondary} />
+              <Text style={[styles.optionText, { color: theme.text }]}>Choose Video from Gallery</Text>
+            </Pressable>
+
+            <Pressable onPress={() => setAttachmentMenuVisible(false)} style={[styles.modalOption, { borderTopWidth: 1, borderTopColor: theme.border, marginTop: 4 }]}>
+              <Text style={[styles.cancelText, { color: theme.primary }]}>Cancel</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
     </KeyboardAvoidingView>
+  );
+}
+
+/* ────────────────────────────────────────────────────────
+   Attachment Render Views
+   ──────────────────────────────────────────────────────── */
+
+function ImageAttachmentView({ url }: { url: string }) {
+  const [loading, setLoading] = useState(true);
+  return (
+    <Pressable onPress={() => Linking.openURL(url)}>
+      <Image
+        source={{ uri: url }}
+        style={{ width: '100%', height: 160 }}
+        resizeMode="cover"
+        onLoadEnd={() => setLoading(false)}
+      />
+      {loading && (
+        <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.05)' }]}>
+          <ActivityIndicator size="small" />
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+function VideoAttachmentView({ url }: { url: string }) {
+  return (
+    <Pressable
+      onPress={() => Linking.openURL(url)}
+      style={{ width: '100%', height: 140, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' }}>
+      <MaterialCommunityIcons name="play-circle" size={48} color="#FFFFFF" />
+      <Text style={{ color: '#FFFFFF', fontSize: 12, marginTop: 4, fontWeight: 'bold' }}>Play Video</Text>
+    </Pressable>
+  );
+}
+
+function AudioAttachmentView({ url, isOutgoing }: { url: string; isOutgoing: boolean }) {
+  const theme = useTheme();
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  useEffect(() => {
+    return () => {
+      if (sound) {
+        sound.unloadAsync();
+      }
+    };
+  }, [sound]);
+
+  const handlePlayPause = async () => {
+    try {
+      if (sound) {
+        if (isPlaying) {
+          await sound.pauseAsync();
+          setIsPlaying(false);
+        } else {
+          await sound.playAsync();
+          setIsPlaying(true);
+        }
+      } else {
+        const { sound: newSound } = await Audio.Sound.createAsync(
+          { uri: url },
+          { shouldPlay: true },
+          (status) => {
+            if (status.isLoaded) {
+              setPosition(status.positionMillis);
+              setDuration(status.durationMillis || 0);
+              setIsPlaying(status.isPlaying);
+              if (status.didJustFinish) {
+                setIsPlaying(false);
+                setPosition(0);
+              }
+            }
+          }
+        );
+        setSound(newSound);
+        setIsPlaying(true);
+      }
+    } catch (err) {
+      console.warn('Playback error:', err);
+    }
+  };
+
+  const formatTime = (millis: number) => {
+    if (isNaN(millis) || millis < 0) return '0:00';
+    const seconds = Math.floor((millis / 1000) % 60);
+    const minutes = Math.floor(millis / 60000);
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  };
+
+  const textColor = isOutgoing ? theme.onPrimary : theme.text;
+  const accentColor = isOutgoing ? '#FFFFFF' : theme.primary;
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', padding: Spacing.two + 2, gap: Spacing.two, minWidth: 200 }}>
+      <Pressable
+        onPress={handlePlayPause}
+        style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: isOutgoing ? 'rgba(255,255,255,0.2)' : theme.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+        <MaterialCommunityIcons
+          name={isPlaying ? 'pause' : 'play'}
+          size={18}
+          color={accentColor}
+        />
+      </Pressable>
+      <View style={{ flex: 1, gap: 1 }}>
+        <Text style={{ fontSize: 12, color: textColor, fontWeight: 'bold' }}>
+          🎙️ Voice Note
+        </Text>
+        <Text style={{ fontSize: 10, color: isOutgoing ? 'rgba(255,255,255,0.7)' : theme.textSecondary }}>
+          {formatTime(position)} / {duration > 0 ? formatTime(duration) : '0:00'}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -677,7 +1097,7 @@ const styles = StyleSheet.create({
     marginRight: Spacing.two,
   },
   avatarPlaceholder: {
-    width: 24, // Matches avatar space width to keep bubbles aligned
+    width: 24,
     marginRight: Spacing.two,
   },
   bubbleWrapper: {
@@ -734,6 +1154,18 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  uploadBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    gap: Spacing.two,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   modalOverlay: {
     flex: 1,

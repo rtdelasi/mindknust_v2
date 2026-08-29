@@ -655,7 +655,7 @@ export default function SocialFeedScreen() {
         {/* SUBVIEW 1: Figma Post Composer */}
         {activeSubView === 'compose' && (
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={[styles.modalScreen, { backgroundColor: theme.background }]}>
             {/* Modal Header */}
             <View style={[styles.modalHeader, { borderBottomColor: theme.divider, backgroundColor: theme.surfaceRaised }]}>

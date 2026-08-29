@@ -15,6 +15,7 @@ import {
   View,
   Animated,
   PanResponder,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -100,25 +101,40 @@ export default function HomeScreen() {
     },
     primaryState: 'normal',
   });
-  // Draggable FAB setup
+  // Draggable FAB setup with boundary clamping to keep it fully on screen
   const pan = useRef(new Animated.ValueXY()).current;
+  const lastPosition = useRef({ x: 0, y: 0 });
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        pan.setOffset({
-          x: (pan.x as any)._value,
-          y: (pan.y as any)._value,
-        });
-        pan.setValue({ x: 0, y: 0 });
+        // Start gesture tracking from previous dropped position
       },
-      onPanResponderMove: Animated.event(
-        [null, { dx: pan.x, dy: pan.y }],
-        { useNativeDriver: false }
-      ),
+      onPanResponderMove: (e, gestureState) => {
+        const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+        
+        // Calculate proposed absolute position from initial layout
+        const targetX = lastPosition.current.x + gestureState.dx;
+        const targetY = lastPosition.current.y + gestureState.dy;
+        
+        // Set clamp limits to keep it safely within visible boundaries
+        const minX = -(screenWidth - 56 - 32);
+        const maxX = 16;
+        
+        const minY = -(screenHeight - insets.top - insets.bottom - 160);
+        const maxY = insets.bottom + 50;
+        
+        const clampedX = Math.min(Math.max(targetX, minX), maxX);
+        const clampedY = Math.min(Math.max(targetY, minY), maxY);
+        
+        pan.setValue({ x: clampedX, y: clampedY });
+      },
       onPanResponderRelease: (e, gestureState) => {
-        pan.flattenOffset();
+        const currentX = (pan.x as any)._value;
+        const currentY = (pan.y as any)._value;
+        lastPosition.current = { x: currentX, y: currentY };
+        
         // If the swipe/drag gesture is negligible, trigger screen navigation
         if (Math.abs(gestureState.dx) < 6 && Math.abs(gestureState.dy) < 6) {
           router.push('/social-feed');

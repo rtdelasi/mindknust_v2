@@ -203,7 +203,8 @@ export default function PostDetailScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 80}
       style={[styles.screen, { backgroundColor: theme.background }]}>
 
       {/* Header Bar */}
