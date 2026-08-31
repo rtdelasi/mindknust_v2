@@ -50,75 +50,77 @@ export default function LoginScreen() {
       let displayName = email.split('@')[0];
       let resolvedRole: UserRole = role;
       let resolvedApproval: ApprovalStatus = 'approved';
+      let authenticatedUid: string | null = null;
 
+      // 1. Firebase Auth sign-in
       if (hasFirebaseConfig && auth) {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-
-        // Enforce user role from Supabase to block wrong portal login
-        let dbRole: UserRole = 'student';
-        let profileExists = false;
-
-        if (hasSupabaseConfig && supabase) {
-          const { data, error: roleError } = await supabase
-            .from('profiles')
-            .select('role, name')
-            .eq('id', userCredential.user.uid)
-            .maybeSingle();
-
-          if (!roleError && data?.role) {
-            dbRole = data.role as UserRole;
-            profileExists = true;
-            if (data.name) {
-              displayName = data.name;
-            }
-          } else {
-            dbRole = email.endsWith('@counselcare.edu') ? 'counselor' : 'student';
-          }
-        } else {
-          dbRole = email.endsWith('@counselcare.edu') ? 'counselor' : 'student';
-        }
-
-        // Admins sign in from either portal tab; students and counselors must
-        // use the portal matching their registered role.
-        if (dbRole !== 'admin' && dbRole !== role) {
-          const { signOut } = await import('firebase/auth');
-          await signOut(auth);
-          throw new Error(`This account is registered as a ${dbRole}. Please use the ${dbRole === 'student' ? 'Student' : 'Counselor'} Portal.`);
-        }
-
-        // Auto-create profile in Supabase if missing
-        if (!profileExists && hasSupabaseConfig) {
-          const defaultName = email.split('@')[0];
-          await upsertProfile(userCredential.user.uid, defaultName, email, dbRole);
-          displayName = defaultName;
-          if (dbRole === 'student') {
-            // Students need an anonymous ID for anonymous posts and bookings.
-            // Registration supplies one; this path has to issue its own.
-            await ensureAnonymousId(userCredential.user.uid);
-          }
-        }
-
-        // Counselors must carry their real approval status, otherwise the
-        // pending/rejected gate in app/index.tsx is bypassed. Counselors who
-        // registered before the approval flow existed have no
-        // counselor_profiles row at all — treat those as approved rather than
-        // pending, or an established counselor is locked out of their own
-        // chats and appointments. Only an explicit row can gate access.
-        if (dbRole === 'counselor' && hasSupabaseConfig && supabase) {
-          const { data: cData, error: cError } = await supabase
-            .from('counselor_profiles')
-            .select('approval_status')
-            .eq('user_id', userCredential.user.uid)
-            .maybeSingle();
-          if (!cError && cData?.approval_status) {
-            resolvedApproval = cData.approval_status as ApprovalStatus;
-          }
-        }
-
-        resolvedRole = dbRole;
+        const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
+        authenticatedUid = userCredential.user.uid;
       }
 
-      await login(resolvedRole, email, displayName, undefined, undefined, resolvedApproval);
+      // If no cloud auth configured, fallback to local mock ID
+      if (!authenticatedUid) {
+        authenticatedUid = role === 'counselor' ? 'kwame-boateng' : 'student-user';
+      }
+
+      // Enforce user role from Supabase to block wrong portal login
+      let dbRole: UserRole = role;
+      let profileExists = false;
+
+      if (hasSupabaseConfig && supabase) {
+        const { data, error: roleError } = await supabase
+          .from('profiles')
+          .select('role, name')
+          .eq('id', authenticatedUid)
+          .maybeSingle();
+
+        if (!roleError && data?.role) {
+          dbRole = data.role as UserRole;
+          profileExists = true;
+          if (data.name) {
+            displayName = data.name;
+          }
+        } else {
+          dbRole = email.endsWith('@mindknust.edu.gh') ? 'counselor' : 'student';
+        }
+      } else {
+        dbRole = email.endsWith('@mindknust.edu.gh') ? 'counselor' : 'student';
+      }
+
+      // Admins sign in from either portal tab; students and counselors must
+      // use the portal matching their registered role.
+      if (dbRole !== 'admin' && dbRole !== role) {
+        if (hasFirebaseConfig && auth) {
+          const { signOut } = await import('firebase/auth');
+          await signOut(auth);
+        }
+        throw new Error(`This account is registered as a ${dbRole}. Please use the ${dbRole === 'student' ? 'Student' : 'Counselor'} Portal.`);
+      }
+
+      // Auto-create profile in Supabase if missing
+      if (!profileExists && hasSupabaseConfig) {
+        const defaultName = email.split('@')[0];
+        await upsertProfile(authenticatedUid, defaultName, email.trim(), dbRole);
+        displayName = defaultName;
+        if (dbRole === 'student') {
+          await ensureAnonymousId(authenticatedUid);
+        }
+      }
+
+      if (dbRole === 'counselor' && hasSupabaseConfig && supabase) {
+        const { data: cData, error: cError } = await supabase
+          .from('counselor_profiles')
+          .select('approval_status')
+          .eq('user_id', authenticatedUid)
+          .maybeSingle();
+        if (!cError && cData?.approval_status) {
+          resolvedApproval = cData.approval_status as ApprovalStatus;
+        }
+      }
+
+      resolvedRole = dbRole;
+
+      await login(resolvedRole, email.trim(), displayName, undefined, undefined, resolvedApproval);
       setLoading(false);
       router.replace('/');
     } catch (err: any) {
@@ -143,7 +145,7 @@ export default function LoginScreen() {
             <View style={[styles.logoIconWrap, { backgroundColor: theme.primarySoft }]}>
               <MaterialCommunityIcons name="heart-pulse" size={42} color={theme.primary} />
             </View>
-            <Text style={[styles.title, { color: theme.text }]}>CounselCare</Text>
+            <Text style={[styles.title, { color: theme.text }]}>MindKNUST</Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
               Your campus mental health and wellbeing portal.
             </Text>

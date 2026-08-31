@@ -169,7 +169,7 @@ export default function ProfileScreen() {
               icon="help-circle-outline"
               label="Help"
               color={theme.success}
-              onPress={() => Alert.alert('Contact Support', 'KNUST Counselor support team email: support@counselcare.edu')}
+              onPress={() => Alert.alert('Contact Support', 'KNUST Counselor support team email: support@mindknust.edu.gh')}
             />
           </View>
 
@@ -334,7 +334,7 @@ export default function ProfileScreen() {
               iconBg={theme.successSoft}
               iconColor={theme.success}
               showChevron
-              onPress={() => Alert.alert('Contact Support', 'KNUST Counselor support team email: support@counselcare.edu')}
+              onPress={() => Alert.alert('Contact Support', 'KNUST Counselor support team email: support@mindknust.edu.gh')}
             />
             <SettingsRow
               icon="shield-lock-outline"
@@ -368,7 +368,7 @@ export default function ProfileScreen() {
 
           {/* ── App Info ── */}
           <View style={styles.appInfo}>
-            <Text style={[styles.appInfoText, { color: theme.textSecondary }]}>CounselCare v1.0.0</Text>
+            <Text style={[styles.appInfoText, { color: theme.textSecondary }]}>MindKNUST v1.0.0</Text>
             <Text style={[styles.appInfoText, { color: theme.textSecondary }]}>KNUST Campus Wellbeing</Text>
           </View>
 

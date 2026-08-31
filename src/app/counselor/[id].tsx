@@ -136,7 +136,7 @@ export default function CounselorDetailScreen() {
     if (!counselor) return;
     try {
       await Share.share({
-        message: `Check out ${counselor.profile?.name || 'this counselor'} on CounselCare — ${counselor.specialties.join(', ')}`,
+        message: `Check out ${counselor.profile?.name || 'this counselor'} on MindKNUST — ${counselor.specialties.join(', ')}`,
       });
     } catch {}
   };
@@ -486,7 +486,7 @@ export default function CounselorDetailScreen() {
                     </View>
                     {rev.comment ? (
                       <Text style={{ fontSize: 13, color: theme.textSecondary, lineHeight: 18, marginTop: 4 }}>
-                        "{rev.comment}"
+                        &ldquo;{rev.comment}&rdquo;
                       </Text>
                     ) : null}
                     <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 6, alignSelf: 'flex-end' }}>

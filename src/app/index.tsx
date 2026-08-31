@@ -13,7 +13,7 @@ export default function Index() {
   useEffect(() => {
     const checkOnboarding = async () => {
       try {
-        const completed = await safeStorage.getItem('counselcare_onboarding_completed');
+        const completed = await safeStorage.getItem('mindknust_onboarding_completed');
         setShouldShowOnboarding(completed !== 'true');
       } catch (e) {
         console.warn('Error reading onboarding status:', e);

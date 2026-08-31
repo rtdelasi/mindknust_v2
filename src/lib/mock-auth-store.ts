@@ -6,22 +6,18 @@ import { auth, hasFirebaseConfig } from '@/lib/firebase';
 import { supabase, hasSupabaseConfig } from '@/lib/supabase';
 import { ensureAnonymousId } from '@/lib/supabase-db';
 
-const ROLE_KEY = 'counselcare_mock_role';
-const AUTH_KEY = 'counselcare_mock_authenticated';
-const USER_KEY = 'counselcare_mock_user_name';
-const AVATAR_KEY = 'counselcare_mock_avatar_url';
-const ANON_ID_KEY = 'counselcare_mock_anonymous_id';
-const APPROVAL_STATUS_KEY = 'counselcare_mock_approval_status';
+const ROLE_KEY = 'mindknust_mock_role';
+const AUTH_KEY = 'mindknust_mock_authenticated';
+const USER_KEY = 'mindknust_mock_user_name';
+const AVATAR_KEY = 'mindknust_mock_avatar_url';
+const ANON_ID_KEY = 'mindknust_mock_anonymous_id';
+const APPROVAL_STATUS_KEY = 'mindknust_mock_approval_status';
 
 export type UserRole = 'student' | 'counselor' | 'admin';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 let listeners: (() => void)[] = [];
-
-// Firebase restores its persisted session asynchronously. Until the first
-// onAuthStateChanged callback fires, `auth.currentUser` is null even for a
-// signed-in user, which would bounce them to the login screen on cold start.
-let firebaseAuthResolved = !(hasFirebaseConfig && auth);
+let authResolved = !(hasFirebaseConfig && auth);
 
 function notifyListeners() {
   listeners.forEach((listener) => listener());
@@ -31,13 +27,11 @@ function notifyListeners() {
 if (hasFirebaseConfig && auth) {
   auth.onAuthStateChanged(async (firebaseUser) => {
     if (firebaseUser) {
-      // 1. Get the display name and photoURL
       let name = firebaseUser.displayName || firebaseUser.email || 'User';
       let avatar = firebaseUser.photoURL || null;
       let approvalStatus: ApprovalStatus = 'approved';
+      let resolvedRole: UserRole = firebaseUser.email?.endsWith('@mindknust.edu.gh') ? 'counselor' : 'student';
 
-      // 2. Query user role and status from Supabase if connected
-      let resolvedRole: UserRole = firebaseUser.email?.endsWith('@counselcare.edu') ? 'counselor' : 'student';
       if (hasSupabaseConfig && supabase) {
         try {
           const { data, error } = await supabase
@@ -47,18 +41,12 @@ if (hasFirebaseConfig && auth) {
             .maybeSingle();
 
           if (!error && data) {
-            resolvedRole = data.role as UserRole;
-            if (data.name) {
-              name = data.name;
-            }
-            if (data.avatar_url) {
-              avatar = data.avatar_url;
-            }
+            resolvedRole = (data.role as UserRole) || resolvedRole;
+            if (data.name) name = data.name;
+            if (data.avatar_url) avatar = data.avatar_url;
             if (data.anonymous_id) {
               await safeStorage.setItem(ANON_ID_KEY, data.anonymous_id);
             } else if (resolvedRole === 'student') {
-              // Profiles created by sign-in auto-provisioning have no ID.
-              // Backfill so anonymous posting has something to display.
               const backfilled = await ensureAnonymousId(firebaseUser.uid);
               if (backfilled) {
                 await safeStorage.setItem(ANON_ID_KEY, backfilled);
@@ -78,11 +66,10 @@ if (hasFirebaseConfig && auth) {
             }
           }
         } catch (e) {
-          console.warn('Could not query role/status from Supabase, using fallbacks:', e);
+          console.warn('[Firebase Auth Store] Error resolving profile from Supabase:', e);
         }
       }
 
-      // 3. Cache them locally so they are synchronously fetchable
       await safeStorage.setItem(ROLE_KEY, resolvedRole);
       await safeStorage.setItem(AUTH_KEY, 'true');
       await safeStorage.setItem(USER_KEY, name);
@@ -93,7 +80,6 @@ if (hasFirebaseConfig && auth) {
         await safeStorage.removeItem(AVATAR_KEY);
       }
     } else {
-      // Only clear if local demo/mock auth is not explicitly authenticated
       const localAuth = await safeStorage.getItem(AUTH_KEY);
       if (localAuth !== 'true') {
         await safeStorage.removeItem(ROLE_KEY);
@@ -104,7 +90,7 @@ if (hasFirebaseConfig && auth) {
         await safeStorage.removeItem(APPROVAL_STATUS_KEY);
       }
     }
-    firebaseAuthResolved = true;
+    authResolved = true;
     notifyListeners();
   });
 }
@@ -116,6 +102,13 @@ export const mockAuth = {
   getRole: async (): Promise<UserRole | null> => {
     return (await safeStorage.getItem(ROLE_KEY)) as UserRole | null;
   },
+  getUserId: async (): Promise<string> => {
+    if (hasFirebaseConfig && auth?.currentUser?.uid) {
+      return auth.currentUser.uid;
+    }
+    const role = (await safeStorage.getItem(ROLE_KEY)) as UserRole | null;
+    return role === 'counselor' ? 'kwame-boateng' : 'student-user';
+  },
   isAuthenticated: async (): Promise<boolean> => {
     const localAuth = await safeStorage.getItem(AUTH_KEY);
     if (localAuth === 'true') {
@@ -123,7 +116,7 @@ export const mockAuth = {
     }
     const client = auth;
     if (hasFirebaseConfig && client) {
-      if (!firebaseAuthResolved) {
+      if (!authResolved) {
         await new Promise<void>((resolve) => {
           const unsub = client.onAuthStateChanged(() => {
             unsub();
@@ -137,7 +130,12 @@ export const mockAuth = {
   },
   getUserName: async (): Promise<string> => {
     if (hasFirebaseConfig && auth?.currentUser) {
-      return (await safeStorage.getItem(USER_KEY)) || auth.currentUser.displayName || auth.currentUser.email || 'User';
+      return (
+        (await safeStorage.getItem(USER_KEY)) ||
+        auth.currentUser.displayName ||
+        auth.currentUser.email ||
+        'User'
+      );
     }
     return (await safeStorage.getItem(USER_KEY)) || 'Guest';
   },
@@ -157,9 +155,18 @@ export const mockAuth = {
     }
     return 'approved';
   },
-  login: async (role: UserRole, email: string, name?: string, avatarUrl?: string, anonymousId?: string, approvalStatus: ApprovalStatus = 'approved') => {
+  login: async (
+    role: UserRole,
+    email: string,
+    name?: string,
+    avatarUrl?: string,
+    anonymousId?: string,
+    approvalStatus: ApprovalStatus = 'approved'
+  ) => {
     const userName = name || (role === 'student' ? 'Adjoa D.' : 'Kwame Boateng');
-    const userAvatar = avatarUrl || (role === 'student' ? null : 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150');
+    const userAvatar =
+      avatarUrl ||
+      (role === 'student' ? null : 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150');
     await safeStorage.setItem(ROLE_KEY, role);
     await safeStorage.setItem(AUTH_KEY, 'true');
     await safeStorage.setItem(USER_KEY, userName);
@@ -237,16 +244,11 @@ export function useMockAuth() {
         setApprovalStatus(status);
       }
     }
-
     load();
-
-    const unsubscribe = mockAuth.subscribe(() => {
-      load();
-    });
-
+    const unsub = mockAuth.subscribe(load);
     return () => {
       active = false;
-      unsubscribe();
+      unsub();
     };
   }, []);
 
@@ -259,7 +261,7 @@ export function useMockAuth() {
     approvalStatus,
     login: mockAuth.login,
     logout: mockAuth.logout,
-    updateProfile: mockAuth.updateProfile,
     updateProfileName: mockAuth.updateProfileName,
+    updateProfile: mockAuth.updateProfile,
   };
 }

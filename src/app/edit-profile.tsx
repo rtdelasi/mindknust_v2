@@ -118,7 +118,32 @@ export default function EditProfileScreen() {
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      setPhotoUri(result.assets[0].uri);
+      const asset = result.assets[0];
+
+      // Type validation
+      const mime = asset.mimeType || '';
+      const uri = asset.uri || '';
+      const extension = uri.split('.').pop()?.toLowerCase() || '';
+      const allowedImageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+      
+      if (mime) {
+        if (!mime.startsWith('image/')) {
+          Alert.alert('Security Error', 'Invalid file type. Only image files are allowed.');
+          return;
+        }
+      } else if (extension && !allowedImageExtensions.includes(extension)) {
+        Alert.alert('Security Error', 'Invalid file extension. Only JPG, PNG, WEBP, and GIF images are allowed.');
+        return;
+      }
+
+      // Size validation (Max 5MB)
+      const maxSizeBytes = 5 * 1024 * 1024;
+      if (asset.fileSize && asset.fileSize > maxSizeBytes) {
+        Alert.alert('Security Error', 'File size exceeds the maximum limit of 5MB.');
+        return;
+      }
+
+      setPhotoUri(asset.uri);
     }
   };
 
@@ -136,7 +161,32 @@ export default function EditProfileScreen() {
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      setPhotoUri(result.assets[0].uri);
+      const asset = result.assets[0];
+
+      // Type validation
+      const mime = asset.mimeType || '';
+      const uri = asset.uri || '';
+      const extension = uri.split('.').pop()?.toLowerCase() || '';
+      const allowedImageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+      
+      if (mime) {
+        if (!mime.startsWith('image/')) {
+          Alert.alert('Security Error', 'Invalid file type. Only image files are allowed.');
+          return;
+        }
+      } else if (extension && !allowedImageExtensions.includes(extension)) {
+        Alert.alert('Security Error', 'Invalid file extension. Only JPG, PNG, WEBP, and GIF images are allowed.');
+        return;
+      }
+
+      // Size validation (Max 5MB)
+      const maxSizeBytes = 5 * 1024 * 1024;
+      if (asset.fileSize && asset.fileSize > maxSizeBytes) {
+        Alert.alert('Security Error', 'File size exceeds the maximum limit of 5MB.');
+        return;
+      }
+
+      setPhotoUri(asset.uri);
     }
   };
 
@@ -161,7 +211,7 @@ export default function EditProfileScreen() {
     setLoading(true);
     try {
       const activeUserUid = auth?.currentUser?.uid || (isCounselor ? 'kwame-boateng' : 'student-user');
-      const activeUserEmail = auth?.currentUser?.email || (isCounselor ? 'kwame@counselcare.edu' : 'student@knust.edu');
+      const activeUserEmail = auth?.currentUser?.email || (isCounselor ? 'kwame@mindknust.edu.gh' : 'student@knust.edu');
 
       let finalAvatarUrl = photoUri;
 

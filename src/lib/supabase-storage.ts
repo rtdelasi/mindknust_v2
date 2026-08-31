@@ -113,3 +113,30 @@ export async function deleteFiles(bucketName: string, paths: string | string[]) 
 
   return data;
 }
+
+/**
+ * Create a temporary signed URL to download or view a private file in storage
+ * @param bucketName The name of the storage bucket
+ * @param path The path to the file within the bucket
+ * @param expiresInSeconds Duration in seconds before the signed URL expires (default: 3600 = 1 hour)
+ */
+export async function createSignedUrl(
+  bucketName: string,
+  path: string,
+  expiresInSeconds: number = 3600
+): Promise<string> {
+  if (!supabase) {
+    throw new Error('Supabase client is not initialized.');
+  }
+
+  const { data, error } = await supabase.storage
+    .from(bucketName)
+    .createSignedUrl(path, expiresInSeconds);
+
+  if (error || !data?.signedUrl) {
+    throw error || new Error('Failed to generate signed URL.');
+  }
+
+  return data.signedUrl;
+}
+

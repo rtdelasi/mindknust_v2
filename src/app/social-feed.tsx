@@ -328,7 +328,7 @@ export default function SocialFeedScreen() {
 
   const handleSharePost = async (postId: string) => {
     try {
-      Clipboard.setString(`https://counselcare.edu/post/${postId}`);
+      Clipboard.setString(`https://mindknust.edu.gh/post/${postId}`);
       Alert.alert('Link Copied', 'Post URL copied to clipboard!');
       setPosts(prev =>
         prev.map(post => {
@@ -393,7 +393,32 @@ export default function SocialFeedScreen() {
         quality: 0.8,
       });
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setSelectedMediaUri(result.assets[0].uri);
+        const asset = result.assets[0];
+
+        // Type validation
+        const mime = asset.mimeType || '';
+        const uri = asset.uri || '';
+        const extension = uri.split('.').pop()?.toLowerCase() || '';
+        const allowedImageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+        
+        if (mime) {
+          if (!mime.startsWith('image/')) {
+            Alert.alert('Security Error', 'Invalid file type. Only image files are allowed.');
+            return;
+          }
+        } else if (extension && !allowedImageExtensions.includes(extension)) {
+          Alert.alert('Security Error', 'Invalid file extension. Only JPG, PNG, WEBP, and GIF images are allowed.');
+          return;
+        }
+
+        // Size validation (Max 5MB for feed posts)
+        const maxSizeBytes = 5 * 1024 * 1024;
+        if (asset.fileSize && asset.fileSize > maxSizeBytes) {
+          Alert.alert('Security Error', 'File size exceeds the maximum limit of 5MB.');
+          return;
+        }
+
+        setSelectedMediaUri(asset.uri);
       }
     } catch (err) {
       console.error('Error opening device gallery:', err);

@@ -119,6 +119,7 @@ interface Announcement {
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [adminEmail, setAdminEmail] = useState('admin@mindknust.edu.gh');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState<'overview' | 'moderation' | 'flagged' | 'counselors' | 'notifications' | 'news'>('overview');
@@ -158,13 +159,31 @@ export default function App() {
   const [modSearch, setModSearch] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'flagged'>('all');
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoginError('');
+
+    if (adminEmail && password && hasSupabaseConfig) {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: adminEmail.trim(),
+          password: password.trim(),
+        });
+
+        if (!error && data?.user) {
+          setIsLoggedIn(true);
+          return;
+        }
+      } catch (e) {
+        console.warn('Supabase admin login notice:', e);
+      }
+    }
+
     if (password === 'admin123' || password === 'mindknust2026') {
       setIsLoggedIn(true);
       setLoginError('');
     } else {
-      setLoginError('Invalid Administrator Passcode.');
+      setLoginError('Invalid Administrator Credentials or Passcode.');
     }
   };
 
@@ -324,9 +343,27 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // File type validation (whitelist image types only)
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('Security Error: Invalid file type. Only JPG, PNG, WEBP, and GIF images are allowed.');
+      return;
+    }
+
+    // File size validation (limit to 5MB)
+    const maxSizeBytes = 5 * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      alert('Security Error: File size exceeds the maximum limit of 5MB.');
+      return;
+    }
+
     setUploadingImage(true);
     try {
       const fileExt = file.name.split('.').pop() || 'jpg';
+      // Sanitize file extension to prevent path traversal
+      if (!/^[a-zA-Z0-9]+$/.test(fileExt)) {
+        throw new Error('Invalid file extension.');
+      }
       const fileName = `news_${Date.now()}.${fileExt}`;
       const filePath = `news-articles/${fileName}`;
 
@@ -581,21 +618,34 @@ export default function App() {
             <div className="w-16 h-16 bg-brand-500/10 border border-brand-500/20 rounded-2xl flex items-center justify-center mb-4">
               <Lock className="w-8 h-8 text-brand-500" />
             </div>
-            <h1 className="text-2xl font-bold text-slate-100">CounselCare Portal</h1>
+            <h1 className="text-2xl font-bold text-slate-100">MindKNUST Portal</h1>
             <p className="text-slate-400 text-sm mt-1">Administrator Dashboard Control Panel</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-6">
+          <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-2">
-                Administrator Passcode
+              <label className="block text-sm font-semibold text-slate-300 mb-1.5">
+                Admin Email
+              </label>
+              <input
+                type="email"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                placeholder="admin@mindknust.edu.gh"
+                className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl focus:outline-none focus:border-brand-500 transition-colors text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-300 mb-1.5">
+                Passcode / Password
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter admin passcode"
-                className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-3 rounded-xl focus:outline-none focus:border-brand-500 transition-colors"
+                placeholder="Enter password or demo passcode"
+                className="w-full bg-slate-950 border border-slate-800 text-slate-100 px-4 py-2.5 rounded-xl focus:outline-none focus:border-brand-500 transition-colors text-sm"
                 autoFocus
               />
               {loginError ? (
@@ -608,14 +658,14 @@ export default function App() {
 
             <button
               type="submit"
-              className="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-brand-600/20"
+              className="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-brand-600/20 text-sm mt-2"
             >
               Access Dashboard
             </button>
           </form>
 
-          <div className="mt-8 text-center text-xs text-slate-500">
-            Demo passcode: <span className="font-mono text-slate-400">admin123</span>
+          <div className="mt-6 text-center text-xs text-slate-500">
+            Demo passcode: <span className="font-mono text-slate-400">admin123</span> or <span className="font-mono text-slate-400">mindknust2026</span>
           </div>
         </div>
       </div>
@@ -631,7 +681,7 @@ export default function App() {
             <Heart className="w-5 h-5 text-brand-500" />
           </div>
           <div>
-            <h2 className="font-bold text-slate-100 leading-tight">CounselCare</h2>
+            <h2 className="font-bold text-slate-100 leading-tight">MindKNUST</h2>
             <span className="text-xs text-slate-500">Admin Control</span>
           </div>
         </div>

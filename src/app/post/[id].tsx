@@ -92,7 +92,7 @@ export default function PostDetailScreen() {
   const handleSharePost = async () => {
     if (!post) return;
     try {
-      Clipboard.setString(`https://counselcare.edu/post/${post.id}`);
+      Clipboard.setString(`https://mindknust.edu.gh/post/${post.id}`);
       Alert.alert('Link Copied', 'Post URL copied to clipboard!');
       setPost({
         ...post,

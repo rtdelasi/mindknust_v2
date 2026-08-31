@@ -17,7 +17,7 @@ export async function getHmsAuthToken(
   }
 
   const targetRoomCode =
-    roomCode || process.env.EXPO_PUBLIC_100MS_ROOM_CODE || 'counselcare-demo-room';
+    roomCode || process.env.EXPO_PUBLIC_100MS_ROOM_CODE || 'mindknust-demo-room';
 
   try {
     console.log('[HMSService] Fetching auth token for room code:', targetRoomCode);

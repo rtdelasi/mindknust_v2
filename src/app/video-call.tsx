@@ -303,10 +303,10 @@ export default function VideoCallScreen() {
   }, [stableTrackId]);
 
   const defaultRoomId = useRef(
-    `counselcare-webrtc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    `mindknust-webrtc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   ).current;
 
-  const activeRoomId = passedRoomId || (appointmentId ? `counselcare-webrtc-appt-${appointmentId}` : defaultRoomId);
+  const activeRoomId = passedRoomId || (appointmentId ? `mindknust-webrtc-appt-${appointmentId}` : defaultRoomId);
   const callIdRef = useRef<string | null>(passedCallId || null);
   const signalingRef = useRef<WebRTCSignalingManager | null>(null);
   const statusUnsubRef = useRef<(() => void) | null>(null);

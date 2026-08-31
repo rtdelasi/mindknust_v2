@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "CounselCare",
-    "slug": "counselcare",
+    "name": "MindKNUST",
+    "slug": "mindknust",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "counselcare",
+    "scheme": "mindknust",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -30,7 +30,7 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.anonymous.counselcare"
+      "package": "com.anonymous.mindknust"
     },
     "web": {
       "output": "static",
@@ -53,16 +53,16 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "Allow CounselCare to access your photos to share in the community feed.",
-          "savePhotosPermission": "Allow CounselCare to save photos.",
+          "photosPermission": "Allow MindKNUST to access your photos to share in the community feed.",
+          "savePhotosPermission": "Allow MindKNUST to save photos.",
           "isAccessMediaLocationEnabled": false
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow CounselCare to access your camera for video sessions.",
-          "microphonePermission": "Allow CounselCare to access your microphone for video sessions.",
+          "cameraPermission": "Allow MindKNUST to access your camera for video sessions.",
+          "microphonePermission": "Allow MindKNUST to access your microphone for video sessions.",
           "recordAudioAndroid": true
         }
       ]
@@ -74,7 +74,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "74d288e6-61ec-4388-ab39-c6682e52fb62"
+        "projectId": "27bdc7f4-cb58-4c51-a15e-cffe0000c977"
       }
     }
   }

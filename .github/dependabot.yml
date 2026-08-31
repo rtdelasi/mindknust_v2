@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # Maintain dependencies for the mobile app (React Native / Expo)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "security-team"
+    labels:
+      - "dependencies"
+      - "security"
+    ignore:
+      - dependency-name: "expo"
+        update-types: ["version-update:semver-major"]
+
+  # Maintain dependencies for the web admin dashboard (Vite / React)
+  - package-ecosystem: "npm"
+    directory: "/admin-dashboard"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "admin-dashboard"
+      - "security"
+
+  # Maintain GitHub Actions workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "ci-cd"
+      - "security"

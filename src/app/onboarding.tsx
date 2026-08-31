@@ -42,8 +42,8 @@ export default function OnboardingScreen() {
   const handleComplete = async () => {
     try {
       // Persist onboarding preferences locally and flag completion status
-      await safeStorage.setItem('counselcare_student_preferences', JSON.stringify(selectedPreferences));
-      await safeStorage.setItem('counselcare_onboarding_completed', 'true');
+      await safeStorage.setItem('mindknust_student_preferences', JSON.stringify(selectedPreferences));
+      await safeStorage.setItem('mindknust_onboarding_completed', 'true');
       router.replace('/');
     } catch (e) {
       console.warn('Failed to save onboarding settings:', e);
@@ -54,7 +54,7 @@ export default function OnboardingScreen() {
   // Onboarding screens configuration
   const steps = [
     {
-      title: 'Welcome to CounselCare',
+      title: 'Welcome to MindKNUST',
       subtitle: 'Your safe, confidential campus space for mental health support and counseling guidance at KNUST.',
       icon: 'heart-pulse',
       color: theme.primary,

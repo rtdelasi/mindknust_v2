@@ -386,7 +386,7 @@ export default function AdminApprovalsTabScreen() {
         </View>
         <Text style={[styles.accessDeniedTitle, { color: theme.text }]}>Access Restricted</Text>
         <Text style={[styles.accessDeniedSub, { color: theme.textSecondary }]}>
-          Counselor application review and verification controls are restricted to authorized CounselCare clinical administrators.
+          Counselor application review and verification controls are restricted to authorized MindKNUST clinical administrators.
         </Text>
         <Button
           label="Return to Dashboard"

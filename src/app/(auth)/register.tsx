@@ -23,6 +23,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useMockAuth } from '@/lib/mock-auth-store';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth, hasFirebaseConfig } from '@/lib/firebase';
+import { supabase, hasSupabaseConfig } from '@/lib/supabase';
 import {
   upsertProfile,
   generateAnonymousId,
@@ -92,10 +93,35 @@ export default function RegisterScreen() {
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
+        const asset = result.assets[0];
+
+        // Type validation (fallback matching extension if mimeType is empty)
+        const mime = asset.mimeType || '';
+        const uri = asset.uri || '';
+        const extension = uri.split('.').pop()?.toLowerCase() || '';
+        const allowedImageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+        
+        if (mime) {
+          if (!mime.startsWith('image/')) {
+            Alert.alert('Security Error', 'Invalid file type. Only image files are allowed.');
+            return;
+          }
+        } else if (extension && !allowedImageExtensions.includes(extension)) {
+          Alert.alert('Security Error', 'Invalid file extension. Only JPG, PNG, WEBP, and GIF images are allowed.');
+          return;
+        }
+
+        // Size validation
+        const maxSizeBytes = (type === 'doc' ? 10 : 5) * 1024 * 1024; // 10MB for documents, 5MB for photos
+        if (asset.fileSize && asset.fileSize > maxSizeBytes) {
+          Alert.alert('Security Error', `File size exceeds the maximum limit of ${type === 'doc' ? '10MB' : '5MB'}.`);
+          return;
+        }
+
         if (type === 'doc') {
-          setCredentialDoc(result.assets[0].uri);
+          setCredentialDoc(asset.uri);
         } else {
-          setPhotoUrl(result.assets[0].uri);
+          setPhotoUrl(asset.uri);
         }
       }
     } catch (e) {
@@ -139,6 +165,7 @@ export default function RegisterScreen() {
 
       let userUid = `student-${Date.now()}`;
 
+      // 1. Firebase Auth signup
       if (hasFirebaseConfig && auth) {
         const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
         await updateProfile(userCredential.user, { displayName: name.trim() });
@@ -204,6 +231,7 @@ export default function RegisterScreen() {
     try {
       let userUid = `counselor-${Date.now()}`;
 
+      // 1. Firebase Auth signup
       if (hasFirebaseConfig && auth) {
         const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
         await updateProfile(userCredential.user, { displayName: name.trim() });
@@ -304,7 +332,7 @@ export default function RegisterScreen() {
             </Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
               {role === 'student'
-                ? 'Join KNUST CounselCare for instant confidential support'
+                ? 'Join MindKNUST for instant confidential support'
                 : 'Apply to join our verified clinical counseling portal'}
             </Text>
           </View>

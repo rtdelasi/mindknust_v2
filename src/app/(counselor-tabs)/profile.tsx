@@ -236,7 +236,7 @@ export default function CounselorProfileScreen() {
                       </View>
                       {rev.comment ? (
                         <Text style={{ fontSize: 12, color: theme.textSecondary, lineHeight: 16 }}>
-                          "{rev.comment}"
+                          &ldquo;{rev.comment}&rdquo;
                         </Text>
                       ) : null}
                       <Text style={{ fontSize: 10, color: theme.textSecondary, alignSelf: 'flex-end' }}>

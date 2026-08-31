@@ -1,4 +1,4 @@
-# CounselCare
+# MindKNUST
 
 Expo SDK 54 counselor booking app scaffold with Expo Router and Supabase.
 

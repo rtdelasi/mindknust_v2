@@ -203,17 +203,17 @@ export async function upsertProfile(
     if (error) {
       console.warn('[Supabase Profiles] RLS or DB notice during upsert:', error.message || error);
       const fallback = { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
-      AsyncStorage.setItem(`counselcare_user_created_at:${id}`, fallback.created_at).catch(() => {});
+      AsyncStorage.setItem(`mindknust_user_created_at:${id}`, fallback.created_at).catch(() => {});
       return fallback;
     }
     if (data?.created_at) {
-      AsyncStorage.setItem(`counselcare_user_created_at:${id}`, data.created_at).catch(() => {});
+      AsyncStorage.setItem(`mindknust_user_created_at:${id}`, data.created_at).catch(() => {});
     }
     return data;
   } catch (err) {
     console.warn('[Supabase Profiles] Catching upsert error, falling back locally:', err);
     const fallback = { id, name, email, role, avatar_url: avatarUrl, anonymous_id: anonymousId, created_at: new Date().toISOString() };
-    AsyncStorage.setItem(`counselcare_user_created_at:${id}`, fallback.created_at).catch(() => {});
+    AsyncStorage.setItem(`mindknust_user_created_at:${id}`, fallback.created_at).catch(() => {});
     return fallback;
   }
 }

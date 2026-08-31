@@ -74,7 +74,7 @@ export async function scheduleSessionReminder(
       identifier: `session-reminder-${appointmentId}`,
       content: {
         title: 'Upcoming Session Reminder 🕒',
-        body: `Your session with ${otherPartyName} starts in 15 minutes. Open CounselCare to join the lobby!`,
+        body: `Your session with ${otherPartyName} starts in 15 minutes. Open MindKNUST to join the lobby!`,
         data: { appointmentId },
         sound: true,
       },

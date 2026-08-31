@@ -121,7 +121,7 @@ export default function CounselorPendingScreen() {
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
               {isRejected
                 ? 'Thank you for your interest. Unfortunately, your clinical counselor application was not approved at this time.'
-                : 'Welcome to CounselCare! Your application has been submitted and is currently being verified by our clinical administration team.'}
+                : 'Welcome to MindKNUST! Your application has been submitted and is currently being verified by our clinical administration team.'}
             </Text>
           </View>
 

@@ -98,7 +98,7 @@ export default function CounselorSessionsScreen() {
     setSelectedApptId(apptId);
     setSelectedStudentName(studentName);
     try {
-      const stored = await safeStorage.getItem(`counselcare_notes_${apptId}`);
+      const stored = await safeStorage.getItem(`mindknust_notes_${apptId}`);
       setSessionNotes(stored || '');
     } catch {
       setSessionNotes('');
@@ -109,7 +109,7 @@ export default function CounselorSessionsScreen() {
   const handleSaveNotes = async () => {
     if (!selectedApptId) return;
     try {
-      await safeStorage.setItem(`counselcare_notes_${selectedApptId}`, sessionNotes.trim());
+      await safeStorage.setItem(`mindknust_notes_${selectedApptId}`, sessionNotes.trim());
       setNotesModalVisible(false);
       Alert.alert('Notes Saved', 'Session clinical summary stored successfully.');
     } catch {

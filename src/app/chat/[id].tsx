@@ -519,8 +519,32 @@ export default function ChatRoomScreen() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const uri = result.assets[0].uri;
-        await handleSendAttachment('image', uri);
+        const asset = result.assets[0];
+
+        // Type validation
+        const mime = asset.mimeType || '';
+        const uri = asset.uri || '';
+        const extension = uri.split('.').pop()?.toLowerCase() || '';
+        const allowedImageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+        
+        if (mime) {
+          if (!mime.startsWith('image/')) {
+            Alert.alert('Security Error', 'Invalid file type. Only image files are allowed.');
+            return;
+          }
+        } else if (extension && !allowedImageExtensions.includes(extension)) {
+          Alert.alert('Security Error', 'Invalid file extension. Only JPG, PNG, WEBP, and GIF images are allowed.');
+          return;
+        }
+
+        // Size validation (Max 5MB for images)
+        const maxSizeBytes = 5 * 1024 * 1024;
+        if (asset.fileSize && asset.fileSize > maxSizeBytes) {
+          Alert.alert('Security Error', 'File size exceeds the maximum limit of 5MB.');
+          return;
+        }
+
+        await handleSendAttachment('image', asset.uri);
       }
     } catch (err) {
       console.warn('Pick image failed:', err);
@@ -543,8 +567,32 @@ export default function ChatRoomScreen() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const uri = result.assets[0].uri;
-        await handleSendAttachment('video', uri);
+        const asset = result.assets[0];
+
+        // Type validation
+        const mime = asset.mimeType || '';
+        const uri = asset.uri || '';
+        const extension = uri.split('.').pop()?.toLowerCase() || '';
+        const allowedVideoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
+        
+        if (mime) {
+          if (!mime.startsWith('video/')) {
+            Alert.alert('Security Error', 'Invalid file type. Only video files are allowed.');
+            return;
+          }
+        } else if (extension && !allowedVideoExtensions.includes(extension)) {
+          Alert.alert('Security Error', 'Invalid file extension. Only common video formats are allowed.');
+          return;
+        }
+
+        // Size validation (Max 15MB for videos)
+        const maxSizeBytes = 15 * 1024 * 1024;
+        if (asset.fileSize && asset.fileSize > maxSizeBytes) {
+          Alert.alert('Security Error', 'Video size exceeds the maximum limit of 15MB.');
+          return;
+        }
+
+        await handleSendAttachment('video', asset.uri);
       }
     } catch (err) {
       console.warn('Pick video failed:', err);
@@ -567,8 +615,32 @@ export default function ChatRoomScreen() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const uri = result.assets[0].uri;
-        await handleSendAttachment('image', uri);
+        const asset = result.assets[0];
+
+        // Type validation
+        const mime = asset.mimeType || '';
+        const uri = asset.uri || '';
+        const extension = uri.split('.').pop()?.toLowerCase() || '';
+        const allowedImageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+        
+        if (mime) {
+          if (!mime.startsWith('image/')) {
+            Alert.alert('Security Error', 'Invalid file type. Only image files are allowed.');
+            return;
+          }
+        } else if (extension && !allowedImageExtensions.includes(extension)) {
+          Alert.alert('Security Error', 'Invalid file extension. Only JPG, PNG, WEBP, and GIF images are allowed.');
+          return;
+        }
+
+        // Size validation (Max 5MB)
+        const maxSizeBytes = 5 * 1024 * 1024;
+        if (asset.fileSize && asset.fileSize > maxSizeBytes) {
+          Alert.alert('Security Error', 'File size exceeds the maximum limit of 5MB.');
+          return;
+        }
+
+        await handleSendAttachment('image', asset.uri);
       }
     } catch (err) {
       console.warn('Take photo failed:', err);

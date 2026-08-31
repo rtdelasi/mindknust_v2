@@ -3,7 +3,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { Colors } from '@/constants/theme';
 import { safeStorage } from '@/lib/safe-storage';
 
-const THEME_KEY = 'counselcare_theme_mode';
+const THEME_KEY = 'mindknust_theme_mode';
 
 type ThemeMode = keyof typeof Colors;
 

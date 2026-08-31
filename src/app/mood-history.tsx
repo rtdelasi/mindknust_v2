@@ -49,14 +49,14 @@ export default function MoodHistoryScreen() {
         }));
         setLogs(formatted);
       } else {
-        const existing = await safeStorage.getItem('counselcare_mood_logs');
+        const existing = await safeStorage.getItem('mindknust_mood_logs');
         if (existing) {
           setLogs(JSON.parse(existing));
         }
       }
     } catch (e) {
       console.warn('DB mood logs fetch failed, loading local logs:', e);
-      const existing = await safeStorage.getItem('counselcare_mood_logs');
+      const existing = await safeStorage.getItem('mindknust_mood_logs');
       if (existing) {
         setLogs(JSON.parse(existing));
       }
@@ -84,7 +84,7 @@ export default function MoodHistoryScreen() {
               // Note: We delete locally for now. If table delete is needed, it can be extended.
               const updated = logs.filter((log) => log.id !== id);
               setLogs(updated);
-              await safeStorage.setItem('counselcare_mood_logs', JSON.stringify(updated));
+              await safeStorage.setItem('mindknust_mood_logs', JSON.stringify(updated));
             } catch (e) {
               console.error(e);
               Alert.alert('Error', 'Failed to delete log.');
@@ -107,7 +107,7 @@ export default function MoodHistoryScreen() {
           onPress: async () => {
             try {
               setLogs([]);
-              await safeStorage.removeItem('counselcare_mood_logs');
+              await safeStorage.removeItem('mindknust_mood_logs');
             } catch (e) {
               console.error(e);
             }
