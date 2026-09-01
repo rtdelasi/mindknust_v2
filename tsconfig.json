@@ -23,7 +23,6 @@
     "admin-dashboard",
     "android",
     "ios",
-    "dist",
-    "scratch"
+    "dist"
   ]
 }

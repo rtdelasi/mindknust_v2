@@ -4,11 +4,11 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node --dns-result-order=ipv4first node_modules/expo/bin/cli start",
-    "reset-project": "node ./scripts/reset-project.js",
     "android": "node --dns-result-order=ipv4first node_modules/expo/bin/cli start --android",
     "ios": "node --dns-result-order=ipv4first node_modules/expo/bin/cli start --ios",
     "web": "node --dns-result-order=ipv4first node_modules/expo/bin/cli start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "node ./scripts/verify-authorization.js && node ./scripts/verify-utils.js"
   },
   "dependencies": {
     "@100mslive/react-native-hms": "^1.12.3",

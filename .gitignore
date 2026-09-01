@@ -67,7 +67,3 @@ Thumbs.db
 *.log
 logs/
 
-# ============================================================
-# Vendored AI tooling — reinstall with `uipro init --ai claude`
-# ============================================================
-.claude/skills/
