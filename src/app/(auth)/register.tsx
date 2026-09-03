@@ -327,6 +327,11 @@ export default function RegisterScreen() {
 
           {/* Header text */}
           <View style={styles.headerBlock}>
+            <Image
+              source={require('@/assets/images/mindknust-logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
             <Text style={[styles.title, { color: theme.text }]}>
               {role === 'student' ? 'Student Registration' : 'Counselor Application'}
             </Text>
@@ -897,6 +902,11 @@ const styles = StyleSheet.create({
   headerBlock: {
     alignItems: 'center',
     gap: Spacing.one,
+  },
+  logoImage: {
+    width: 64,
+    height: 64,
+    marginBottom: 4,
   },
   title: {
     fontSize: FontSize.h2,

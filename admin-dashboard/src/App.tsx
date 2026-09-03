@@ -14,7 +14,6 @@ import {
   AlertTriangle,
   UserCheck,
   Calendar,
-  Lock,
   Megaphone,
   Flag,
   Ban,
@@ -615,9 +614,11 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
           <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 bg-brand-500/10 border border-brand-500/20 rounded-2xl flex items-center justify-center mb-4">
-              <Lock className="w-8 h-8 text-brand-500" />
-            </div>
+            <img
+              src="/mindknust-logo.png"
+              alt="MindKNUST Logo"
+              className="w-20 h-20 object-contain mb-4"
+            />
             <h1 className="text-2xl font-bold text-slate-100">MindKNUST Portal</h1>
             <p className="text-slate-400 text-sm mt-1">Administrator Dashboard Control Panel</p>
           </div>
@@ -677,9 +678,11 @@ export default function App() {
       {/* Sidebar Navigation */}
       <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
         <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-          <div className="w-10 h-10 bg-brand-500/10 rounded-xl flex items-center justify-center">
-            <Heart className="w-5 h-5 text-brand-500" />
-          </div>
+          <img
+            src="/mindknust-logo.png"
+            alt="MindKNUST Logo"
+            className="w-10 h-10 object-contain"
+          />
           <div>
             <h2 className="font-bold text-slate-100 leading-tight">MindKNUST</h2>
             <span className="text-xs text-slate-500">Admin Control</span>

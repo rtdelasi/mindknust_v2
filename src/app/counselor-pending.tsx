@@ -2,6 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState, useCallback } from 'react';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -97,6 +98,15 @@ export default function CounselorPendingScreen() {
         ]}
         showsVerticalScrollIndicator={false}>
         <View style={styles.container}>
+          {/* Brand Logo */}
+          <View style={styles.logoWrap}>
+            <Image
+              source={require('@/assets/images/mindknust-logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
+          </View>
+
           {/* Status Icon */}
           <View
             style={[
@@ -216,6 +226,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     alignItems: 'center',
     gap: Spacing.four,
+  },
+  logoWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.one,
+  },
+  logoImage: {
+    width: 72,
+    height: 72,
   },
   iconCircle: {
     width: 96,

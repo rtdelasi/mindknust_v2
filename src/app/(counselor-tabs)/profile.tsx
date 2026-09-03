@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useState, useCallback } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, Alert, Switch } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View, Alert, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/avatar';
@@ -279,6 +279,21 @@ export default function CounselorProfileScreen() {
               />
             </View>
           </Card>
+
+          {/* App Info & Attribution */}
+          <View style={styles.appInfo}>
+            <Image
+              source={require('@/assets/images/mindknust-logo.png')}
+              style={styles.appInfoLogo}
+              resizeMode="contain"
+            />
+            <Text style={[styles.appInfoText, { color: theme.textSecondary, fontWeight: FontWeight.semibold }]}>
+              MindKNUST Clinical Portal v1.0.0
+            </Text>
+            <Text style={[styles.appInfoText, { color: theme.textSecondary }]}>
+              KNUST Counseling Center & Student Affairs
+            </Text>
+          </View>
 
           {/* Actions */}
           <View style={styles.actionsBox}>
@@ -727,6 +742,20 @@ const styles = StyleSheet.create({
   trustLinkText: {
     fontSize: FontSize.caption + 1,
     fontWeight: FontWeight.bold,
+  },
+  appInfo: {
+    alignItems: 'center',
+    gap: Spacing.half,
+    paddingVertical: Spacing.three,
+    marginTop: Spacing.two,
+  },
+  appInfoLogo: {
+    width: 48,
+    height: 48,
+    marginBottom: 4,
+  },
+  appInfoText: {
+    fontSize: FontSize.small,
   },
   actionsBox: {
     width: '100%',

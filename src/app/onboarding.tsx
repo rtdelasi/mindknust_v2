@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/button';
@@ -102,10 +102,20 @@ export default function OnboardingScreen() {
       </View>
 
       <View style={styles.content}>
-        {/* Step Icon */}
-        <View style={[styles.iconContainer, { backgroundColor: theme.surfaceRaised }]}>
-          <MaterialCommunityIcons name={step.icon as any} size={72} color={step.color} />
-        </View>
+        {/* Step Icon / Brand Logo */}
+        {currentStep === 0 ? (
+          <View style={styles.logoContainer}>
+            <Image
+              source={require('@/assets/images/mindknust-logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
+          </View>
+        ) : (
+          <View style={[styles.iconContainer, { backgroundColor: theme.surfaceRaised }]}>
+            <MaterialCommunityIcons name={step.icon as any} size={72} color={step.color} />
+          </View>
+        )}
 
         {/* Dynamic Titles */}
         <Text style={[styles.title, { color: theme.text }]}>{step.title}</Text>
@@ -194,6 +204,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.five,
     gap: Spacing.four,
+  },
+  logoContainer: {
+    width: 140,
+    height: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.two,
+  },
+  logoImage: {
+    width: 140,
+    height: 140,
   },
   iconContainer: {
     width: 130,

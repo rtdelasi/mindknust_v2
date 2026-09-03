@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useState, useCallback } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View, Switch, TextInput, Modal } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View, Switch, TextInput, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/avatar';
@@ -368,8 +368,17 @@ export default function ProfileScreen() {
 
           {/* ── App Info ── */}
           <View style={styles.appInfo}>
-            <Text style={[styles.appInfoText, { color: theme.textSecondary }]}>MindKNUST v1.0.0</Text>
-            <Text style={[styles.appInfoText, { color: theme.textSecondary }]}>KNUST Campus Wellbeing</Text>
+            <Image
+              source={require('@/assets/images/mindknust-logo.png')}
+              style={styles.appInfoLogo}
+              resizeMode="contain"
+            />
+            <Text style={[styles.appInfoText, { color: theme.textSecondary, fontWeight: FontWeight.semibold }]}>
+              MindKNUST v1.0.0
+            </Text>
+            <Text style={[styles.appInfoText, { color: theme.textSecondary }]}>
+              KNUST Counseling Center & Student Affairs
+            </Text>
           </View>
 
           {/* ── Logout ── */}
@@ -739,6 +748,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.half,
     paddingVertical: Spacing.two,
+  },
+  appInfoLogo: {
+    width: 48,
+    height: 48,
+    marginBottom: 4,
   },
   appInfoText: {
     fontSize: FontSize.small,

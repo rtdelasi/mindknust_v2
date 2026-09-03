@@ -2,6 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -142,8 +143,12 @@ export default function LoginScreen() {
         <View style={styles.container}>
           {/* Brand Logo & Header */}
           <View style={styles.headerBlock}>
-            <View style={[styles.logoIconWrap, { backgroundColor: theme.primarySoft }]}>
-              <MaterialCommunityIcons name="heart-pulse" size={42} color={theme.primary} />
+            <View style={styles.logoWrap}>
+              <Image
+                source={require('@/assets/images/mindknust-logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
             </View>
             <Text style={[styles.title, { color: theme.text }]}>MindKNUST</Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
@@ -283,12 +288,15 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     marginBottom: Spacing.two,
   },
-  logoIconWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: BorderRadius.lg + 4,
+  logoWrap: {
+    width: 90,
+    height: 90,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  logoImage: {
+    width: 90,
+    height: 90,
   },
   title: {
     fontSize: FontSize.h1 + 6,
