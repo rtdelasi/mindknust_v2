@@ -39,7 +39,7 @@ export default function StudentChatsScreen() {
   const [chats, setChats] = useState<SupabaseChat[]>([]);
   const [counselors, setCounselors] = useState<SupabaseCounselor[]>([]);
   const [loading, setLoading] = useState(true);
-  const { onlineUsers } = usePresence();
+  const { onlineUsers, isUserOnline } = usePresence();
 
   // Long-press options popup
   const [selectedChat, setSelectedChat] = useState<SupabaseChat | null>(null);
@@ -193,7 +193,7 @@ export default function StudentChatsScreen() {
                           {/* Avatar with live status dot */}
                           <View style={styles.avatarWrapper}>
                             <Avatar name={nameVal} size="md" />
-                            <View style={[styles.statusDot, { backgroundColor: onlineUsers.includes(chat.counselor_id) ? '#34C759' : '#8E8E93', borderColor: theme.surfaceRaised }]} />
+                            <View style={[styles.statusDot, { backgroundColor: isUserOnline(chat.counselor_id) ? '#34C759' : '#8E8E93', borderColor: theme.surfaceRaised }]} />
                           </View>
 
                           <View style={styles.chatDetails}>
@@ -258,7 +258,7 @@ export default function StudentChatsScreen() {
                         <Card variant="raised" padding="three" style={styles.counselorQuickCard}>
                           <View style={styles.avatarWrapper}>
                             <Avatar name={name} size="md" />
-                            <View style={[styles.statusDot, { backgroundColor: onlineUsers.includes(c.id) ? '#34C759' : '#8E8E93', borderColor: theme.surfaceRaised }]} />
+                            <View style={[styles.statusDot, { backgroundColor: isUserOnline(c.id) ? '#34C759' : '#8E8E93', borderColor: theme.surfaceRaised }]} />
                           </View>
                           <View style={{ flex: 1, gap: 2 }}>
                             <Text style={[styles.participantName, { color: theme.text }]}>{name}</Text>

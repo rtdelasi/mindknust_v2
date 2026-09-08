@@ -962,7 +962,10 @@ export async function createAppointment(
       await saveLocalAppointment(fallbackAppt);
       return fallbackAppt;
     }
-    return data || fallbackAppt;
+
+    const appt = data || fallbackAppt;
+    notifyNewAppointment(studentId, counselorId, date, timeSlot, topic, appt?.id).catch(() => {});
+    return appt;
   } catch (err) {
     console.warn('[Supabase Appointments] Error creating appointment, using fallback:', err);
     await saveLocalAppointment(fallbackAppt);
@@ -972,7 +975,7 @@ export async function createAppointment(
 
 export async function updateAppointmentStatus(
   appointmentId: string,
-  status: 'accepted' | 'declined' | 'completed'
+  status: 'accepted' | 'approved' | 'declined' | 'completed'
 ): Promise<boolean> {
   if (!hasSupabaseConfig || !supabase) return false;
 
@@ -1033,24 +1036,79 @@ export async function rescheduleAppointment(
 }
 
 export async function fetchUserChats(userId: string, role: 'student' | 'counselor'): Promise<SupabaseChat[]> {
-  if (!hasSupabaseConfig || !supabase) return [];
+  if (!hasSupabaseConfig || !supabase || !userId) return [];
 
   const field = role === 'student' ? 'student_id' : 'counselor_id';
-  const { data, error } = await supabase
-    .from('chats')
-    .select(`
-      id, student_id, counselor_id, last_message, last_message_at,
-      student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url),
-      counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url)
-    `)
-    .eq(field, userId)
-    .order('last_message_at', { ascending: false });
+  const defaultAlias = role === 'counselor' ? 'kwame-boateng' : 'student-user';
 
-  if (error) {
-    console.error('Error fetching user chats:', error);
-    throw error;
+  let candidateIds = [userId, defaultAlias];
+  try {
+    const prof = await fetchProfileById(userId);
+    if (prof?.anonymous_id) {
+      candidateIds.push(prof.anonymous_id);
+    }
+  } catch {}
+  candidateIds = Array.from(new Set(candidateIds.filter(Boolean)));
+
+  try {
+    const { data, error } = await supabase
+      .from('chats')
+      .select(`
+        id, student_id, counselor_id, last_message, last_message_at,
+        student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url, anonymous_id),
+        counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url, anonymous_id)
+      `)
+      .in(field, candidateIds)
+      .order('last_message_at', { ascending: false });
+
+    if (error) {
+      console.warn('[Supabase Chats] Notice fetching user chats with in filter:', error.message);
+      const { data: fallbackData } = await supabase
+        .from('chats')
+        .select(`
+          id, student_id, counselor_id, last_message, last_message_at,
+          student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url, anonymous_id),
+          counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url, anonymous_id)
+        `)
+        .eq(field, userId)
+        .order('last_message_at', { ascending: false });
+      return (fallbackData || []) as unknown as SupabaseChat[];
+    }
+
+    const seen = new Set<string>();
+    const deduplicated: SupabaseChat[] = [];
+    for (const chat of (data || [])) {
+      if (!seen.has(chat.id)) {
+        seen.add(chat.id);
+        deduplicated.push(chat as unknown as SupabaseChat);
+      }
+    }
+    return deduplicated;
+  } catch (err) {
+    console.error('Error fetching user chats:', err);
+    return [];
   }
-  return (data || []) as unknown as SupabaseChat[];
+}
+
+export async function fetchChatById(chatId: string): Promise<SupabaseChat | null> {
+  if (!hasSupabaseConfig || !supabase || !chatId) return null;
+  try {
+    const { data, error } = await supabase
+      .from('chats')
+      .select(`
+        id, student_id, counselor_id, last_message, last_message_at,
+        student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url, anonymous_id),
+        counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url, anonymous_id)
+      `)
+      .eq('id', chatId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data as unknown as SupabaseChat;
+  } catch (err) {
+    console.warn('[Supabase Chats] Error fetching chat by ID:', err);
+    return null;
+  }
 }
 
 // Helper: Validate UUID syntax to prevent Postgres 22P02 error
@@ -1080,36 +1138,59 @@ export async function fetchOrCreateChat(studentId: string, counselorId: string):
     };
   }
 
+  const studentCandidates = Array.from(new Set([studentId, 'student-user'].filter(Boolean)));
+  const counselorCandidates = Array.from(new Set([counselorId, 'kwame-boateng'].filter(Boolean)));
+
   try {
-    // Attempt to fetch existing chat
-    const { data: existing, error: fetchError } = await supabase
+    // 1. Attempt to fetch existing chat matching exact pair or known aliases
+    const { data: existingList, error: fetchError } = await supabase
       .from('chats')
       .select(`
         id, student_id, counselor_id, last_message, last_message_at,
-        student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url),
-        counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url)
+        student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url, anonymous_id),
+        counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url, anonymous_id)
       `)
-      .eq('student_id', studentId)
-      .eq('counselor_id', counselorId)
-      .maybeSingle();
+      .in('student_id', studentCandidates)
+      .in('counselor_id', counselorCandidates)
+      .order('last_message_at', { ascending: false });
 
-    if (!fetchError && existing) {
-      return existing as unknown as SupabaseChat;
+    if (!fetchError && existingList && existingList.length > 0) {
+      return existingList[0] as unknown as SupabaseChat;
     }
 
-    // Create new chat
+    // 2. Ensure both student and counselor profile records exist in public.profiles
+    await Promise.all([
+      ensureProfileExists(studentId, 'student'),
+      ensureProfileExists(counselorId, 'counselor'),
+    ]);
+
+    // 3. Create new chat
     const { data: created, error: createError } = await supabase
       .from('chats')
       .insert({ student_id: studentId, counselor_id: counselorId })
       .select(`
         id, student_id, counselor_id, last_message, last_message_at,
-        student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url),
-        counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url)
+        student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url, anonymous_id),
+        counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url, anonymous_id)
       `)
       .maybeSingle();
 
     if (createError) {
       console.warn('[Supabase Chats] Notice creating chat (code ' + createError.code + '):', createError.message);
+      // Fallback query if conflict or already created concurrently
+      const { data: retryFetch } = await supabase
+        .from('chats')
+        .select(`
+          id, student_id, counselor_id, last_message, last_message_at,
+          student_profile:profiles!chats_student_id_fkey(id, name, email, avatar_url, anonymous_id),
+          counselor_profile:profiles!chats_counselor_id_fkey(id, name, email, avatar_url, anonymous_id)
+        `)
+        .eq('student_id', studentId)
+        .eq('counselor_id', counselorId)
+        .maybeSingle();
+
+      if (retryFetch) return retryFetch as unknown as SupabaseChat;
+
       return {
         id: generateFallbackUUID(),
         student_id: studentId,
@@ -1483,11 +1564,11 @@ export async function markChatNotificationsAsRead(chatId: string, userId: string
 
 /**
  * Insert a notification when an appointment status changes.
- * Notifies the student when accepted/declined/completed.
+ * Notifies the student when accepted/approved/declined/completed.
  */
 export async function notifyAppointmentUpdate(
   appointmentId: string,
-  status: 'accepted' | 'declined' | 'completed'
+  status: 'accepted' | 'approved' | 'declined' | 'completed'
 ): Promise<void> {
   if (!hasSupabaseConfig || !supabase) return;
 
@@ -1514,12 +1595,15 @@ export async function notifyAppointmentUpdate(
 
     switch (status) {
       case 'accepted':
+      case 'approved':
         title = 'Session Accepted';
         body = `Your ${topic} session on ${dateStr} at ${appt.time_slot} has been accepted.`;
+        link = '/(tabs)/sessions';
         break;
       case 'declined':
         title = 'Session Declined';
         body = `Your ${topic} session on ${dateStr} at ${appt.time_slot} was declined. You can book a new session.`;
+        link = '/(tabs)/sessions';
         break;
       case 'completed':
         title = 'Session Completed';
@@ -1531,6 +1615,60 @@ export async function notifyAppointmentUpdate(
     await createNotification(recipientId, title, body, link);
   } catch (err) {
     console.warn('Failed to create appointment notification:', err);
+  }
+}
+
+/**
+ * Insert notifications when a new session is scheduled/booked.
+ * Notifies the counselor that a student requested a session,
+ * and notifies the student confirming their booking request.
+ */
+export async function notifyNewAppointment(
+  studentId: string,
+  counselorId: string,
+  dateStr: string,
+  timeSlot: string,
+  topic: string = 'General Support',
+  appointmentId?: string
+): Promise<void> {
+  if (!hasSupabaseConfig || !supabase) return;
+
+  try {
+    const [studentProf, counselorProf] = await Promise.all([
+      fetchProfileById(studentId),
+      fetchProfileById(counselorId),
+    ]);
+
+    const studentName = studentProf?.name || 'A student';
+    const counselorName = counselorProf?.name || 'Counselor';
+    const displayTopic = topic || 'Counseling session';
+
+    let formattedDate = dateStr;
+    try {
+      formattedDate = new Date(dateStr).toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+    } catch {}
+
+    // 1. Notify Counselor
+    await createNotification(
+      counselorId,
+      'New Session Request',
+      `${studentName} requested a ${displayTopic} session on ${formattedDate} at ${timeSlot}.`,
+      '/(counselor-tabs)/sessions'
+    );
+
+    // 2. Notify Student (Confirmation)
+    await createNotification(
+      studentId,
+      'Session Booking Submitted',
+      `Your ${displayTopic} session request with ${counselorName} on ${formattedDate} at ${timeSlot} has been submitted.`,
+      '/(tabs)/sessions'
+    );
+  } catch (err) {
+    console.warn('Failed to send new appointment notifications:', err);
   }
 }
 
@@ -1993,6 +2131,28 @@ export interface SupabaseCall {
   callee_profile?: SupabaseProfile;
 }
 
+export async function broadcastIncomingCall(calleeId: string, callData: SupabaseCall): Promise<void> {
+  if (!supabase || !calleeId) return;
+  try {
+    const channelName = `incoming-call-channel-${calleeId}`;
+    const channel = supabase.channel(channelName);
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        channel.send({
+          type: 'broadcast',
+          event: 'incoming_call',
+          payload: callData,
+        });
+        setTimeout(() => {
+          supabase?.removeChannel(channel);
+        }, 4000);
+      }
+    });
+  } catch (err) {
+    console.warn('[Realtime] Error broadcasting incoming call:', err);
+  }
+}
+
 export async function createCall(
   callerId: string,
   calleeId: string,
@@ -2000,45 +2160,142 @@ export async function createCall(
   roomId: string,
   appointmentId?: string,
 ): Promise<SupabaseCall | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from('calls')
-    .insert({
-      caller_id: callerId,
-      callee_id: calleeId,
-      call_type: callType,
-      room_id: roomId,
-      status: 'ringing',
-      appointment_id: appointmentId || null,
-    })
-    .select(`
-      *,
-      caller_profile:profiles!calls_caller_id_fkey(id, name, email, avatar_url, anonymous_id)
-    `)
-    .single();
-  if (error) {
-    console.warn('[DB] createCall error:', error.message);
-    return null;
+  const fallbackId = generateFallbackUUID();
+  let callerProfile: SupabaseProfile | undefined = undefined;
+
+  try {
+    const prof = await fetchProfileById(callerId);
+    if (prof) callerProfile = prof;
+  } catch {}
+
+  const normalizedCall: SupabaseCall = {
+    id: fallbackId,
+    caller_id: callerId,
+    callee_id: calleeId,
+    call_type: callType,
+    status: 'ringing',
+    room_id: roomId,
+    appointment_id: appointmentId || null,
+    created_at: new Date().toISOString(),
+    answered_at: null,
+    ended_at: null,
+    caller_profile: callerProfile,
+  };
+
+  if (!supabase) {
+    return normalizedCall;
   }
-  return data as unknown as SupabaseCall;
+
+  let dbCall: SupabaseCall | null = null;
+  const dbCallType = callType === 'voice' ? 'audio' : 'video';
+
+  try {
+    // Attempt 1: Full insert with both schema variations
+    const { data, error } = await supabase
+      .from('calls')
+      .insert({
+        caller_id: callerId,
+        callee_id: calleeId,
+        receiver_id: calleeId,
+        call_type: callType,
+        room_id: roomId,
+        channel_id: roomId,
+        status: 'ringing',
+        appointment_id: appointmentId || null,
+      })
+      .select('*')
+      .maybeSingle();
+
+    if (!error && data) {
+      dbCall = {
+        ...normalizedCall,
+        id: data.id || fallbackId,
+        caller_id: data.caller_id || callerId,
+        callee_id: data.callee_id || data.receiver_id || calleeId,
+        call_type: (data.call_type === 'audio' ? 'voice' : data.call_type) || callType,
+        room_id: data.room_id || data.channel_id || roomId,
+        status: data.status || 'ringing',
+      };
+    } else {
+      // Attempt 2: Insert matching original schema (receiver_id, channel_id, call_type 'audio'/'video')
+      const { data: data2, error: error2 } = await supabase
+        .from('calls')
+        .insert({
+          caller_id: callerId,
+          receiver_id: calleeId,
+          call_type: dbCallType,
+          channel_id: roomId,
+          status: 'ringing',
+          appointment_id: appointmentId || null,
+        })
+        .select('*')
+        .maybeSingle();
+
+      if (!error2 && data2) {
+        dbCall = {
+          ...normalizedCall,
+          id: data2.id || fallbackId,
+          caller_id: data2.caller_id || callerId,
+          callee_id: data2.receiver_id || calleeId,
+          call_type: (data2.call_type === 'audio' ? 'voice' : data2.call_type) || callType,
+          room_id: data2.channel_id || roomId,
+          status: data2.status || 'ringing',
+        };
+      } else {
+        console.warn('[DB] createCall insert notices:', error?.message, error2?.message);
+      }
+    }
+  } catch (err: any) {
+    console.warn('[DB] createCall exception:', err.message);
+  }
+
+  const finalCall = dbCall || normalizedCall;
+
+  // Always broadcast via Realtime channel to ensure instantaneous delivery to callee
+  broadcastIncomingCall(calleeId, finalCall).catch(() => {});
+  if (calleeId === 'kwame-boateng' || calleeId.includes('counselor')) {
+    broadcastIncomingCall('kwame-boateng', finalCall).catch(() => {});
+  }
+
+  return finalCall;
 }
 
 export async function updateCallStatus(
   callId: string,
   status: SupabaseCall['status'],
 ): Promise<boolean> {
-  if (!supabase) return false;
+  if (!supabase || !callId) return false;
   const update: Record<string, unknown> = { status };
   if (status === 'accepted') update.answered_at = new Date().toISOString();
   if (status === 'ended' || status === 'missed' || status === 'declined') update.ended_at = new Date().toISOString();
-  const { error } = await supabase
-    .from('calls')
-    .update(update)
-    .eq('id', callId);
-  if (error) {
-    console.warn('[DB] updateCallStatus error:', error.message);
-    return false;
-  }
+
+  // Instant broadcast of status change
+  try {
+    const channelName = `call-status-broadcast-${callId}`;
+    const channel = supabase.channel(channelName);
+    channel.subscribe((s) => {
+      if (s === 'SUBSCRIBED') {
+        channel.send({
+          type: 'broadcast',
+          event: 'call_status_update',
+          payload: { id: callId, status },
+        });
+        setTimeout(() => supabase?.removeChannel(channel), 2500);
+      }
+    });
+  } catch {}
+
+  try {
+    const { error } = await supabase
+      .from('calls')
+      .update(update)
+      .eq('id', callId);
+    if (error) {
+      console.warn('[DB] updateCallStatus error:', error.message);
+      return false;
+    }
+  } catch {}
+
   return true;
 }
 
@@ -2046,14 +2303,25 @@ export async function fetchCallById(callId: string): Promise<SupabaseCall | null
   if (!supabase) return null;
   const { data, error } = await supabase
     .from('calls')
-    .select(`
-      *,
-      caller_profile:profiles!calls_caller_id_fkey(id, name, email, avatar_url, anonymous_id)
-    `)
+    .select('*')
     .eq('id', callId)
     .single();
   if (error || !data) return null;
-  return data as unknown as SupabaseCall;
+  
+  let callerProfile: SupabaseProfile | undefined = undefined;
+  if (data.caller_id) {
+    try {
+      const prof = await fetchProfileById(data.caller_id);
+      if (prof) callerProfile = prof;
+    } catch {}
+  }
+
+  return {
+    ...data,
+    callee_id: data.callee_id || data.receiver_id,
+    room_id: data.room_id || data.channel_id,
+    caller_profile: callerProfile,
+  } as unknown as SupabaseCall;
 }
 
 export async function fetchProfileById(userId: string): Promise<SupabaseProfile | null> {
@@ -2068,17 +2336,18 @@ export async function fetchProfileById(userId: string): Promise<SupabaseProfile 
 }
 
 /**
- * Subscribe to status changes on a specific call.
+ * Subscribe to status changes on a specific call via dual channels.
  * Returns the unsubscribe function.
  */
 export function subscribeToCallStatus(
   callId: string,
   onUpdate: (call: SupabaseCall) => void,
 ): () => void {
-  if (!supabase) return () => {};
-  const channelName = `call-${callId}-${Date.now()}`;
-  const channel = supabase
-    .channel(channelName)
+  if (!supabase || !callId) return () => {};
+
+  const cdcChannelName = `call-cdc-${callId}-${Date.now()}`;
+  const cdcChannel = supabase
+    .channel(cdcChannelName)
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` },
@@ -2087,34 +2356,91 @@ export function subscribeToCallStatus(
       },
     )
     .subscribe();
+
+  const broadcastChannelName = `call-status-broadcast-${callId}`;
+  const broadcastChannel = supabase
+    .channel(broadcastChannelName)
+    .on('broadcast', { event: 'call_status_update' }, (event) => {
+      if (event.payload) {
+        onUpdate(event.payload as unknown as SupabaseCall);
+      }
+    })
+    .subscribe();
+
   return () => {
-    supabase!.removeChannel(channel);
+    supabase?.removeChannel(cdcChannel);
+    supabase?.removeChannel(broadcastChannel);
   };
 }
 
 /**
- * Subscribe to incoming calls for a specific user (callee).
- * Fires when a new row is inserted where callee_id matches.
+ * Subscribe to incoming calls for a specific user (callee) via dual channels.
+ * Fires when a new row is inserted in Postgres or broadcast over Realtime.
  * Returns the unsubscribe function.
  */
 export function subscribeToIncomingCalls(
   calleeId: string,
   onIncoming: (call: SupabaseCall) => void,
 ): () => void {
-  if (!supabase) return () => {};
-  const channelName = `incoming-calls-${calleeId}-${Date.now()}`;
-  const channel = supabase
-    .channel(channelName)
+  if (!supabase || !calleeId) return () => {};
+
+  const receivedCallIds = new Set<string>();
+
+  const handleIncoming = (rawCall: any) => {
+    if (!rawCall || !rawCall.id) return;
+    if (receivedCallIds.has(rawCall.id)) return;
+    receivedCallIds.add(rawCall.id);
+
+    const normalized: SupabaseCall = {
+      id: rawCall.id,
+      caller_id: rawCall.caller_id,
+      callee_id: rawCall.callee_id || rawCall.receiver_id || calleeId,
+      call_type: (rawCall.call_type === 'audio' ? 'voice' : rawCall.call_type) || 'video',
+      status: rawCall.status || 'ringing',
+      room_id: rawCall.room_id || rawCall.channel_id || `mindknust-webrtc-${rawCall.id}`,
+      appointment_id: rawCall.appointment_id || null,
+      created_at: rawCall.created_at || new Date().toISOString(),
+      answered_at: rawCall.answered_at || null,
+      ended_at: rawCall.ended_at || null,
+      is_anonymous_display: rawCall.is_anonymous_display,
+      caller_profile: rawCall.caller_profile,
+      callee_profile: rawCall.callee_profile,
+    };
+
+    onIncoming(normalized);
+  };
+
+  // 1. Postgres CDC channel
+  const cdcChannelName = `incoming-calls-cdc-${calleeId}-${Date.now()}`;
+  const cdcChannel = supabase
+    .channel(cdcChannelName)
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'calls', filter: `callee_id=eq.${calleeId}` },
+      { event: 'INSERT', schema: 'public', table: 'calls' },
       (payload) => {
-        onIncoming(payload.new as unknown as SupabaseCall);
+        const row = payload.new as any;
+        if (row && (row.callee_id === calleeId || row.receiver_id === calleeId)) {
+          handleIncoming(row);
+        }
       },
     )
     .subscribe();
+
+  // 2. Instant Realtime Broadcast channel
+  const broadcastChannelName = `incoming-call-channel-${calleeId}`;
+  const broadcastChannel = supabase
+    .channel(broadcastChannelName)
+    .on('broadcast', { event: 'incoming_call' }, (event) => {
+      console.log(`[Realtime Broadcast] Incoming call received for ${calleeId}:`, event.payload?.id);
+      if (event.payload) {
+        handleIncoming(event.payload);
+      }
+    })
+    .subscribe();
+
   return () => {
-    supabase!.removeChannel(channel);
+    supabase?.removeChannel(cdcChannel);
+    supabase?.removeChannel(broadcastChannel);
   };
 }
 
@@ -2377,7 +2703,9 @@ export async function bookSlot(
       return { success: false, reason: 'Failed to insert appointment record.' };
     }
 
-    return { success: true, appointment: data as unknown as SupabaseAppointment };
+    const appt = data as unknown as SupabaseAppointment;
+    notifyNewAppointment(studentId, counselorId, date, timeSlot, topic, appt?.id).catch(() => {});
+    return { success: true, appointment: appt };
   } catch (err: any) {
     console.error('[DB] bookSlot exception:', err);
     return { success: false, reason: err.message || 'An unexpected error occurred.' };

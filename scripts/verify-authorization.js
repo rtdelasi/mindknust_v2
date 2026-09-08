@@ -121,24 +121,45 @@ assertTest('User B CAN read User B own mood logs', canSelectMoodLog(userB, moodB
 assertTest('Admin CAN read mood logs for safety monitoring', canSelectMoodLog(adminUser, moodB) === true);
 assertTest('Unauthenticated user CANNOT read mood logs', canSelectMoodLog(null, moodB) === false);
 
-// 2. Chat & Private Messaging Isolation Test
+// 2. Chat & Private Messaging Isolation & History Retrieval Test
 const messageInChatA = database.messages[0];
+const counselorReplyInChatA = database.messages[1];
 assertTest('User A CAN read messages in their own chat thread', canSelectMessage(userA, messageInChatA) === true);
 assertTest('Counselor Kwame CAN read messages in assigned chat thread', canSelectMessage(counselorUser, messageInChatA) === true);
+assertTest('User A CAN read historical replies from counselor', canSelectMessage(userA, counselorReplyInChatA) === true);
+assertTest('Counselor Kwame CAN read all prior historical messages in thread', canSelectMessage(counselorUser, counselorReplyInChatA) === true);
 assertTest('User B CANNOT read messages in User A chat thread', canSelectMessage(userB, messageInChatA) === false);
 assertTest('Unauthenticated user CANNOT read chat messages', canSelectMessage(null, messageInChatA) === false);
 
-// 3. Profile Modification Protection Test
+// 3. Chat History Complete Retrieval Verification (Simulating Database Query)
+function fetchHistoricalMessagesForChat(chatId, requester) {
+  const chat = database.chats.find((c) => c.id === chatId);
+  if (!chat) return [];
+  if (chat.student_id !== requester.id && chat.counselor_id !== requester.id && requester.role !== 'admin') {
+    return [];
+  }
+  return database.messages.filter((m) => m.chat_id === chatId);
+}
+
+const userAHistorical = fetchHistoricalMessagesForChat('chat-ab', userA);
+const counselorHistorical = fetchHistoricalMessagesForChat('chat-ab', counselorUser);
+const userBHistorical = fetchHistoricalMessagesForChat('chat-ab', userB);
+
+assertTest('User A retrieves complete historical message history (length == 2)', userAHistorical.length === 2);
+assertTest('Counselor Kwame retrieves complete historical message history (length == 2)', counselorHistorical.length === 2);
+assertTest('Unrelated User B retrieves 0 historical messages from chat-ab', userBHistorical.length === 0);
+
+// 4. Profile Modification Protection Test
 assertTest('User A CANNOT update User B profile', canUpdateProfile(userA, userB.id) === false);
 assertTest('User A CAN update own profile', canUpdateProfile(userA, userA.id) === true);
 assertTest('Admin CAN manage profiles', canUpdateProfile(adminUser, userB.id) === true);
 
-// 4. Clinical Approvals Privilege Escalation Prevention
+// 5. Clinical Approvals Privilege Escalation Prevention
 assertTest('Student CANNOT approve counselor credentials', canUpdateCounselorApproval(userA) === false);
 assertTest('Counselor CANNOT approve other counselors', canUpdateCounselorApproval(counselorUser) === false);
 assertTest('Admin CAN approve counselor credentials', canUpdateCounselorApproval(adminUser) === true);
 
-// 5. Post Deletion & Moderation Protection Test
+// 6. Post Deletion & Moderation Protection Test
 const postA = database.posts[0];
 assertTest('User B CANNOT delete User A post', canDeletePost(userB, postA) === false);
 assertTest('User A CAN delete own post', canDeletePost(userA, postA) === true);

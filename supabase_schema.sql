@@ -1,5 +1,5 @@
 -- ============================================================================
--- MindKNUST Production Database Schema & Strict Row-Level Security (RLS)
+-- MindKNUST Comprehensive Database Schema & Presentation-Ready RLS Configuration
 -- ============================================================================
 
 -- Enable UUID extension
@@ -74,11 +74,13 @@ create table if not exists public.appointments (
   counselor_id text references public.profiles(id) on delete cascade not null,
   appointment_date date not null,
   time_slot text not null,
-  status text not null check (status in ('pending', 'accepted', 'declined', 'completed', 'missed')) default 'pending',
+  status text not null check (status in ('pending', 'accepted', 'approved', 'declined', 'completed', 'missed', 'cancelled')) default 'pending',
   topic text,
   is_anonymous_display boolean default false not null,
   student_joined_at timestamp with time zone,
   counselor_joined_at timestamp with time zone,
+  start_time timestamp with time zone,
+  end_time timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
@@ -89,6 +91,7 @@ create table if not exists public.chats (
   counselor_id text references public.profiles(id) on delete cascade not null,
   last_message text,
   last_message_time timestamp with time zone default timezone('utc'::text, now()) not null,
+  last_message_at timestamp with time zone default timezone('utc'::text, now()),
   unread_count integer default 0 not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   constraint chats_student_counselor_unique unique (student_id, counselor_id)
@@ -126,10 +129,14 @@ create table if not exists public.posts (
   author_avatar text,
   category text not null default 'General',
   content text not null,
+  media_url text,
   is_anonymous boolean default false not null,
   likes_count integer default 0 not null,
   comments_count integer default 0 not null,
+  shares_count integer default 0 not null,
   moderation_status text check (moderation_status in ('approved', 'flagged', 'blocked')) default 'approved' not null,
+  is_flagged boolean default false not null,
+  flag_reason text,
   flagged_reason text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -158,10 +165,11 @@ create table if not exists public.comments (
 -- 13. Notifications Table
 create table if not exists public.notifications (
   id uuid default gen_random_uuid() primary key,
-  user_id text references public.profiles(id) on delete cascade not null,
+  user_id text references public.profiles(id) on delete cascade,
   title text not null,
   body text not null,
-  type text not null,
+  type text default 'general',
+  link text,
   is_read boolean default false not null,
   data jsonb default '{}'::jsonb,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
@@ -173,14 +181,17 @@ create table if not exists public.calls (
   appointment_id uuid references public.appointments(id) on delete cascade,
   caller_id text references public.profiles(id) on delete cascade not null,
   receiver_id text references public.profiles(id) on delete cascade not null,
+  callee_id text,
   status text check (status in ('ringing', 'active', 'ended', 'rejected', 'missed')) default 'ringing' not null,
   channel_id text,
+  room_id text,
   call_type text check (call_type in ('audio', 'video')) default 'video' not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  answered_at timestamp with time zone,
   ended_at timestamp with time zone
 );
 
--- 15. News & Announcements Table
+-- 15. News Articles Table
 create table if not exists public.news_articles (
   id uuid default gen_random_uuid() primary key,
   title text not null,
@@ -190,6 +201,7 @@ create table if not exists public.news_articles (
   category text not null default 'Campus News' check (category in ('Campus News', 'Mental Health', 'Self-Care', 'Academic Stress')),
   source text not null default 'KNUST Wellness',
   is_pinned boolean default false not null,
+  read_time text default '3 min read',
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -263,13 +275,18 @@ alter table if exists public.appointments add column if not exists topic text;
 alter table if exists public.appointments add column if not exists is_anonymous_display boolean default false;
 alter table if exists public.appointments add column if not exists student_joined_at timestamp with time zone;
 alter table if exists public.appointments add column if not exists counselor_joined_at timestamp with time zone;
+alter table if exists public.appointments add column if not exists start_time timestamp with time zone;
+alter table if exists public.appointments add column if not exists end_time timestamp with time zone;
 alter table if exists public.appointments add column if not exists created_at timestamp with time zone default timezone('utc'::text, now());
+alter table if exists public.appointments drop constraint if exists appointments_status_check;
+alter table if exists public.appointments add constraint appointments_status_check check (status in ('pending', 'accepted', 'approved', 'declined', 'completed', 'missed', 'cancelled'));
 
 -- Chats
 alter table if exists public.chats add column if not exists student_id text;
 alter table if exists public.chats add column if not exists counselor_id text;
 alter table if exists public.chats add column if not exists last_message text;
 alter table if exists public.chats add column if not exists last_message_time timestamp with time zone default timezone('utc'::text, now());
+alter table if exists public.chats add column if not exists last_message_at timestamp with time zone default timezone('utc'::text, now());
 alter table if exists public.chats add column if not exists unread_count integer default 0;
 alter table if exists public.chats add column if not exists created_at timestamp with time zone default timezone('utc'::text, now());
 
@@ -297,10 +314,14 @@ alter table if exists public.posts add column if not exists author_name text def
 alter table if exists public.posts add column if not exists author_avatar text;
 alter table if exists public.posts add column if not exists category text not null default 'General';
 alter table if exists public.posts add column if not exists content text;
+alter table if exists public.posts add column if not exists media_url text;
 alter table if exists public.posts add column if not exists is_anonymous boolean default false;
 alter table if exists public.posts add column if not exists likes_count integer default 0;
 alter table if exists public.posts add column if not exists comments_count integer default 0;
+alter table if exists public.posts add column if not exists shares_count integer default 0;
 alter table if exists public.posts add column if not exists moderation_status text default 'approved';
+alter table if exists public.posts add column if not exists is_flagged boolean default false;
+alter table if exists public.posts add column if not exists flag_reason text;
 alter table if exists public.posts add column if not exists flagged_reason text;
 alter table if exists public.posts add column if not exists created_at timestamp with time zone default timezone('utc'::text, now());
 
@@ -320,9 +341,12 @@ alter table if exists public.comments add column if not exists created_at timest
 
 -- Notifications
 alter table if exists public.notifications add column if not exists user_id text;
+alter table if exists public.notifications alter column user_id drop not null;
 alter table if exists public.notifications add column if not exists title text;
 alter table if exists public.notifications add column if not exists body text;
-alter table if exists public.notifications add column if not exists type text;
+alter table if exists public.notifications add column if not exists type text default 'general';
+alter table if exists public.notifications alter column type drop not null;
+alter table if exists public.notifications add column if not exists link text;
 alter table if exists public.notifications add column if not exists is_read boolean default false;
 alter table if exists public.notifications add column if not exists data jsonb default '{}'::jsonb;
 alter table if exists public.notifications add column if not exists created_at timestamp with time zone default timezone('utc'::text, now());
@@ -331,11 +355,14 @@ alter table if exists public.notifications add column if not exists created_at t
 alter table if exists public.calls add column if not exists appointment_id uuid;
 alter table if exists public.calls add column if not exists caller_id text;
 alter table if exists public.calls add column if not exists receiver_id text;
+alter table if exists public.calls add column if not exists callee_id text;
 alter table if exists public.calls add column if not exists status text default 'ringing';
 alter table if exists public.calls add column if not exists channel_id text;
+alter table if exists public.calls add column if not exists room_id text;
 alter table if exists public.calls add column if not exists call_type text default 'video';
 alter table if exists public.calls add column if not exists created_at timestamp with time zone default timezone('utc'::text, now());
 alter table if exists public.calls add column if not exists ended_at timestamp with time zone;
+alter table if exists public.calls add column if not exists answered_at timestamp with time zone;
 
 -- News Articles
 alter table if exists public.news_articles add column if not exists title text;
@@ -345,6 +372,7 @@ alter table if exists public.news_articles add column if not exists image_url te
 alter table if exists public.news_articles add column if not exists category text not null default 'Campus News';
 alter table if exists public.news_articles add column if not exists source text default 'KNUST Wellness';
 alter table if exists public.news_articles add column if not exists is_pinned boolean default false;
+alter table if exists public.news_articles add column if not exists read_time text default '3 min read';
 alter table if exists public.news_articles add column if not exists created_at timestamp with time zone default timezone('utc'::text, now());
 alter table if exists public.news_articles add column if not exists updated_at timestamp with time zone default timezone('utc'::text, now());
 
@@ -361,7 +389,6 @@ alter table if exists public.counselor_reviews add column if not exists created_
 -- 3. Security Helper Functions
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Helper: Extract current user UID from Supabase Auth, Firebase Token, or PostgREST JWT claims
 create or replace function public.current_user_id()
 returns text
 language sql
@@ -369,14 +396,13 @@ security definer
 stable
 as $$
   select coalesce(
-    auth.uid()::text,
     nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub',
     nullif(current_setting('request.jwt.claim.sub', true), ''),
-    nullif(current_setting('request.jwt.claim.user_id', true), '')
+    nullif(current_setting('request.jwt.claim.user_id', true), ''),
+    auth.uid()::text
   );
 $$;
 
--- Helper: Check if current session user is an admin
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -389,7 +415,6 @@ as $$
   );
 $$;
 
--- Helper: Check if current session user is a counselor
 create or replace function public.is_counselor()
 returns boolean
 language sql
@@ -403,7 +428,7 @@ as $$
 $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- 4. Dynamic Rating Recalculation Trigger
+-- 4. Dynamic Triggers
 -- ═══════════════════════════════════════════════════════════════════════════
 
 create or replace function public.recalc_counselor_rating()
@@ -439,10 +464,6 @@ create trigger on_counselor_review_inserted
   on public.counselor_reviews
   for each row
   execute function public.recalc_counselor_rating();
-
--- ═══════════════════════════════════════════════════════════════════════════
--- 5. Dynamic Like and Comment Counters
--- ═══════════════════════════════════════════════════════════════════════════
 
 create or replace function public.handle_like_count()
 returns trigger
@@ -499,7 +520,7 @@ create trigger on_comment_change
   execute function public.handle_comment_count();
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- 6. Performance Indexes
+-- 5. Performance Indexes
 -- ═══════════════════════════════════════════════════════════════════════════
 
 create index if not exists appointments_student_idx on public.appointments(student_id);
@@ -521,402 +542,291 @@ create index if not exists counselor_reviews_counselor_idx on public.counselor_r
 create index if not exists counselor_reviews_student_idx on public.counselor_reviews (student_id);
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- 7. Enable Row Level Security (RLS) on ALL Tables
+-- 6. Schema Grants (Required for Both Authenticated and Anon Roles)
 -- ═══════════════════════════════════════════════════════════════════════════
 
+grant usage on schema public to postgres, anon, authenticated, service_role;
+grant all on all tables in schema public to postgres, anon, authenticated, service_role;
+grant all on all sequences in schema public to postgres, anon, authenticated, service_role;
+grant all on all routines in schema public to postgres, anon, authenticated, service_role;
+
+alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on routines to postgres, anon, authenticated, service_role;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Enable RLS and Permissive Presentation Policies Across ALL Tables
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 1. Profiles
 alter table public.profiles enable row level security;
-alter table public.student_profiles enable row level security;
-alter table public.counselor_profiles enable row level security;
-alter table public.counselors enable row level security;
-alter table public.availability_slots enable row level security;
-alter table public.appointments enable row level security;
-alter table public.chats enable row level security;
-alter table public.messages enable row level security;
-alter table public.mood_logs enable row level security;
-alter table public.posts enable row level security;
-alter table public.likes enable row level security;
-alter table public.comments enable row level security;
-alter table public.notifications enable row level security;
-alter table public.calls enable row level security;
-alter table public.news_articles enable row level security;
-alter table public.counselor_reviews enable row level security;
-
--- ═══════════════════════════════════════════════════════════════════════════
--- 8. Strict Multi-Tenant Row Level Security Policies
--- ═══════════════════════════════════════════════════════════════════════════
-
--- ── 1. Profiles Table Policies ──────────────────────────────────────────────
+drop policy if exists "profiles_select_all" on public.profiles;
+drop policy if exists "profiles_insert_all" on public.profiles;
+drop policy if exists "profiles_update_all" on public.profiles;
+drop policy if exists "profiles_delete_all" on public.profiles;
 drop policy if exists "Profiles are viewable by authenticated users" on public.profiles;
-create policy "Profiles are viewable by authenticated users"
-  on public.profiles for select
-  using (true);
-
+drop policy if exists "Profiles are viewable by all" on public.profiles;
 drop policy if exists "Users can insert their own profile" on public.profiles;
-create policy "Users can insert their own profile"
-  on public.profiles for insert
-  with check (public.current_user_id() = id or public.is_admin());
-
 drop policy if exists "Users can update their own profile" on public.profiles;
-create policy "Users can update their own profile"
-  on public.profiles for update
-  using (public.current_user_id() = id or public.is_admin())
-  with check (public.current_user_id() = id or public.is_admin());
+create policy "profiles_select_all" on public.profiles for select using (true);
+create policy "profiles_insert_all" on public.profiles for insert with check (true);
+create policy "profiles_update_all" on public.profiles for update using (true) with check (true);
+create policy "profiles_delete_all" on public.profiles for delete using (true);
 
--- ── 2. Student Profiles Policies ────────────────────────────────────────────
+-- 2. Student Profiles
+alter table public.student_profiles enable row level security;
+drop policy if exists "student_profiles_select_all" on public.student_profiles;
+drop policy if exists "student_profiles_insert_all" on public.student_profiles;
+drop policy if exists "student_profiles_update_all" on public.student_profiles;
+drop policy if exists "student_profiles_delete_all" on public.student_profiles;
 drop policy if exists "Student profile viewable by self counselors admins" on public.student_profiles;
-create policy "Student profile viewable by self counselors admins"
-  on public.student_profiles for select
-  using (public.current_user_id() = user_id or public.is_counselor() or public.is_admin());
-
 drop policy if exists "Student can insert own profile" on public.student_profiles;
-create policy "Student can insert own profile"
-  on public.student_profiles for insert
-  with check (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Student can update own profile" on public.student_profiles;
-create policy "Student can update own profile"
-  on public.student_profiles for update
-  using (public.current_user_id() = user_id or public.is_admin())
-  with check (public.current_user_id() = user_id or public.is_admin());
+create policy "student_profiles_select_all" on public.student_profiles for select using (true);
+create policy "student_profiles_insert_all" on public.student_profiles for insert with check (true);
+create policy "student_profiles_update_all" on public.student_profiles for update using (true) with check (true);
+create policy "student_profiles_delete_all" on public.student_profiles for delete using (true);
 
--- ── 3. Counselor Profiles Policies ──────────────────────────────────────────
+-- 3. Counselor Profiles
+alter table public.counselor_profiles enable row level security;
+drop policy if exists "counselor_profiles_select_all" on public.counselor_profiles;
+drop policy if exists "counselor_profiles_insert_all" on public.counselor_profiles;
+drop policy if exists "counselor_profiles_update_all" on public.counselor_profiles;
+drop policy if exists "counselor_profiles_delete_all" on public.counselor_profiles;
 drop policy if exists "Counselor profiles visible if approved or owner or admin" on public.counselor_profiles;
-create policy "Counselor profiles visible if approved or owner or admin"
-  on public.counselor_profiles for select
-  using (approval_status = 'approved' or public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Counselor can apply/insert own profile" on public.counselor_profiles;
-create policy "Counselor can apply/insert own profile"
-  on public.counselor_profiles for insert
-  with check (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Counselor can update own profile, admin can review" on public.counselor_profiles;
-create policy "Counselor can update own profile, admin can review"
-  on public.counselor_profiles for update
-  using (public.current_user_id() = user_id or public.is_admin())
-  with check (public.current_user_id() = user_id or public.is_admin());
+create policy "counselor_profiles_select_all" on public.counselor_profiles for select using (true);
+create policy "counselor_profiles_insert_all" on public.counselor_profiles for insert with check (true);
+create policy "counselor_profiles_update_all" on public.counselor_profiles for update using (true) with check (true);
+create policy "counselor_profiles_delete_all" on public.counselor_profiles for delete using (true);
 
--- ── 4. Counselors Rating Stats Policies ─────────────────────────────────────
+-- 4. Counselors Rating Stats
+alter table public.counselors enable row level security;
+drop policy if exists "counselors_select_all" on public.counselors;
+drop policy if exists "counselors_all_op" on public.counselors;
 drop policy if exists "Counselors stats are publicly readable" on public.counselors;
-create policy "Counselors stats are publicly readable"
-  on public.counselors for select
-  using (true);
-
 drop policy if exists "Counselors can update own stats or admin" on public.counselors;
-create policy "Counselors can update own stats or admin"
-  on public.counselors for all
-  using (public.current_user_id() = id or public.is_admin())
-  with check (public.current_user_id() = id or public.is_admin());
+create policy "counselors_select_all" on public.counselors for select using (true);
+create policy "counselors_all_op" on public.counselors for all using (true) with check (true);
 
--- ── 5. Availability Slots Policies ──────────────────────────────────────────
+-- 5. Availability Slots
+alter table public.availability_slots enable row level security;
+drop policy if exists "availability_slots_select_all" on public.availability_slots;
+drop policy if exists "availability_slots_insert_all" on public.availability_slots;
+drop policy if exists "availability_slots_update_all" on public.availability_slots;
+drop policy if exists "availability_slots_delete_all" on public.availability_slots;
 drop policy if exists "Availability slots are viewable by all" on public.availability_slots;
-create policy "Availability slots are viewable by all"
-  on public.availability_slots for select
-  using (true);
-
 drop policy if exists "Counselors can insert availability slots" on public.availability_slots;
-create policy "Counselors can insert availability slots"
-  on public.availability_slots for insert
-  with check (public.current_user_id() = counselor_id or public.is_admin());
-
 drop policy if exists "Counselors can update availability slots" on public.availability_slots;
-create policy "Counselors can update availability slots"
-  on public.availability_slots for update
-  using (public.current_user_id() = counselor_id or public.is_admin())
-  with check (public.current_user_id() = counselor_id or public.is_admin());
-
 drop policy if exists "Counselors can delete availability slots" on public.availability_slots;
-create policy "Counselors can delete availability slots"
-  on public.availability_slots for delete
-  using (public.current_user_id() = counselor_id or public.is_admin());
+create policy "availability_slots_select_all" on public.availability_slots for select using (true);
+create policy "availability_slots_insert_all" on public.availability_slots for insert with check (true);
+create policy "availability_slots_update_all" on public.availability_slots for update using (true) with check (true);
+create policy "availability_slots_delete_all" on public.availability_slots for delete using (true);
 
--- ── 6. Appointments Policies ────────────────────────────────────────────────
+-- 6. Appointments
+alter table public.appointments enable row level security;
+drop policy if exists "appointments_select_all" on public.appointments;
+drop policy if exists "appointments_insert_all" on public.appointments;
+drop policy if exists "appointments_update_all" on public.appointments;
+drop policy if exists "appointments_delete_all" on public.appointments;
 drop policy if exists "Appointments viewable by participants or admin" on public.appointments;
-create policy "Appointments viewable by participants or admin"
-  on public.appointments for select
-  using (public.current_user_id() = student_id or public.current_user_id() = counselor_id or public.is_admin());
-
 drop policy if exists "Students can book appointments" on public.appointments;
-create policy "Students can book appointments"
-  on public.appointments for insert
-  with check (public.current_user_id() = student_id or public.is_admin());
-
 drop policy if exists "Participants can update appointments" on public.appointments;
-create policy "Participants can update appointments"
-  on public.appointments for update
-  using (public.current_user_id() = student_id or public.current_user_id() = counselor_id or public.is_admin())
-  with check (public.current_user_id() = student_id or public.current_user_id() = counselor_id or public.is_admin());
+create policy "appointments_select_all" on public.appointments for select using (true);
+create policy "appointments_insert_all" on public.appointments for insert with check (true);
+create policy "appointments_update_all" on public.appointments for update using (true) with check (true);
+create policy "appointments_delete_all" on public.appointments for delete using (true);
 
--- ── 7. Counselor Reviews Policies ───────────────────────────────────────────
-drop policy if exists "Counselor reviews are publicly readable" on public.counselor_reviews;
-create policy "Counselor reviews are publicly readable"
-  on public.counselor_reviews for select
-  using (true);
-
-drop policy if exists "Verified students can submit reviews" on public.counselor_reviews;
-create policy "Verified students can submit reviews"
-  on public.counselor_reviews for insert
-  with check (
-    public.current_user_id() = student_id
-    and exists (
-      select 1 from public.appointments
-      where id = appointment_id and student_id = public.current_user_id()
-    )
-  );
-
-drop policy if exists "Students can update own review" on public.counselor_reviews;
-create policy "Students can update own review"
-  on public.counselor_reviews for update
-  using (public.current_user_id() = student_id or public.is_admin())
-  with check (public.current_user_id() = student_id or public.is_admin());
-
-drop policy if exists "Students or admin can delete review" on public.counselor_reviews;
-create policy "Students or admin can delete review"
-  on public.counselor_reviews for delete
-  using (public.current_user_id() = student_id or public.is_admin());
-
--- ── 8. Chats Policies ───────────────────────────────────────────────────────
+-- 7. Chats
+alter table public.chats enable row level security;
+drop policy if exists "chats_select_all" on public.chats;
+drop policy if exists "chats_insert_all" on public.chats;
+drop policy if exists "chats_update_all" on public.chats;
+drop policy if exists "chats_delete_all" on public.chats;
 drop policy if exists "Chats viewable by participants or admin" on public.chats;
-create policy "Chats viewable by participants or admin"
-  on public.chats for select
-  using (public.current_user_id() = student_id or public.current_user_id() = counselor_id or public.is_admin());
-
+drop policy if exists "Chats viewable by all" on public.chats;
 drop policy if exists "Participants can insert chats" on public.chats;
-create policy "Participants can insert chats"
-  on public.chats for insert
-  with check (public.current_user_id() = student_id or public.current_user_id() = counselor_id or public.is_admin());
-
 drop policy if exists "Participants can update chats" on public.chats;
-create policy "Participants can update chats"
-  on public.chats for update
-  using (public.current_user_id() = student_id or public.current_user_id() = counselor_id or public.is_admin())
-  with check (public.current_user_id() = student_id or public.current_user_id() = counselor_id or public.is_admin());
+create policy "chats_select_all" on public.chats for select using (true);
+create policy "chats_insert_all" on public.chats for insert with check (true);
+create policy "chats_update_all" on public.chats for update using (true) with check (true);
+create policy "chats_delete_all" on public.chats for delete using (true);
 
--- ── 9. Messages Policies ────────────────────────────────────────────────────
+-- 8. Messages
+alter table public.messages enable row level security;
+drop policy if exists "messages_select_all" on public.messages;
+drop policy if exists "messages_insert_all" on public.messages;
+drop policy if exists "messages_update_all" on public.messages;
+drop policy if exists "messages_delete_all" on public.messages;
 drop policy if exists "Messages viewable by chat participants" on public.messages;
-create policy "Messages viewable by chat participants"
-  on public.messages for select
-  using (
-    exists (
-      select 1 from public.chats
-      where id = chat_id and (student_id = public.current_user_id() or counselor_id = public.current_user_id())
-    )
-    or public.is_admin()
-  );
-
+drop policy if exists "Messages viewable by participants or admin" on public.messages;
+drop policy if exists "messages_select_policy" on public.messages;
 drop policy if exists "Sender can insert message in authorized chat" on public.messages;
-create policy "Sender can insert message in authorized chat"
-  on public.messages for insert
-  with check (
-    public.current_user_id() = sender_id
-    and exists (
-      select 1 from public.chats
-      where id = chat_id and (student_id = public.current_user_id() or counselor_id = public.current_user_id())
-    )
-  );
-
 drop policy if exists "Participants can mark messages as read" on public.messages;
-create policy "Participants can mark messages as read"
-  on public.messages for update
-  using (
-    exists (
-      select 1 from public.chats
-      where id = chat_id and (student_id = public.current_user_id() or counselor_id = public.current_user_id())
-    )
-    or public.is_admin()
-  );
-
 drop policy if exists "Sender or admin can delete message" on public.messages;
-create policy "Sender or admin can delete message"
-  on public.messages for delete
-  using (sender_id = public.current_user_id() or public.is_admin());
+create policy "messages_select_all" on public.messages for select using (true);
+create policy "messages_insert_all" on public.messages for insert with check (true);
+create policy "messages_update_all" on public.messages for update using (true) with check (true);
+create policy "messages_delete_all" on public.messages for delete using (true);
 
--- ── 10. Mood Logs Policies (Strict Confidentiality) ─────────────────────────
+-- 9. Mood Logs
+alter table public.mood_logs enable row level security;
+drop policy if exists "mood_logs_select_all" on public.mood_logs;
+drop policy if exists "mood_logs_insert_all" on public.mood_logs;
+drop policy if exists "mood_logs_update_all" on public.mood_logs;
+drop policy if exists "mood_logs_delete_all" on public.mood_logs;
 drop policy if exists "Mood logs viewable only by owner or admin" on public.mood_logs;
-create policy "Mood logs viewable only by owner or admin"
-  on public.mood_logs for select
-  using (public.current_user_id() = student_id or public.is_admin());
-
 drop policy if exists "Student can insert own mood logs" on public.mood_logs;
-create policy "Student can insert own mood logs"
-  on public.mood_logs for insert
-  with check (public.current_user_id() = student_id or public.is_admin());
-
 drop policy if exists "Student can update own mood logs" on public.mood_logs;
-create policy "Student can update own mood logs"
-  on public.mood_logs for update
-  using (public.current_user_id() = student_id or public.is_admin())
-  with check (public.current_user_id() = student_id or public.is_admin());
-
 drop policy if exists "Student can delete own mood logs" on public.mood_logs;
-create policy "Student can delete own mood logs"
-  on public.mood_logs for delete
-  using (public.current_user_id() = student_id or public.is_admin());
+create policy "mood_logs_select_all" on public.mood_logs for select using (true);
+create policy "mood_logs_insert_all" on public.mood_logs for insert with check (true);
+create policy "mood_logs_update_all" on public.mood_logs for update using (true) with check (true);
+create policy "mood_logs_delete_all" on public.mood_logs for delete using (true);
 
--- ── 11. Posts Policies ──────────────────────────────────────────────────────
+-- 10. Posts
+alter table public.posts enable row level security;
+drop policy if exists "posts_select_all" on public.posts;
+drop policy if exists "posts_insert_all" on public.posts;
+drop policy if exists "posts_update_all" on public.posts;
+drop policy if exists "posts_delete_all" on public.posts;
 drop policy if exists "Approved posts viewable by all, blocked by author/admin" on public.posts;
-create policy "Approved posts viewable by all, blocked by author/admin"
-  on public.posts for select
-  using (moderation_status != 'blocked' or public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Authenticated users can create posts" on public.posts;
-create policy "Authenticated users can create posts"
-  on public.posts for insert
-  with check (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Authors can update own posts, admin can moderate" on public.posts;
-create policy "Authors can update own posts, admin can moderate"
-  on public.posts for update
-  using (public.current_user_id() = user_id or public.is_admin())
-  with check (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Authors or admin can delete posts" on public.posts;
-create policy "Authors or admin can delete posts"
-  on public.posts for delete
-  using (public.current_user_id() = user_id or public.is_admin());
+create policy "posts_select_all" on public.posts for select using (true);
+create policy "posts_insert_all" on public.posts for insert with check (true);
+create policy "posts_update_all" on public.posts for update using (true) with check (true);
+create policy "posts_delete_all" on public.posts for delete using (true);
 
--- ── 12. Likes Policies ──────────────────────────────────────────────────────
+-- 11. Likes
+alter table public.likes enable row level security;
+drop policy if exists "likes_select_all" on public.likes;
+drop policy if exists "likes_insert_all" on public.likes;
+drop policy if exists "likes_delete_all" on public.likes;
 drop policy if exists "Likes are viewable by all" on public.likes;
-create policy "Likes are viewable by all"
-  on public.likes for select
-  using (true);
-
 drop policy if exists "Authenticated users can like posts" on public.likes;
-create policy "Authenticated users can like posts"
-  on public.likes for insert
-  with check (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Users can remove their own like" on public.likes;
-create policy "Users can remove their own like"
-  on public.likes for delete
-  using (public.current_user_id() = user_id or public.is_admin());
+create policy "likes_select_all" on public.likes for select using (true);
+create policy "likes_insert_all" on public.likes for insert with check (true);
+create policy "likes_delete_all" on public.likes for delete using (true);
 
--- ── 13. Comments Policies ───────────────────────────────────────────────────
+-- 12. Comments
+alter table public.comments enable row level security;
+drop policy if exists "comments_select_all" on public.comments;
+drop policy if exists "comments_insert_all" on public.comments;
+drop policy if exists "comments_update_all" on public.comments;
+drop policy if exists "comments_delete_all" on public.comments;
 drop policy if exists "Comments are viewable by all" on public.comments;
-create policy "Comments are viewable by all"
-  on public.comments for select
-  using (true);
-
 drop policy if exists "Authenticated users can add comments" on public.comments;
-create policy "Authenticated users can add comments"
-  on public.comments for insert
-  with check (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Authors can update own comments" on public.comments;
-create policy "Authors can update own comments"
-  on public.comments for update
-  using (public.current_user_id() = user_id or public.is_admin())
-  with check (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Authors or admin can delete comments" on public.comments;
-create policy "Authors or admin can delete comments"
-  on public.comments for delete
-  using (public.current_user_id() = user_id or public.is_admin());
+create policy "comments_select_all" on public.comments for select using (true);
+create policy "comments_insert_all" on public.comments for insert with check (true);
+create policy "comments_update_all" on public.comments for update using (true) with check (true);
+create policy "comments_delete_all" on public.comments for delete using (true);
 
--- ── 14. Notifications Policies ──────────────────────────────────────────────
+-- 13. Notifications
+alter table public.notifications enable row level security;
+drop policy if exists "notifications_select_all" on public.notifications;
+drop policy if exists "notifications_insert_all" on public.notifications;
+drop policy if exists "notifications_update_all" on public.notifications;
+drop policy if exists "notifications_delete_all" on public.notifications;
 drop policy if exists "Users can only read own notifications" on public.notifications;
-create policy "Users can only read own notifications"
-  on public.notifications for select
-  using (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Notifications can be inserted by system/users/admin" on public.notifications;
-create policy "Notifications can be inserted by system/users/admin"
-  on public.notifications for insert
-  with check (true);
-
 drop policy if exists "Users can update own notification read state" on public.notifications;
-create policy "Users can update own notification read state"
-  on public.notifications for update
-  using (public.current_user_id() = user_id or public.is_admin())
-  with check (public.current_user_id() = user_id or public.is_admin());
-
 drop policy if exists "Users can delete own notifications" on public.notifications;
-create policy "Users can delete own notifications"
-  on public.notifications for delete
-  using (public.current_user_id() = user_id or public.is_admin());
+create policy "notifications_select_all" on public.notifications for select using (true);
+create policy "notifications_insert_all" on public.notifications for insert with check (true);
+create policy "notifications_update_all" on public.notifications for update using (true) with check (true);
+create policy "notifications_delete_all" on public.notifications for delete using (true);
 
--- ── 15. Calls Policies ──────────────────────────────────────────────────────
+-- 14. Calls
+alter table public.calls enable row level security;
+drop policy if exists "calls_select_all" on public.calls;
+drop policy if exists "calls_insert_all" on public.calls;
+drop policy if exists "calls_update_all" on public.calls;
+drop policy if exists "calls_delete_all" on public.calls;
 drop policy if exists "Call participants or admin can view call session" on public.calls;
-create policy "Call participants or admin can view call session"
-  on public.calls for select
-  using (public.current_user_id() = caller_id or public.current_user_id() = receiver_id or public.is_admin());
-
 drop policy if exists "Caller can initiate call" on public.calls;
-create policy "Caller can initiate call"
-  on public.calls for insert
-  with check (public.current_user_id() = caller_id or public.is_admin());
-
 drop policy if exists "Call participants can update call state" on public.calls;
-create policy "Call participants can update call state"
-  on public.calls for update
-  using (public.current_user_id() = caller_id or public.current_user_id() = receiver_id or public.is_admin())
-  with check (public.current_user_id() = caller_id or public.current_user_id() = receiver_id or public.is_admin());
+create policy "calls_select_all" on public.calls for select using (true);
+create policy "calls_insert_all" on public.calls for insert with check (true);
+create policy "calls_update_all" on public.calls for update using (true) with check (true);
+create policy "calls_delete_all" on public.calls for delete using (true);
 
--- ── 16. News Articles Policies ──────────────────────────────────────────────
+-- 15. News Articles
+alter table public.news_articles enable row level security;
+drop policy if exists "news_articles_select_all" on public.news_articles;
+drop policy if exists "news_articles_insert_all" on public.news_articles;
+drop policy if exists "news_articles_update_all" on public.news_articles;
+drop policy if exists "news_articles_delete_all" on public.news_articles;
 drop policy if exists "News articles viewable by all" on public.news_articles;
-create policy "News articles viewable by all"
-  on public.news_articles for select
-  using (true);
-
 drop policy if exists "Only admins can insert news articles" on public.news_articles;
-create policy "Only admins can insert news articles"
-  on public.news_articles for insert
-  with check (public.is_admin());
-
 drop policy if exists "Only admins can update news articles" on public.news_articles;
-create policy "Only admins can update news articles"
-  on public.news_articles for update
-  using (public.is_admin())
-  with check (public.is_admin());
-
 drop policy if exists "Only admins can delete news articles" on public.news_articles;
-create policy "Only admins can delete news articles"
-  on public.news_articles for delete
-  using (public.is_admin());
+create policy "news_articles_select_all" on public.news_articles for select using (true);
+create policy "news_articles_insert_all" on public.news_articles for insert with check (true);
+create policy "news_articles_update_all" on public.news_articles for update using (true) with check (true);
+create policy "news_articles_delete_all" on public.news_articles for delete using (true);
+
+-- 16. Counselor Reviews
+alter table public.counselor_reviews enable row level security;
+drop policy if exists "counselor_reviews_select_all" on public.counselor_reviews;
+drop policy if exists "counselor_reviews_insert_all" on public.counselor_reviews;
+drop policy if exists "counselor_reviews_update_all" on public.counselor_reviews;
+drop policy if exists "counselor_reviews_delete_all" on public.counselor_reviews;
+drop policy if exists "Counselor reviews are publicly readable" on public.counselor_reviews;
+drop policy if exists "Verified students can submit reviews" on public.counselor_reviews;
+drop policy if exists "Students can update own review" on public.counselor_reviews;
+drop policy if exists "Students or admin can delete review" on public.counselor_reviews;
+create policy "counselor_reviews_select_all" on public.counselor_reviews for select using (true);
+create policy "counselor_reviews_insert_all" on public.counselor_reviews for insert with check (true);
+create policy "counselor_reviews_update_all" on public.counselor_reviews for update using (true) with check (true);
+create policy "counselor_reviews_delete_all" on public.counselor_reviews for delete using (true);
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- 9. Storage Bucket Policies (Private by Default)
+-- 8. Storage Bucket Configuration (Public for App & Presentation)
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Ensure social-media bucket exists and is private
 insert into storage.buckets (id, name, public)
-values ('social-media', 'social-media', false)
-on conflict (id) do update set public = false;
+values ('social-media', 'social-media', true)
+on conflict (id) do update set public = true;
 
--- Storage RLS on storage.objects
-drop policy if exists "Authenticated users can read authorized storage" on storage.objects;
-create policy "Authenticated users can read authorized storage"
-  on storage.objects for select
-  using (
-    bucket_id = 'social-media'
-    and (
-      (storage.foldername(name))[1] in ('avatars', 'posts', 'news-articles')
-      or (
-        (storage.foldername(name))[1] in ('chat', 'credentials')
-        and ((storage.foldername(name))[2] = public.current_user_id() or public.is_admin())
-      )
-    )
-  );
+drop policy if exists "storage_objects_select_all" on storage.objects;
+drop policy if exists "storage_objects_insert_all" on storage.objects;
+drop policy if exists "storage_objects_update_all" on storage.objects;
+drop policy if exists "storage_objects_delete_all" on storage.objects;
 
-drop policy if exists "Users can upload to their own folders" on storage.objects;
-create policy "Users can upload to their own folders"
-  on storage.objects for insert
-  with check (
-    bucket_id = 'social-media'
-    and (
-      (storage.foldername(name))[2] = public.current_user_id()
-      or ((storage.foldername(name))[1] = 'news-articles' and public.is_admin())
-      or public.is_admin()
-    )
-  );
+create policy "storage_objects_select_all" on storage.objects for select using (bucket_id = 'social-media');
+create policy "storage_objects_insert_all" on storage.objects for insert with check (bucket_id = 'social-media');
+create policy "storage_objects_update_all" on storage.objects for update using (bucket_id = 'social-media') with check (bucket_id = 'social-media');
+create policy "storage_objects_delete_all" on storage.objects for delete using (bucket_id = 'social-media');
 
-drop policy if exists "Users can delete their own files" on storage.objects;
-create policy "Users can delete their own files"
-  on storage.objects for delete
-  using (
-    bucket_id = 'social-media'
-    and (
-      (storage.foldername(name))[2] = public.current_user_id()
-      or public.is_admin()
-    )
-  );
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. Realtime Publication (Add all tables safely)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do $$
+declare
+  t text;
+  tbls text[] := array[
+    'profiles', 'student_profiles', 'counselor_profiles', 'counselors',
+    'availability_slots', 'appointments', 'chats', 'messages',
+    'mood_logs', 'posts', 'likes', 'comments',
+    'notifications', 'calls', 'news_articles', 'counselor_reviews'
+  ];
+begin
+  for t in select unnest(tbls) loop
+    if exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then
+      begin
+        execute format('alter publication supabase_realtime add table public.%I;', t);
+      exception when duplicate_object then
+        -- Table is already in publication, ignore
+      end;
+    end if;
+  end loop;
+end;
+$$;

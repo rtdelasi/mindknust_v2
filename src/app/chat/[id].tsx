@@ -33,6 +33,8 @@ import {
   markMessagesAsRead,
   markChatNotificationsAsRead,
   fetchOrCreateChat,
+  fetchChatById,
+  isValidUUID,
 } from '@/lib/supabase-db';
 import { uploadFileFromUri } from '@/lib/supabase-storage';
 import { usePresence } from '@/contexts/presence-context';
@@ -43,15 +45,17 @@ interface ChatMessage {
   senderName: string;
   text: string;
   timestamp: string;
-  created_at: string;
-  delivered_at?: string;
-  read_at?: string;
+  created_at?: string;
+  delivered_at?: string | null;
+  read_at?: string | null;
   attachment?: {
-    isAttachment: boolean;
-    type: 'image' | 'video' | 'audio';
+    isAttachment?: boolean;
+    type: 'image' | 'video' | 'audio' | 'document';
     url: string;
+    name?: string;
+    duration?: number;
     text?: string;
-  };
+  } | null;
 }
 
 function parseAttachmentMessage(text: string) {
@@ -71,11 +75,11 @@ function parseAttachmentMessage(text: string) {
   return undefined;
 }
 
-export default function ChatRoomScreen() {
+export default function ChatDetailScreen() {
   const theme = useTheme();
   const isDark = useThemeMode() === 'dark';
-  const router = useRouter();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const params = useLocalSearchParams<{
     id: string;
     name?: string;
@@ -86,7 +90,9 @@ export default function ChatRoomScreen() {
   }>();
   const { role } = useMockAuth();
 
-  const [activeChatId, setActiveChatId] = useState<string>(params.id !== 'new' ? params.id || '' : '');
+  const [activeChatId, setActiveChatId] = useState<string>(
+    params.id && params.id !== 'new' && isValidUUID(params.id) ? params.id : ''
+  );
   const [resolvedRecipientId, setResolvedRecipientId] = useState<string>(params.recipientId || params.studentId || '');
   const [resolvedRecipientName, setResolvedRecipientName] = useState<string>(
     params.name || (params.studentName ? decodeURIComponent(params.studentName) : 'Student Member')
@@ -133,11 +139,15 @@ export default function ChatRoomScreen() {
   }, []);
 
   useEffect(() => {
-    const resolveNewChat = async () => {
+    const resolveChatMetadata = async () => {
+      // 1. If route is 'new' or target recipient is specified
       if (params.id === 'new' && (params.studentId || params.recipientId)) {
         const targetSid = params.studentId || params.recipientId || '';
         try {
-          const chat = await fetchOrCreateChat(targetSid, currentUserId);
+          const chat = await fetchOrCreateChat(
+            role === 'counselor' ? targetSid : currentUserId,
+            role === 'counselor' ? currentUserId : targetSid
+          );
           if (chat) {
             setActiveChatId(chat.id);
             setResolvedRecipientId(targetSid);
@@ -146,12 +156,54 @@ export default function ChatRoomScreen() {
             }
           }
         } catch (err) {
-          console.warn('Error resolving chat room from notification:', err);
+          console.warn('Error resolving chat room from new parameter:', err);
+        }
+      } else if (params.id && params.id !== 'new') {
+        // 2. If params.id is NOT a valid UUID (e.g. counselor ID or recipient ID string)
+        if (!isValidUUID(params.id)) {
+          const targetId = params.id;
+          try {
+            const chat = await fetchOrCreateChat(
+              role === 'counselor' ? targetId : currentUserId,
+              role === 'counselor' ? currentUserId : targetId
+            );
+            if (chat) {
+              setActiveChatId(chat.id);
+              setResolvedRecipientId(targetId);
+              if (params.name) {
+                setResolvedRecipientName(params.name);
+              }
+            }
+          } catch (err) {
+            console.warn('Error resolving chat room from alias ID:', err);
+          }
+        } else {
+          // 3. params.id is a real UUID: fetch chat details and recipient profile
+          if (!activeChatId) {
+            setActiveChatId(params.id);
+          }
+          try {
+            const chat = await fetchChatById(params.id);
+            if (chat) {
+              const isCounselorRole = role === 'counselor';
+              const otherId = isCounselorRole ? chat.student_id : chat.counselor_id;
+              const otherProfile = isCounselorRole ? chat.student_profile : chat.counselor_profile;
+              const otherName = otherProfile?.name || (isCounselorRole ? 'Student Member' : 'Counselor');
+              if (otherId && (!resolvedRecipientId || resolvedRecipientId === '')) {
+                setResolvedRecipientId(otherId);
+              }
+              if (otherName && (!resolvedRecipientName || resolvedRecipientName === 'Student Member' || resolvedRecipientName === 'Counselor')) {
+                setResolvedRecipientName(otherName);
+              }
+            }
+          } catch (err) {
+            console.warn('Error resolving chat metadata by ID:', err);
+          }
         }
       }
     };
-    resolveNewChat();
-  }, [params.id, params.studentId, params.recipientId, currentUserId, params.studentName]);
+    resolveChatMetadata();
+  }, [params.id, params.studentId, params.recipientId, currentUserId, params.studentName, params.name, role, activeChatId, resolvedRecipientId, resolvedRecipientName]);
 
   const loadChatThread = async () => {
     if (!chatId) return;
@@ -731,7 +783,7 @@ export default function ChatRoomScreen() {
 
             const showDateDivider =
               !previousMsg ||
-              new Date(msg.created_at).getTime() - new Date(previousMsg.created_at).getTime() > 1800000;
+              new Date(msg.created_at || Date.now()).getTime() - new Date(previousMsg.created_at || Date.now()).getTime() > 1800000;
 
             const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
             const isLastInRun = !nextMsg || nextMsg.senderId !== msg.senderId;
@@ -742,7 +794,7 @@ export default function ChatRoomScreen() {
                 {showDateDivider && (
                   <View style={styles.dateDivider}>
                     <Text style={[styles.dateDividerText, { color: theme.textSecondary }]}>
-                      {new Date(msg.created_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} • {msg.timestamp}
+                      {new Date(msg.created_at || Date.now()).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} • {msg.timestamp}
                     </Text>
                   </View>
                 )}

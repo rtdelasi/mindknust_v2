@@ -81,7 +81,7 @@ function RootLayoutContent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const pathname = usePathname();
-  const { role } = useMockAuth();
+  const { role, anonymousId } = useMockAuth();
   const theme = useTheme();
   const [activeAlert, setActiveAlert] = useState<{ title: string; body: string; link?: string | null } | null>(null);
   const [incomingCall, setIncomingCall] = useState<SupabaseCall | null>(null);
@@ -374,7 +374,7 @@ function RootLayoutContent() {
   }, [currentUserId]);
 
   return (
-    <PresenceProvider userId={currentUserId}>
+    <PresenceProvider userId={currentUserId} role={role} anonymousId={anonymousId}>
     <View style={styles.container}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />

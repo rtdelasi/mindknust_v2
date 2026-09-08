@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 
 export interface WebRTCSignalingEvent {
-  type: 'offer' | 'answer' | 'ice-candidate' | 'media-state' | 'hangup' | 'peer-ready';
+  type: 'offer' | 'answer' | 'ice-candidate' | 'media-state' | 'hangup' | 'peer-ready' | 'error';
   senderId: string;
   payload: any;
 }
@@ -10,7 +10,8 @@ export type WebRTCSignalingCallback = (event: WebRTCSignalingEvent) => void;
 
 /**
  * WebRTC Signaling Manager using Supabase Realtime Channels.
- * Handles peer-to-peer SDP Offer/Answer negotiation and ICE candidate exchange.
+ * Handles peer-to-peer SDP Offer/Answer negotiation and ICE candidate exchange
+ * with bounded retries, message queueing, and acknowledgment.
  */
 export class WebRTCSignalingManager {
   private channel: any = null;
@@ -18,7 +19,11 @@ export class WebRTCSignalingManager {
   private userId: string;
   private callback: WebRTCSignalingCallback | null = null;
   private isSubscribed: boolean = false;
+  private isExplicitlyClosed: boolean = false;
   private messageQueue: WebRTCSignalingEvent[] = [];
+  private retryTimeout: any = null;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 5;
 
   constructor(roomId: string, userId: string) {
     this.roomId = roomId;
@@ -31,9 +36,26 @@ export class WebRTCSignalingManager {
   public connect(callback: WebRTCSignalingCallback): void {
     if (!supabase) return;
     this.callback = callback;
+    this.isExplicitlyClosed = false;
+
+    if (this.retryTimeout) {
+      clearTimeout(this.retryTimeout);
+      this.retryTimeout = null;
+    }
 
     const channelName = `webrtc-p2p-${this.roomId}`;
-    this.channel = supabase.channel(channelName);
+    if (this.channel) {
+      try {
+        supabase.removeChannel(this.channel);
+      } catch {}
+      this.channel = null;
+    }
+
+    this.channel = supabase.channel(channelName, {
+      config: {
+        broadcast: { ack: true, self: false },
+      },
+    });
 
     this.channel
       .on('broadcast', { event: 'webrtc_signal' }, (data: { payload: WebRTCSignalingEvent }) => {
@@ -50,10 +72,36 @@ export class WebRTCSignalingManager {
         console.log(`[${this.userId}] [WebRTCSignaling] Channel ${channelName} status:`, status);
         if (status === 'SUBSCRIBED') {
           this.isSubscribed = true;
+          this.reconnectAttempts = 0;
           this.flushQueue();
           this.sendPeerReady();
         } else {
           this.isSubscribed = false;
+          // Auto-reconnect with bounded retries if unexpectedly closed or timed out
+          if (!this.isExplicitlyClosed && (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR' || status === 'CLOSED')) {
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+              this.reconnectAttempts += 1;
+              const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 5000);
+              console.log(`[${this.userId}] [WebRTCSignaling] Reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${delay}ms...`);
+              if (this.retryTimeout) clearTimeout(this.retryTimeout);
+              this.retryTimeout = setTimeout(() => {
+                if (!this.isExplicitlyClosed && this.callback) {
+                  this.connect(this.callback);
+                }
+              }, delay);
+            } else {
+              console.warn(`[${this.userId}] [WebRTCSignaling] Max reconnection attempts (${this.maxReconnectAttempts}) reached.`);
+              if (this.callback) {
+                this.callback({
+                  type: 'error',
+                  senderId: 'system',
+                  payload: {
+                    message: 'Real-time call connection timed out. Please check your network connection.',
+                  },
+                });
+              }
+            }
+          }
         }
       });
   }
@@ -131,15 +179,22 @@ export class WebRTCSignalingManager {
   }
 
   private sendSignal(event: WebRTCSignalingEvent): void {
-    if (!this.channel) return;
+    if (!this.channel) {
+      this.messageQueue.push(event);
+      return;
+    }
 
     if (this.isSubscribed) {
       console.log(`[${this.userId}] [WebRTCSignaling] Sending signal [${event.type}] via WebSocket broadcast`);
-      this.channel.send({
-        type: 'broadcast',
-        event: 'webrtc_signal',
-        payload: event,
-      });
+      this.channel
+        .send({
+          type: 'broadcast',
+          event: 'webrtc_signal',
+          payload: event,
+        })
+        .catch((err: any) => {
+          console.warn(`[${this.userId}] [WebRTCSignaling] send error:`, err);
+        });
     } else {
       console.log(`[${this.userId}] [WebRTCSignaling] Channel not SUBSCRIBED yet. Queueing signal [${event.type}]`);
       this.messageQueue.push(event);
@@ -151,11 +206,13 @@ export class WebRTCSignalingManager {
       const event = this.messageQueue.shift();
       if (event) {
         console.log(`[${this.userId}] [WebRTCSignaling] Flushing queued signal [${event.type}] via WebSocket broadcast`);
-        this.channel.send({
-          type: 'broadcast',
-          event: 'webrtc_signal',
-          payload: event,
-        });
+        this.channel
+          .send({
+            type: 'broadcast',
+            event: 'webrtc_signal',
+            payload: event,
+          })
+          .catch(() => {});
       }
     }
   }
@@ -164,8 +221,16 @@ export class WebRTCSignalingManager {
    * Disconnect and unsubscribe from the signaling channel.
    */
   public disconnect(): void {
+    this.isExplicitlyClosed = true;
+    this.reconnectAttempts = 0;
+    if (this.retryTimeout) {
+      clearTimeout(this.retryTimeout);
+      this.retryTimeout = null;
+    }
     if (this.channel && supabase) {
-      supabase.removeChannel(this.channel);
+      try {
+        supabase.removeChannel(this.channel);
+      } catch {}
       this.channel = null;
     }
     this.isSubscribed = false;

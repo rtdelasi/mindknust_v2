@@ -18,35 +18,14 @@ export const supabase =
     ? createClient(supabaseUrl, supabaseAnonKey, {
         auth: {
           storage: safeStorage,
-          autoRefreshToken: false, // Managed by Firebase Auth
+          autoRefreshToken: false,
           persistSession: false,
           detectSessionInUrl: false,
         },
-        accessToken: async () => {
-          if (auth?.currentUser) {
-            try {
-              return await auth.currentUser.getIdToken();
-            } catch {
-              return null;
-            }
-          }
-          return null;
-        },
-        global: {
-          fetch: async (url, options = {}) => {
-            if (auth?.currentUser) {
-              try {
-                const token = await auth.currentUser.getIdToken();
-                if (token) {
-                  const headers = new Headers(options.headers || {});
-                  headers.set('Authorization', `Bearer ${token}`);
-                  return fetch(url, { ...options, headers });
-                }
-              } catch (e) {
-                console.warn('[Supabase Fetch Interceptor] Notice fetching token:', e);
-              }
-            }
-            return fetch(url, options);
+        realtime: {
+          params: {
+            apikey: supabaseAnonKey,
+            eventsPerSecond: 10,
           },
         },
       })

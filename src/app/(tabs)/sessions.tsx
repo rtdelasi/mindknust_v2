@@ -93,7 +93,7 @@ export default function MySessionsScreen() {
     }, [])
   );
 
-  const upcomingSessions = appointments.filter((a) => ['pending', 'accepted'].includes(a.status));
+  const upcomingSessions = appointments.filter((a) => ['pending', 'accepted', 'approved'].includes(a.status));
   const nextSession = upcomingSessions.length > 0 ? upcomingSessions[0] : null;
 
   // Filter counselors by search text
@@ -111,7 +111,7 @@ export default function MySessionsScreen() {
   const recentCompleted = completedSessions.slice(-3).reverse();
   const recentMoods = moodLogs.slice(0, 7);
   const activeCounselorId = (() => {
-    const latest = appointments.find((a) => ['accepted', 'completed'].includes(a.status));
+    const latest = appointments.find((a) => ['accepted', 'approved', 'completed'].includes(a.status));
     return latest?.counselor_id || null;
   })();
   const activeCounselor = activeCounselorId

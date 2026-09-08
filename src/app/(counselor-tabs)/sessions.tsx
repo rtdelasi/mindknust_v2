@@ -118,7 +118,7 @@ export default function CounselorSessionsScreen() {
   };
 
   // Filter lists based on status categories
-  const upcomingList = appointments.filter((a) => a.status === 'accepted');
+  const upcomingList = appointments.filter((a) => ['accepted', 'approved'].includes(a.status));
   const pendingList = appointments.filter((a) => a.status === 'pending');
   const pastList = appointments.filter((a) => ['completed', 'declined', 'cancelled', 'missed'].includes(a.status));
 

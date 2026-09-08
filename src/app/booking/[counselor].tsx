@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -133,15 +133,22 @@ export default function BookingScreen() {
     }
   }, [selectedDate, counselorData?.id]);
 
+  const selectedDateRef = useRef(selectedDate);
+  useEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+
   // Supabase Realtime synchronization for appointments
   useEffect(() => {
     if (!hasSupabaseConfig || !supabase) return;
     const cId = counselorData?.id || counselor;
     if (!cId) return;
 
-    console.log(`[Realtime] Subscribing to appointments for counselor ${cId}`);
+    const channelName = `counselor-appointments-${cId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    console.log(`[Realtime] Subscribing to appointments for counselor ${cId} (${channelName})`);
+
     const channel = supabase
-      .channel(`counselor-appointments-${cId}`)
+      .channel(channelName)
       .on(
          'postgres_changes',
          {
@@ -152,16 +159,16 @@ export default function BookingScreen() {
          },
          () => {
            console.log('[Realtime] Counselor appointments updated, reloading booked slots...');
-           loadBookedSlots(cId, selectedDate);
+           loadBookedSlots(cId, selectedDateRef.current);
          }
       )
       .subscribe();
 
     return () => {
-      console.log(`[Realtime] Unsubscribing from appointments for counselor ${cId}`);
+      console.log(`[Realtime] Unsubscribing from appointments for counselor ${cId} (${channelName})`);
       supabase?.removeChannel(channel);
     };
-  }, [counselorData?.id, selectedDate]);
+  }, [counselorData?.id, counselor]);
 
   useEffect(() => {
     const daySlots = slots.filter(

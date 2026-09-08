@@ -40,6 +40,7 @@ import {
   SupabaseReview,
 } from '@/lib/supabase-db';
 import { getCounselorPhoto } from '@/lib/counselor-utils';
+import { scheduleSessionReminder } from '@/lib/notification-service';
 
 export default function CounselorDetailScreen() {
   const theme = useTheme();
@@ -154,7 +155,7 @@ export default function CounselorDetailScreen() {
     try {
       const formattedDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
       const formattedDisplayDate = selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-      await createAppointment(
+      const appt = await createAppointment(
         currentUserId,
         counselor.id,
         formattedDate,
@@ -162,6 +163,16 @@ export default function CounselorDetailScreen() {
         selectedTopic || counselor.specialties[0] || 'General Support',
         anonDisplay
       );
+
+      if (appt?.id) {
+        scheduleSessionReminder(
+          appt.id,
+          counselor.profile?.name || 'Counselor',
+          formattedDate,
+          selectedSlotText
+        ).catch(() => {});
+      }
+
       Alert.alert(
         'Session Booked',
         `Your session with ${counselor.profile?.name || 'Counselor'} on ${formattedDisplayDate} at ${selectedSlotText} has been scheduled.`,

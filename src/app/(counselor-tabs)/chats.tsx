@@ -32,7 +32,7 @@ export default function CounselorChatsScreen() {
   const [search, setSearch] = useState('');
   const [chats, setChats] = useState<SupabaseChat[]>([]);
   const [loading, setLoading] = useState(true);
-  const { onlineUsers } = usePresence();
+  const { onlineUsers, isUserOnline } = usePresence();
 
   // Long-press options popup
   const [selectedChat, setSelectedChat] = useState<SupabaseChat | null>(null);
@@ -159,7 +159,20 @@ export default function CounselorChatsScreen() {
                           {/* Avatar with status indicator */}
                           <View style={styles.avatarWrapper}>
                             <Avatar name={studentName} size="md" />
-                            <View style={[styles.statusDot, { backgroundColor: onlineUsers.includes(chat.student_id) ? '#34C759' : '#8E8E93', borderColor: theme.surfaceRaised }]} />
+                            <View
+                              style={[
+                                styles.statusDot,
+                                {
+                                  backgroundColor:
+                                    isUserOnline(chat.student_id) ||
+                                    (chat.student_profile?.anonymous_id &&
+                                      isUserOnline(chat.student_profile.anonymous_id))
+                                      ? '#34C759'
+                                      : '#8E8E93',
+                                  borderColor: theme.surfaceRaised,
+                                },
+                              ]}
+                            />
                           </View>
 
                           <View style={styles.chatDetails}>

@@ -753,6 +753,13 @@ export default function VideoCallScreen() {
         }
       } else if (event.type === 'hangup') {
         setCallState('ended');
+      } else if (event.type === 'error') {
+        console.warn(`[${localPeerName}] Signaling connection error:`, event.payload?.message);
+        Alert.alert(
+          'Call Connection Warning',
+          event.payload?.message || 'Real-time call connection experienced network interruptions.',
+          [{ text: 'OK' }]
+        );
       }
     });
 
@@ -826,12 +833,12 @@ export default function VideoCallScreen() {
     startCall();
   }, [callState, counselorId, currentUserId, callType, activeRoomId, isCaller, role, localPeerName]);
 
-  // 7. Handshake Timeout Monitor (12s limit for peer-ready signal)
+  // 7. Handshake Timeout Monitor (12s limit for peer-ready signal after connected)
   useEffect(() => {
-    if (isCaller && (callState === 'ringing' || callState === 'connected') && !offerSentRef.current) {
+    if (isCaller && callState === 'connected' && !offerSentRef.current) {
       const handshakeTimeout = setTimeout(() => {
         if (!offerSentRef.current) {
-          console.warn(`[${localPeerName}] Handshake timeout: No peer-ready signal received after 12s. Callee app may not be connected yet.`);
+          console.warn(`[${localPeerName}] Handshake timeout: No peer-ready signal received after 12s.`);
         }
       }, 12000);
       return () => clearTimeout(handshakeTimeout);
